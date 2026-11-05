@@ -13,6 +13,15 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- Firebase Cloud Synchro (Gratuit & Temps Réel) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window._firebaseInit = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot };
+  </script>
+
   <!-- Lucide Icons autonomes -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
@@ -191,6 +200,10 @@
       const [isShareModalOpen, setIsShareModalOpen] = useState(false);
       const [copiedLinkType, setCopiedLinkType] = useState(null);
       const [customLogoUrl, setCustomLogoUrl] = useState(null);
+      const [cloudStatus, setCloudStatus] = useState('offline'); // 'offline' | 'connecting' | 'connected' | 'saving'
+      const [firebaseCustomConfig, setFirebaseCustomConfig] = useState(null);
+      const [firebaseModalOpen, setFirebaseModalOpen] = useState(false);
+      const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
 
       const [config, setConfig] = useState({
         name: 'Tournoi du CS La Verpillière',
@@ -213,6 +226,8 @@
       const [teams, setTeams] = useState(DEMO_TEAMS);
       const [newTeamName, setNewTeamName] = useState('');
       const [selectedColor, setSelectedColor] = useState(TEAM_COLORS[0]);
+      const [editingTeam, setEditingTeam] = useState(null);
+      const [newPlayerInputs, setNewPlayerInputs] = useState({});
       const [matches, setMatches] = useState([]);
       const [editingMatch, setEditingMatch] = useState(null);
       const [goalScorerName, setGoalScorerName] = useState('');
@@ -222,7 +237,7 @@
       const [cardType, setCardType] = useState('yellow');
       const [notification, setNotification] = useState(null);
 
-      // Charger depuis localStorage au démarrage si disponible
+      // Charger depuis stockage local au démarrage
       useEffect(() => {
         try {
           const savedData = localStorage.getItem('cslv_tournament_data');
@@ -234,6 +249,9 @@
             if (parsed.matches) setMatches(parsed.matches);
             if (parsed.customLogoUrl) setCustomLogoUrl(parsed.customLogoUrl);
           }
+          const savedFb = localStorage.getItem('cslv_fb_cfg');
+          if (savedFb) setFirebaseCustomConfig(JSON.parse(savedFb));
+
           const params = new URLSearchParams(window.location.search);
           if (params.get('role') === 'viewer') {
             setUserRole('viewer');
@@ -242,13 +260,118 @@
         } catch(e) {}
       }, []);
 
-      // Sauvegarde automatique dans le navigateur
+      // Synchronisation Cloud Temps Réel (Firebase / Firestore)
+      useEffect(() => {
+        let unsubscribe = null;
+        const initCloud = async () => {
+          if (!window._firebaseInit) return;
+          const { initializeApp, getAuth, signInAnonymously, getFirestore, doc, onSnapshot } = window._firebaseInit;
+
+          // Vérifier si une config Firestore existe (via variable globale ou configuration enregistrée)
+          let cfg = null;
+          if (typeof __firebase_config !== 'undefined') {
+            try { cfg = JSON.parse(__firebase_config); } catch(e){}
+          } else if (firebaseCustomConfig) {
+            cfg = firebaseCustomConfig;
+          }
+
+          if (!cfg) {
+            setCloudStatus('offline');
+            return;
+          }
+
+          try {
+            setCloudStatus('connecting');
+            const app = initializeApp(cfg, 'cslv-reader-' + Date.now());
+            const auth = getAuth(app);
+            await signInAnonymously(auth);
+            const db = getFirestore(app);
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'cs-la-verpilliere-1939';
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'tournamentState', 'main');
+
+            unsubscribe = onSnapshot(docRef, (snapshot) => {
+              if (snapshot.exists()) {
+                const cloudData = snapshot.data();
+                if (cloudData) {
+                  if (cloudData.config) setConfig(cloudData.config);
+                  if (cloudData.fields) setFields(cloudData.fields);
+                  if (cloudData.teams) setTeams(cloudData.teams);
+                  if (cloudData.matches) setMatches(cloudData.matches);
+                  if (cloudData.customLogoUrl) setCustomLogoUrl(cloudData.customLogoUrl);
+                }
+              }
+              setCloudStatus('connected');
+            }, () => {
+              setCloudStatus('offline');
+            });
+          } catch (err) {
+            console.warn("Connexion cloud désactivée ou échouée:", err);
+            setCloudStatus('offline');
+          }
+        };
+
+        initCloud();
+        return () => { if (unsubscribe) unsubscribe(); };
+      }, [firebaseCustomConfig]);
+
+      const handleAddTeam = () => {
+        if (!newTeamName.trim()) return;
+        const newTeam = {
+          id: `team-${Date.now()}`,
+          name: newTeamName.trim(),
+          color: selectedColor,
+          players: []
+        };
+        setTeams([...teams, newTeam]);
+        setNewTeamName('');
+        showToast(`Équipe "${newTeam.name}" ajoutée !`);
+      };
+
+      const handleAddPlayerToTeam = (teamId, playerName) => {
+        if (!playerName || !playerName.trim()) return;
+        setTeams(teams.map(t => {
+          if (t.id === teamId) {
+            const currentPlayers = t.players || [];
+            return { ...t, players: [...currentPlayers, playerName.trim()] };
+          }
+          return t;
+        }));
+        setNewPlayerInputs(prev => ({ ...prev, [teamId]: '' }));
+        showToast(`Joueur "${playerName.trim()}" ajouté !`);
+      };
+
+      const handleRemovePlayerFromTeam = (teamId, playerIndex) => {
+        setTeams(teams.map(t => {
+          if (t.id === teamId) {
+            const updatedPlayers = (t.players || []).filter((_, i) => i !== playerIndex);
+            return { ...t, players: updatedPlayers };
+          }
+          return t;
+        }));
+        showToast('Joueur retiré');
+      };
+
+      // Sauvegarde automatique (Locale + Cloud) à chaque modification
       useEffect(() => {
         try {
-          const toSave = { config, fields, teams, matches, customLogoUrl };
+          const toSave = { config, fields, teams, matches, customLogoUrl, lastUpdate: Date.now() };
           localStorage.setItem('cslv_tournament_data', JSON.stringify(toSave));
+
+          // Si le cloud est connecté et qu'on est éditeur, propager en direct
+          if (cloudStatus === 'connected' && userRole === 'editor' && window._firebaseInit) {
+            let cfg = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseCustomConfig;
+            if (cfg) {
+              const { initializeApp, getFirestore, doc, setDoc } = window._firebaseInit;
+              const app = initializeApp(cfg, 'writer-' + Date.now());
+              const db = getFirestore(app);
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'cs-la-verpilliere-1939';
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'tournamentState', 'main');
+              setDoc(docRef, toSave, { merge: true }).catch(() => {});
+            }
+          }
         } catch(e) {}
-      }, [config, fields, teams, matches, customLogoUrl]);
+      }, [config, fields, teams, matches, customLogoUrl, userRole, cloudStatus]);
 
       const showToast = (message, type = 'success') => {
         setNotification({ message, type });
@@ -591,6 +714,13 @@
                     }`}>
                       {userRole === 'editor' ? 'Organisateur' : 'Spectateur'}
                     </span>
+                    {/* Indicateur Cloud */}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      cloudStatus === 'connected' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-400 animate-ping' : 'bg-zinc-500'}`}></span>
+                      {cloudStatus === 'connected' ? 'En direct (Cloud)' : 'Local'}
+                    </span>
                   </div>
                   <div className="text-xs font-semibold text-amber-400">CS La Verpillière &bull; Sang et Or 1939</div>
                 </div>
@@ -813,25 +943,54 @@
             {activeTab === 'teams' && (
               <div className="space-y-6">
                 {userRole === 'editor' && (
-                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-5">
-                    <h2 className="text-base font-bold text-white mb-3">Inscrire une équipe</h2>
+                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-5 shadow-xl">
+                    <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
+                      <span>👥</span> Inscrire une équipe
+                    </h2>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <input
                         type="text"
-                        placeholder="Nom du club ou équipe"
+                        placeholder="Nom du club ou équipe (ex: CS La Verpillière U11)"
                         value={newTeamName}
                         onChange={(e) => setNewTeamName(e.target.value)}
-                        className="flex-1 bg-[#0b0304] border border-red-900/60 rounded-xl px-4 py-2 text-white"
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddTeam()}
+                        className="flex-1 bg-[#0b0304] border border-red-900/60 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                       />
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">Maillot :</span>
+                        <div className="flex gap-1.5">
+                          {TEAM_COLORS.map(c => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setSelectedColor(c)}
+                              style={{ backgroundColor: c }}
+                              className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                                selectedColor === c ? 'scale-110 border-white ring-2 ring-amber-400' : 'border-transparent opacity-80'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleAddTeam}
+                        className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-bold rounded-xl text-sm transition"
+                      >
+                        + Ajouter
+                      </button>
+                    </div>
+
+                    <div className="mt-3 flex gap-3">
                       <button
                         onClick={() => {
-                          if (!newTeamName.trim()) return;
-                          setTeams([...teams, { id: `team-${Date.now()}`, name: newTeamName.trim(), color: selectedColor, players: [] }]);
-                          setNewTeamName('');
+                          setTeams(DEMO_TEAMS);
+                          showToast('8 équipes types réinitialisées avec joueurs !');
                         }}
-                        className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-sm"
+                        className="text-xs text-amber-400/80 hover:text-amber-300 underline underline-offset-4"
                       >
-                        Ajouter
+                        ↺ Recharger les 8 équipes de démonstration
                       </button>
                     </div>
                   </div>
@@ -839,25 +998,231 @@
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {teams.map(team => (
-                    <div key={team.id} className="bg-[#150709] border border-red-950 rounded-xl p-4 flex flex-col justify-between">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs" style={{ backgroundColor: team.color }}>
-                            {team.name.substring(0, 2).toUpperCase()}
+                    <div key={team.id} className="bg-[#150709] border border-red-950 rounded-xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs shadow-md flex-shrink-0" style={{ backgroundColor: team.color }}>
+                              {team.name.substring(0, 2).toUpperCase()}
+                            </div>
+                            <span className="font-bold text-white text-sm truncate">{team.name}</span>
                           </div>
-                          <span className="font-bold text-white text-sm">{team.name}</span>
+                          
+                          {userRole === 'editor' && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setEditingTeam(JSON.parse(JSON.stringify(team)))}
+                                className="px-2 py-1 text-xs bg-[#240a0e] hover:bg-[#380e14] text-amber-300 rounded border border-red-900/60 transition"
+                                title="Modifier nom, couleur et joueurs"
+                              >
+                                ✏️ Éditer
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setTeams(teams.filter(t => t.id !== team.id));
+                                  showToast(`Équipe "${team.name}" supprimée.`);
+                                }}
+                                className="px-2 py-1 text-xs text-slate-500 hover:text-rose-400 rounded transition"
+                                title="Supprimer l'équipe"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        {userRole === 'editor' && (
-                          <button onClick={() => setTeams(teams.filter(t => t.id !== team.id))} className="text-slate-500 hover:text-rose-400 text-xs">
-                            ✕
+
+                        {/* Liste des Joueurs */}
+                        <div className="mb-3">
+                          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 flex justify-between">
+                            <span>Effectif ({team.players?.length || 0})</span>
+                            {userRole === 'editor' && (
+                              <span className="text-[10px] text-slate-500 lowercase">(clic sur ✕ pour retirer)</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {team.players && team.players.length > 0 ? (
+                              team.players.map((p, pIdx) => (
+                                <span
+                                  key={pIdx}
+                                  className="text-xs bg-[#240a0e] border border-red-950 text-slate-200 px-2 py-0.5 rounded-md flex items-center gap-1.5"
+                                >
+                                  <span>{p}</span>
+                                  {userRole === 'editor' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemovePlayerFromTeam(team.id, pIdx)}
+                                      className="text-slate-500 hover:text-rose-400 font-bold text-[10px]"
+                                      title="Retirer ce joueur"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs italic text-slate-600">Aucun joueur dans l'effectif</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Ajout rapide de joueur (Mode Organisateur) */}
+                      {userRole === 'editor' && (
+                        <div className="pt-2.5 border-t border-red-950 flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Prénom ou Nom du joueur..."
+                            value={newPlayerInputs[team.id] || ''}
+                            onChange={(e) => setNewPlayerInputs({ ...newPlayerInputs, [team.id]: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleAddPlayerToTeam(team.id, newPlayerInputs[team.id]);
+                              }
+                            }}
+                            className="flex-1 bg-[#0b0304] border border-red-900/60 text-xs text-white px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-amber-500 placeholder-slate-600"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddPlayerToTeam(team.id, newPlayerInputs[team.id])}
+                            className="px-3 py-1.5 bg-gradient-to-r from-red-900 to-red-800 hover:from-red-800 text-amber-300 font-bold rounded-lg text-xs border border-amber-500/30 transition flex items-center gap-1"
+                          >
+                            <span>+</span>
+                            <span>Ajouter</span>
                           </button>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {team.players?.length || 0} joueur(s) inscrit(s)
-                      </div>
+                        </div>
+                      )}
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* MODALE COMPLÈTE D'ÉDITION D'UNE ÉQUIPE */}
+            {editingTeam && (
+              <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-red-950">
+                    <h3 className="font-bold text-base text-white flex items-center gap-2">
+                      <span>✏️</span> Modifier l'équipe
+                    </h3>
+                    <button
+                      onClick={() => setEditingTeam(null)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Nom de l'équipe</label>
+                    <input
+                      type="text"
+                      value={editingTeam.name}
+                      onChange={(e) => setEditingTeam({ ...editingTeam, name: e.target.value })}
+                      className="w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">Couleur du maillot</label>
+                    <div className="flex gap-2">
+                      {TEAM_COLORS.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setEditingTeam({ ...editingTeam, color: c })}
+                          style={{ backgroundColor: c }}
+                          className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                            editingTeam.color === c ? 'scale-110 border-white ring-2 ring-amber-400' : 'border-transparent opacity-75'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1.5">
+                      Liste des joueurs ({editingTeam.players?.length || 0})
+                    </label>
+                    <div className="max-h-40 overflow-y-auto space-y-1.5 bg-[#0b0304] p-2.5 rounded-xl border border-red-950 mb-2">
+                      {editingTeam.players && editingTeam.players.length > 0 ? (
+                        editingTeam.players.map((p, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-[#150709] px-2.5 py-1.5 rounded-lg border border-red-950/60 text-xs text-white">
+                            <span>{p}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTeam({
+                                  ...editingTeam,
+                                  players: editingTeam.players.filter((_, i) => i !== idx)
+                                });
+                              }}
+                              className="text-slate-500 hover:text-rose-400 font-bold"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500 italic block py-2 text-center">Aucun joueur pour l'instant</span>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        id="modal-new-player-input"
+                        placeholder="Nouveau joueur..."
+                        className="flex-1 bg-[#0b0304] border border-red-900/60 text-xs text-white px-3 py-2 rounded-xl focus:outline-none focus:border-amber-400"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && e.target.value.trim()) {
+                            setEditingTeam({
+                              ...editingTeam,
+                              players: [...(editingTeam.players || []), e.target.value.trim()]
+                            });
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById('modal-new-player-input');
+                          if (el && el.value.trim()) {
+                            setEditingTeam({
+                              ...editingTeam,
+                              players: [...(editingTeam.players || []), el.value.trim()]
+                            });
+                            el.value = '';
+                          }
+                        }}
+                        className="px-3 py-2 bg-[#25090d] text-amber-300 font-bold rounded-xl text-xs border border-amber-500/30"
+                      >
+                        + Ajouter
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-red-950">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTeam(null)}
+                      className="px-4 py-2 text-xs text-slate-400 hover:text-white"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeams(teams.map(t => t.id === editingTeam.id ? editingTeam : t));
+                        setEditingTeam(null);
+                        showToast(`Équipe "${editingTeam.name}" mise à jour !`);
+                      }}
+                      className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-lg"
+                    >
+                      Enregistrer les modifications
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1131,10 +1496,122 @@
                     </div>
                   </div>
 
+                  {/* CONFIGURATION CLOUD PERSISTANTE */}
+                  <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-amber-400">Synchronisation automatique (Cloud)</span>
+                      <span className={`text-[10px] font-bold ${cloudStatus === 'connected' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                        {cloudStatus === 'connected' ? 'Connecté' : 'Non activé'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      Permet la mise à jour instantanée des scores sur les téléphones du public sans recharger la page.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setFirebaseConfigInput(firebaseCustomConfig ? JSON.stringify(firebaseCustomConfig, null, 2) : '');
+                        setFirebaseModalOpen(true);
+                      }}
+                      className="w-full py-2 bg-[#25090d] text-amber-300 border border-amber-500/30 text-xs font-bold rounded-lg hover:bg-amber-950/40 transition flex items-center justify-center gap-2"
+                    >
+                      <span>⚡</span>
+                      {firebaseCustomConfig ? "Modifier la configuration Firebase" : "⚡ Assistant de connexion Firebase (Gratuit)"}
+                    </button>
+                  </div>
+
                   <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950">
                     <span className="text-xs font-bold text-amber-400 block mb-1">Impression & Affichage</span>
-                    <button onClick={() => window.print()} className="w-full py-1.5 bg-amber-500 text-slate-950 font-bold text-xs rounded-lg">
-                      Imprimer le planning & classements
+                    <p className="text-[11px] text-slate-400 mb-2">Imprimez la feuille de route du tournoi ou les tableaux pour affichage aux terrains.</p>
+                    <button onClick={() => window.print()} className="w-full py-1.5 bg-[#25090d] text-amber-200 text-xs rounded-lg border border-red-900">
+                      Imprimer / Exporter en PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL CONFIGURATION FIREBASE GUIDE */}
+          {firebaseModalOpen && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">⚡</span>
+                    <h3 className="font-bold text-white text-base">Connexion Firebase Cloud (Gratuit)</h3>
+                  </div>
+                  <button onClick={() => setFirebaseModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="space-y-4 text-xs text-slate-300">
+                  <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950 space-y-2">
+                    <p className="font-bold text-amber-300 text-sm">Comment obtenir vos clés Firebase :</p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-400">
+                      <li>Rendez-vous sur <strong className="text-white">console.firebase.google.com</strong> avec votre compte Google.</li>
+                      <li>Cliquez sur <strong className="text-white">Créer un projet</strong> (nom : <code className="text-amber-400">tournoi-cslv</code>).</li>
+                      <li>Dans le menu de gauche, allez dans <strong className="text-white">Build &gt; Firestore Database</strong> puis cliquez sur <strong className="text-white">Créer une base</strong> (choisir le mode test).</li>
+                      <li>Dans <strong className="text-white">Build &gt; Authentication</strong>, activez le fournisseur <strong className="text-white">Anonyme</strong>.</li>
+                      <li>Allez dans l'engrenage ⚙️ <strong className="text-white">Paramètres du projet</strong>, descendez à <strong className="text-white">Vos applications</strong> et cliquez sur l'icône Web <code className="text-amber-400">&lt;/&gt;</code>.</li>
+                      <li>Copiez le contenu de l'objet <code className="text-amber-400">firebaseConfig = {"{ ... }"}</code> et collez-le ci-dessous.</li>
+                    </ol>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">Collez votre objet configuration :</label>
+                    <textarea
+                      rows={6}
+                      value={firebaseConfigInput}
+                      onChange={(e) => setFirebaseConfigInput(e.target.value)}
+                      placeholder='{&#10;  "apiKey": "AIzaSy...",&#10;  "authDomain": "tournoi-cslv.firebaseapp.com",&#10;  "projectId": "tournoi-cslv",&#10;  "storageBucket": "tournoi-cslv.firebasestorage.app",&#10;  "messagingSenderId": "...",&#10;  "appId": "1:..."&#10;}'
+                      className="w-full bg-[#0b0304] border border-red-900 rounded-xl p-3 font-mono text-xs text-amber-200 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-2">
+                    <button
+                      onClick={() => setFirebaseModalOpen(false)}
+                      className="px-4 py-2 text-slate-400 hover:text-white"
+                    >
+                      Fermer
+                    </button>
+                    {firebaseCustomConfig && (
+                      <button
+                        onClick={() => {
+                          localStorage.removeItem('cslv_fb_cfg');
+                          setFirebaseCustomConfig(null);
+                          setFirebaseModalOpen(false);
+                          showToast("Déconnexion Cloud effectuée");
+                        }}
+                        className="px-4 py-2 bg-rose-950 text-rose-300 border border-rose-800 rounded-xl font-bold"
+                      >
+                        Déconnecter
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        try {
+                          // Extraire l'objet JSON même si l'utilisateur a copié "const firebaseConfig = { ... };"
+                          let raw = firebaseConfigInput.trim();
+                          const startIdx = raw.indexOf('{');
+                          const endIdx = raw.lastIndexOf('}');
+                          if (startIdx !== -1 && endIdx !== -1) {
+                            raw = raw.substring(startIdx, endIdx + 1);
+                          }
+                          const parsed = JSON.parse(raw);
+                          if (!parsed.projectId || !parsed.apiKey) {
+                            throw new Error("Clés requises manquantes");
+                          }
+                          localStorage.setItem('cslv_fb_cfg', JSON.stringify(parsed));
+                          setFirebaseCustomConfig(parsed);
+                          setFirebaseModalOpen(false);
+                          showToast("Connexion Cloud configurée avec succès !");
+                        } catch (err) {
+                          showToast("Format invalide. Assurez-vous de copier le bloc { ... }", "error");
+                        }
+                      }}
+                      className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl"
+                    >
+                      Enregistrer et Connecter
                     </button>
                   </div>
                 </div>
