@@ -358,7 +358,7 @@
                 if (!isMounted) return;
                 console.warn("Firestore Notice :", error.message);
                 setCloudStatus('error');
-                if (error.code === 'permission-denied' || error.message.includes('permissions')) {
+                if (error.code === 'permission-denied' || (error.message && error.message.includes('permissions'))) {
                   setCloudErrorMsg("Règles Firestore verrouillées : activez 'allow read, write: if true;' dans votre console Firebase.");
                 } else {
                   setCloudErrorMsg(error.message || "Erreur de connexion Firestore");
@@ -421,8 +421,10 @@
       // Sauvegarde automatique (Locale + Cloud) à chaque modification
       useEffect(() => {
         try {
-          const toSave = { config, fields, teams, matches, customLogoUrl, lastUpdate: Date.now() };
-          localStorage.setItem('cslv_tournament_data', JSON.stringify(toSave));
+          // Firebase rejette formellement les valeurs 'undefined' : on nettoie avec JSON.stringify / JSON.parse
+          const rawSave = { config, fields, teams, matches, customLogoUrl, lastUpdate: Date.now() };
+          const sanitizedSave = JSON.parse(JSON.stringify(rawSave));
+          localStorage.setItem('cslv_tournament_data', JSON.stringify(sanitizedSave));
 
           // Si connecté au Cloud et en mode organisateur, enregistrer dans Firestore
           if (cloudStatus === 'connected' && userRole === 'editor' && window.firebase && window.firebase.apps.length > 0) {
@@ -431,12 +433,18 @@
               const db = window.firebase.firestore();
               const tournamentId = cfg.projectId || 'main_tournament';
               const docRef = db.collection('tournaments').doc(tournamentId);
-              docRef.set(toSave, { merge: true }).catch((e) => {
-                console.warn("Écriture cloud échouée:", e);
-              });
+              docRef.set(sanitizedSave, { merge: true })
+                .then(() => {
+                  // Synchronisé avec succès
+                })
+                .catch((e) => {
+                  console.warn("Écriture cloud échouée:", e);
+                });
             }
           }
-        } catch(e) {}
+        } catch(e) {
+          console.error("Erreur de sauvegarde :", e);
+        }
       }, [config, fields, teams, matches, customLogoUrl, userRole, cloudStatus]);
 
       const showToast = (message, type = 'success') => {
@@ -1439,15 +1447,19 @@
                           key={m.id}
                           onClick={() => {
                             if (userRole === 'editor') {
-                              setEditingMatch(JSON.parse(JSON.stringify(m)));
-                              setGoalTeamId(m.team1Id || '');
-                              setCardTeamId(m.team1Id || '');
+                              const matchCopy = JSON.parse(JSON.stringify(m));
+                              setEditingMatch(matchCopy);
+                              // Sécuriser l'équipe par défaut sélectionnée pour les buts
+                              const firstAvailableTeam = m.team1Id || m.team2Id || (teams[0] ? teams[0].id : '');
+                              setGoalTeamId(firstAvailableTeam);
+                              setGoalScorerName('');
+                              setCardTeamId(firstAvailableTeam);
                             }
                           }}
-                          className={`p-4 rounded-xl border ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/40' : ''} bg-[#150709] border-red-950`}
+                          className={`p-4 rounded-xl border ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/40 hover:bg-[#1f0a0d]' : ''} bg-[#150709] border-red-950 transition`}
                         >
                           <div className="flex justify-between text-xs text-slate-400 mb-2">
-                            <span className="font-mono text-amber-400">{m.startTime} - {m.endTime} &bull; {m.fieldName}</span>
+                            <span className="font-mono text-amber-400">{m.startTime || '--:--'} - {m.endTime || '--:--'} &bull; {m.fieldName || 'Terrain'}</span>
                             <span className={
                               m.status === 'live' 
                                 ? 'text-emerald-400 font-black animate-pulse flex items-center gap-1.5' 
@@ -1461,11 +1473,11 @@
                           </div>
 
                           <div className="flex justify-between items-center py-2">
-                            <span className="font-bold text-white text-sm">{t1.name}</span>
+                            <span className="font-bold text-white text-sm truncate max-w-[40%]">{t1.name}</span>
                             <div className="bg-[#0b0304] px-3 py-1 rounded border border-red-950 font-mono font-bold text-white text-base">
-                              {m.score1 !== null ? `${m.score1} - ${m.score2}` : 'VS'}
+                              {m.score1 !== null && m.score1 !== undefined ? `${m.score1} - ${m.score2}` : 'VS'}
                             </div>
-                            <span className="font-bold text-white text-sm text-right">{t2.name}</span>
+                            <span className="font-bold text-white text-sm truncate max-w-[40%] text-right">{t2.name}</span>
                           </div>
 
                           {m.mvp && (
@@ -1476,7 +1488,7 @@
                           )}
 
                           {userRole === 'editor' && (
-                            <div className="text-[10px] text-amber-400/60 text-right mt-1">Cliquer pour saisir le résultat</div>
+                            <div className="text-[10px] text-amber-400/80 text-right mt-1 font-semibold">✏️ Cliquer pour saisir les scores & buteurs</div>
                           )}
                         </div>
                       );
@@ -1646,50 +1658,53 @@
           {/* MODAL FEUILLE DE MATCH / SAISIE DE SCORE AVEC LISTE DÉROULANTE JOUEURS ET MEILLEUR JOUEUR */}
           {editingMatch && userRole === 'editor' && (
             <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-4 pb-2 border-b border-red-950">
-                  <h3 className="font-bold text-white text-base">Feuille de Match</h3>
-                  <button onClick={() => setEditingMatch(null)} className="text-slate-400 hover:text-white">✕</button>
+                  <div>
+                    <h3 className="font-bold text-white text-base">Feuille de Match</h3>
+                    <span className="text-xs text-amber-400 font-semibold">{editingMatch.stage || 'Match'} &bull; {editingMatch.group || ''}</span>
+                  </div>
+                  <button onClick={() => setEditingMatch(null)} className="text-slate-400 hover:text-white p-1 text-lg">✕</button>
                 </div>
 
                 <div className="grid grid-cols-5 items-center gap-2 mb-4 bg-[#0b0304] p-3 rounded-xl border border-red-950">
                   <div className="col-span-2 text-center">
                     <span className="block text-xs font-bold text-white truncate mb-1">
-                      {editingMatch.team1Id ? getTeam(editingMatch.team1Id).name : 'Équipe 1'}
+                      {editingMatch.team1Id ? getTeam(editingMatch.team1Id).name : (editingMatch.placeholder1 || 'Équipe 1')}
                     </span>
                     <input
                       type="number"
                       min="0"
                       value={editingMatch.score1 ?? ''}
                       placeholder="0"
-                      onChange={(e) => setEditingMatch({ ...editingMatch, score1: e.target.value === '' ? null : parseInt(e.target.value) })}
-                      className="w-16 h-12 bg-[#18080a] border border-red-900 rounded-lg text-center font-mono font-bold text-xl text-white mx-auto block"
+                      onChange={(e) => setEditingMatch({ ...editingMatch, score1: e.target.value === '' ? null : parseInt(e.target.value, 10) })}
+                      className="w-16 h-12 bg-[#18080a] border border-red-900 rounded-lg text-center font-mono font-bold text-xl text-white mx-auto block focus:border-amber-400"
                     />
                   </div>
                   <div className="text-center font-bold text-amber-400 text-xs">VS</div>
                   <div className="col-span-2 text-center">
                     <span className="block text-xs font-bold text-white truncate mb-1">
-                      {editingMatch.team2Id ? getTeam(editingMatch.team2Id).name : 'Équipe 2'}
+                      {editingMatch.team2Id ? getTeam(editingMatch.team2Id).name : (editingMatch.placeholder2 || 'Équipe 2')}
                     </span>
                     <input
                       type="number"
                       min="0"
                       value={editingMatch.score2 ?? ''}
                       placeholder="0"
-                      onChange={(e) => setEditingMatch({ ...editingMatch, score2: e.target.value === '' ? null : parseInt(e.target.value) })}
-                      className="w-16 h-12 bg-[#18080a] border border-red-900 rounded-lg text-center font-mono font-bold text-xl text-white mx-auto block"
+                      onChange={(e) => setEditingMatch({ ...editingMatch, score2: e.target.value === '' ? null : parseInt(e.target.value, 10) })}
+                      className="w-16 h-12 bg-[#18080a] border border-red-900 rounded-lg text-center font-mono font-bold text-xl text-white mx-auto block focus:border-amber-400"
                     />
                   </div>
                 </div>
 
                 {/* Statut du match avec En direct en vert et À venir en cyan */}
                 <div className="mb-4">
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Statut du Match</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase">Statut du Match</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { id: 'pending', label: 'À venir', activeColor: 'bg-cyan-900/60 border-cyan-400 text-cyan-200' },
                       { id: 'live', label: 'En direct 🔴', activeColor: 'bg-emerald-600 border-emerald-400 text-white animate-pulse' },
-                      { id: 'finished', label: 'Terminé', activeColor: 'bg-amber-500 border-amber-300 text-slate-950' }
+                      { id: 'finished', label: 'Terminé', activeColor: 'bg-amber-500 border-amber-300 text-slate-950 font-black' }
                     ].map(st => (
                       <button
                         key={st.id}
@@ -1715,23 +1730,27 @@
                   <select
                     value={editingMatch.mvp || ''}
                     onChange={(e) => setEditingMatch({ ...editingMatch, mvp: e.target.value })}
-                    className="w-full bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 focus:outline-none focus:border-amber-400"
+                    className="w-full bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2.5 focus:outline-none focus:border-amber-400"
                   >
-                    <option value="">-- Choisir le meilleur joueur du match --</option>
-                    <optgroup label={getTeam(editingMatch.team1Id).name}>
-                      {(getTeam(editingMatch.team1Id).players || []).map((p, idx) => (
-                        <option key={`p1-${idx}`} value={`${p} (${getTeam(editingMatch.team1Id).name})`}>
-                          {p}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label={getTeam(editingMatch.team2Id).name}>
-                      {(getTeam(editingMatch.team2Id).players || []).map((p, idx) => (
-                        <option key={`p2-${idx}`} value={`${p} (${getTeam(editingMatch.team2Id).name})`}>
-                          {p}
-                        </option>
-                      ))}
-                    </optgroup>
+                    <option value="">-- Aucun joueur sélectionné --</option>
+                    {editingMatch.team1Id && (
+                      <optgroup label={getTeam(editingMatch.team1Id).name}>
+                        {(getTeam(editingMatch.team1Id).players || []).map((p, idx) => (
+                          <option key={`mvp-t1-${idx}`} value={`${p} (${getTeam(editingMatch.team1Id).name})`}>
+                            {p}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {editingMatch.team2Id && (
+                      <optgroup label={getTeam(editingMatch.team2Id).name}>
+                        {(getTeam(editingMatch.team2Id).players || []).map((p, idx) => (
+                          <option key={`mvp-t2-${idx}`} value={`${p} (${getTeam(editingMatch.team2Id).name})`}>
+                            {p}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 
@@ -1739,39 +1758,39 @@
                 <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950 mb-4">
                   <span className="text-xs font-bold text-amber-300 block mb-2">⚽ Ajouter un but</span>
                   <div className="space-y-2 mb-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <select
-                        value={goalTeamId}
+                        value={goalTeamId || editingMatch.team1Id || ''}
                         onChange={(e) => {
                           setGoalTeamId(e.target.value);
                           setGoalScorerName('');
                         }}
-                        className="w-1/2 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
+                        className="flex-1 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 font-semibold"
                       >
-                        <option value={editingMatch.team1Id}>{editingMatch.team1Id ? getTeam(editingMatch.team1Id).name : 'Équipe 1'}</option>
-                        <option value={editingMatch.team2Id}>{editingMatch.team2Id ? getTeam(editingMatch.team2Id).name : 'Équipe 2'}</option>
+                        {editingMatch.team1Id && <option value={editingMatch.team1Id}>{getTeam(editingMatch.team1Id).name}</option>}
+                        {editingMatch.team2Id && <option value={editingMatch.team2Id}>{getTeam(editingMatch.team2Id).name}</option>}
                       </select>
 
                       {/* Menu déroulant des joueurs de l'équipe sélectionnée */}
                       <select
                         value={goalScorerName}
                         onChange={(e) => setGoalScorerName(e.target.value)}
-                        className="w-1/2 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 font-semibold"
+                        className="flex-1 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 font-semibold"
                       >
-                        <option value="">-- Joueur --</option>
-                        {(getTeam(goalTeamId || editingMatch.team1Id).players || []).map((p, idx) => (
+                        <option value="">-- Choisir le buteur --</option>
+                        {((getTeam(goalTeamId || editingMatch.team1Id).players) || []).map((p, idx) => (
                           <option key={idx} value={p}>{p}</option>
                         ))}
-                        <option value="__custom__">Autre (saisie libre)...</option>
+                        <option value="__custom__">Autre joueur (saisie manuelle)...</option>
                       </select>
                     </div>
 
                     {goalScorerName === '__custom__' && (
                       <input
                         type="text"
-                        placeholder="Tapez le prénom et nom du buteur..."
-                        onChange={(e) => setGoalScorerName(e.target.value)}
-                        className="w-full bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
+                        placeholder="Prénom et nom du buteur..."
+                        id="custom-scorer-input"
+                        className="w-full bg-[#18080a] border border-amber-500/60 text-xs text-white rounded-lg p-2"
                       />
                     )}
                   </div>
@@ -1779,14 +1798,28 @@
                   <button
                     type="button"
                     onClick={() => {
-                      if (!goalScorerName.trim() || goalScorerName === '__custom__' || !goalTeamId) {
-                        showToast("Veuillez sélectionner ou saisir un joueur !", "error");
+                      let chosenPlayer = goalScorerName;
+                      if (chosenPlayer === '__custom__') {
+                        const customEl = document.getElementById('custom-scorer-input');
+                        chosenPlayer = customEl ? customEl.value.trim() : '';
+                      }
+
+                      const targetTeamId = goalTeamId || editingMatch.team1Id;
+                      if (!chosenPlayer || !chosenPlayer.trim()) {
+                        showToast("Veuillez sélectionner ou taper le nom du buteur !", "error");
                         return;
                       }
-                      const isT1 = goalTeamId === editingMatch.team1Id;
+
+                      const isT1 = targetTeamId === editingMatch.team1Id;
                       const newS1 = isT1 ? (Number(editingMatch.score1) || 0) + 1 : Number(editingMatch.score1) || 0;
                       const newS2 = !isT1 ? (Number(editingMatch.score2) || 0) + 1 : Number(editingMatch.score2) || 0;
-                      const newEvent = { id: Date.now(), type: 'goal', player: goalScorerName.trim(), teamId: goalTeamId };
+                      const newEvent = { 
+                        id: Date.now(), 
+                        type: 'goal', 
+                        player: chosenPlayer.trim(), 
+                        teamId: targetTeamId 
+                      };
+
                       setEditingMatch({
                         ...editingMatch,
                         score1: newS1,
@@ -1794,21 +1827,22 @@
                         events: [...(editingMatch.events || []), newEvent]
                       });
                       setGoalScorerName('');
+                      showToast(`But accordé à ${chosenPlayer.trim()} !`);
                     }}
-                    className="w-full py-1.5 bg-[#25090d] hover:bg-[#380e14] text-amber-300 text-xs font-bold rounded-lg border border-amber-500/30"
+                    className="w-full py-2 bg-gradient-to-r from-red-900 to-red-800 hover:from-red-800 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/40 transition"
                   >
                     + Enregistrer le but (+1 au score)
                   </button>
                 </div>
 
-                {/* Historique des événements */}
+                {/* Historique des buts enregistrés pour ce match */}
                 {editingMatch.events && editingMatch.events.length > 0 && (
                   <div className="mb-4">
-                    <label className="block text-xs font-semibold text-slate-400 mb-1">Événements du match</label>
-                    <div className="space-y-1">
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase">Buteurs enregistrés</label>
+                    <div className="space-y-1.5">
                       {editingMatch.events.map(ev => (
-                        <div key={ev.id} className="flex justify-between items-center text-xs bg-[#0b0304] px-2.5 py-1.5 rounded-lg border border-red-950">
-                          <span>⚽ {ev.player} ({getTeam(ev.teamId).name})</span>
+                        <div key={ev.id} className="flex justify-between items-center text-xs bg-[#0b0304] px-3 py-1.5 rounded-lg border border-red-950">
+                          <span className="text-white font-medium">⚽ {ev.player} <span className="text-slate-400">({getTeam(ev.teamId).name})</span></span>
                           <button
                             type="button"
                             onClick={() => {
@@ -1820,7 +1854,8 @@
                                 events: editingMatch.events.filter(x => x.id !== ev.id)
                               });
                             }}
-                            className="text-slate-500 hover:text-rose-400 font-bold"
+                            className="text-slate-500 hover:text-rose-400 font-bold px-1.5 py-0.5"
+                            title="Supprimer ce but"
                           >
                             ✕
                           </button>
@@ -1830,7 +1865,7 @@
                   </div>
                 )}
 
-                <div className="flex justify-end gap-2 pt-2 border-t border-red-950">
+                <div className="flex justify-end gap-2 pt-3 border-t border-red-950">
                   <button
                     type="button"
                     onClick={() => setEditingMatch(null)}
@@ -1845,11 +1880,11 @@
                       updated = updateKnockoutProgression(updated);
                       setMatches(updated);
                       setEditingMatch(null);
-                      showToast('Résultat enregistré !');
+                      showToast('Résultats et Homme du match enregistrés !');
                     }}
-                    className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs"
+                    className="px-6 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg cursor-pointer"
                   >
-                    Valider
+                    Valider & Publier
                   </button>
                 </div>
               </div>
