@@ -260,6 +260,8 @@
       // Synchronisation Cloud Fiable avec Firebase Compat
       useEffect(() => {
         let unsubscribe = null;
+        let isMounted = true;
+
         const initCloud = async () => {
           if (!window.firebase) return;
 
@@ -271,15 +273,17 @@
           }
 
           if (!cfg || !cfg.apiKey || !cfg.projectId) {
-            setCloudStatus('offline');
+            if (isMounted) setCloudStatus('offline');
             return;
           }
 
           try {
-            setCloudStatus('connecting');
-            setCloudErrorMsg('');
+            if (isMounted) {
+              setCloudStatus('connecting');
+              setCloudErrorMsg('');
+            }
 
-            // Initialiser Firebase de façon sécurisée
+            // Initialiser Firebase de façon sécurisée (singleton)
             let app;
             const existingApps = window.firebase.apps;
             if (existingApps && existingApps.length > 0) {
@@ -289,41 +293,64 @@
             }
 
             const auth = app.auth();
-            // Connexion anonyme
-            await auth.signInAnonymously();
-
             const db = app.firestore();
-            const appId = typeof __app_id !== 'undefined' ? __app_id : cfg.projectId;
-            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('tournamentState').doc('main');
+            const tournamentId = cfg.projectId || 'main_tournament';
+            const docRef = db.collection('tournaments').doc(tournamentId);
 
-            unsubscribe = docRef.onSnapshot((docSnap) => {
-              if (docSnap.exists) {
-                const cloudData = docSnap.data();
-                if (cloudData) {
-                  if (cloudData.config) setConfig(cloudData.config);
-                  if (cloudData.fields) setFields(cloudData.fields);
-                  if (cloudData.teams) setTeams(cloudData.teams);
-                  if (cloudData.matches) setMatches(cloudData.matches);
-                  if (cloudData.customLogoUrl) setCustomLogoUrl(cloudData.customLogoUrl);
+            // 1. Attendre impérativement que l'authentification soit terminée
+            // avant d'appeler onSnapshot afin d'éviter le rejet initial "Missing or insufficient permissions"
+            try {
+              if (!auth.currentUser) {
+                await auth.signInAnonymously();
+              }
+            } catch (authErr) {
+              console.warn("Auth anonyme non active ou indisponible :", authErr);
+            }
+
+            if (!isMounted) return;
+
+            // 2. Écoute temps réel avec gestion robuste des permissions
+            unsubscribe = docRef.onSnapshot(
+              (docSnap) => {
+                if (!isMounted) return;
+                if (docSnap.exists) {
+                  const cloudData = docSnap.data();
+                  if (cloudData) {
+                    if (cloudData.config) setConfig(cloudData.config);
+                    if (cloudData.fields) setFields(cloudData.fields);
+                    if (cloudData.teams) setTeams(cloudData.teams);
+                    if (cloudData.matches) setMatches(cloudData.matches);
+                    if (cloudData.customLogoUrl) setCustomLogoUrl(cloudData.customLogoUrl);
+                  }
+                }
+                setCloudStatus('connected');
+                setCloudErrorMsg('');
+              },
+              (error) => {
+                if (!isMounted) return;
+                console.warn("Firestore Notice :", error.message);
+                setCloudStatus('error');
+                if (error.code === 'permission-denied' || error.message.includes('permissions')) {
+                  setCloudErrorMsg("Règles Firestore verrouillées : activez 'allow read, write: if true;' dans votre console Firebase.");
+                } else {
+                  setCloudErrorMsg(error.message || "Erreur de connexion Firestore");
                 }
               }
-              setCloudStatus('connected');
-              setCloudErrorMsg('');
-            }, (error) => {
-              console.error("Erreur Firestore Snapshot:", error);
-              setCloudStatus('error');
-              setCloudErrorMsg(error.message || "Erreur de permissions ou règles");
-            });
+            );
 
           } catch (err) {
-            console.error("Erreur Init Firebase:", err);
+            if (!isMounted) return;
+            console.warn("Échec d'initialisation Firebase :", err);
             setCloudStatus('error');
             setCloudErrorMsg(err.message || "Échec de connexion");
           }
         };
 
         initCloud();
-        return () => { if (unsubscribe) unsubscribe(); };
+        return () => {
+          isMounted = false;
+          if (unsubscribe) unsubscribe();
+        };
       }, [firebaseCustomConfig]);
 
       const handleAddTeam = () => {
@@ -374,8 +401,8 @@
             let cfg = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseCustomConfig;
             if (cfg) {
               const db = window.firebase.firestore();
-              const appId = typeof __app_id !== 'undefined' ? __app_id : cfg.projectId;
-              const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('tournamentState').doc('main');
+              const tournamentId = cfg.projectId || 'main_tournament';
+              const docRef = db.collection('tournaments').doc(tournamentId);
               docRef.set(toSave, { merge: true }).catch((e) => {
                 console.warn("Écriture cloud échouée:", e);
               });
@@ -725,13 +752,30 @@
                     }`}>
                       {userRole === 'editor' ? 'Organisateur' : 'Spectateur'}
                     </span>
-                    {/* Indicateur Cloud */}
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                      cloudStatus === 'connected' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-400'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-400 animate-ping' : 'bg-zinc-500'}`}></span>
-                      {cloudStatus === 'connected' ? 'En direct (Cloud)' : 'Local'}
-                    </span>
+                    {/* Indicateur Cloud avec interaction d'aide en cas d'erreur */}
+                    <button
+                      type="button"
+                      onClick={() => setFirebaseModalOpen(true)}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1.5 transition cursor-pointer ${
+                        cloudStatus === 'connected' 
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30' 
+                          : cloudStatus === 'error'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 animate-pulse'
+                          : cloudStatus === 'connecting'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                      title={cloudErrorMsg || "Statut de synchronisation"}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        cloudStatus === 'connected' ? 'bg-emerald-400' : 
+                        cloudStatus === 'error' ? 'bg-rose-400' :
+                        cloudStatus === 'connecting' ? 'bg-amber-400 animate-ping' : 'bg-zinc-500'
+                      }`}></span>
+                      {cloudStatus === 'connected' ? 'En direct (Cloud)' : 
+                       cloudStatus === 'error' ? 'Accès Firestore à autoriser (cliquez)' :
+                       cloudStatus === 'connecting' ? 'Connexion...' : 'Local'}
+                    </button>
                   </div>
                   <div className="text-xs font-semibold text-amber-400">CS La Verpillière &bull; Sang et Or 1939</div>
                 </div>
@@ -810,12 +854,45 @@
                   activeTab === 'stats' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                🔥 Buteurs & Fair-play
+                🔥 Statistiques
               </button>
             </div>
           </header>
 
-          <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
+          <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+            {/* Bannière d'alerte explicative si Firestore renvoie 'Missing permissions' */}
+            {cloudStatus === 'error' && (
+              <div className="mb-4 bg-rose-950/70 border border-rose-700/80 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-rose-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-lg">🔒</span>
+                  <div>
+                    <strong className="text-white block font-semibold">Base de données en attente d'autorisation (Firebase Rules)</strong>
+                    <span>Vos données locales sont sécurisées. Pour activer la synchronisation live, autorisez l'accès dans votre console Firebase.</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      const rulesText = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}";
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(rulesText);
+                        showToast("Règles copiées dans le presse-papier !");
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-[#25090d] hover:bg-[#3d0f15] text-amber-300 border border-amber-500/40 rounded-lg font-bold"
+                  >
+                    📋 Copier la règle
+                  </button>
+                  <button
+                    onClick={() => setFirebaseModalOpen(true)}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg"
+                  >
+                    Voir l'aide
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* CONFIGURATION */}
             {activeTab === 'config' && userRole === 'editor' && (
               <div className="space-y-6">
@@ -1668,36 +1745,46 @@
                 </div>
 
                 {cloudStatus === 'error' && (
-                  <div className="mb-3 p-3 bg-rose-950/80 border border-rose-700 rounded-xl text-rose-200 text-xs">
-                    <strong>Erreur détectée :</strong> {cloudErrorMsg || "Impossible de se connecter"}
-                    <p className="mt-1 text-[11px] text-rose-300">
-                      Vérifiez que vous avez bien activé l'<strong>Authentification Anonyme</strong> et que Firestore est en <strong>Mode Test</strong>.
+                  <div className="mb-3 p-3 bg-rose-950/80 border border-rose-700 rounded-xl text-rose-200 text-xs space-y-2">
+                    <div>
+                      <strong>⚠️ Action requise sur Firebase Console :</strong> {cloudErrorMsg}
+                    </div>
+                    <div className="bg-black/60 p-2.5 rounded-lg border border-rose-900 font-mono text-[11px] text-amber-200">
+                      rules_version = '2';<br/>
+                      service cloud.firestore &#123;<br/>
+                      &nbsp;&nbsp;match /databases/&#123;database&#125;/documents &#123;<br/>
+                      &nbsp;&nbsp;&nbsp;&nbsp;match /&#123;document=**&#125; &#123;<br/>
+                      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br/>
+                      &nbsp;&nbsp;&nbsp;&nbsp;&#125;<br/>
+                      &nbsp;&nbsp;&#125;<br/>
+                      &#125;
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      Rendez-vous sur <strong>Firebase &gt; Cloud Firestore &gt; onglet Règles</strong>, collez ce bloc et cliquez sur le bouton bleu <strong>Publier</strong> (Publish).
                     </p>
                   </div>
                 )}
 
                 <div className="space-y-4 text-xs text-slate-300">
                   <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950 space-y-2">
-                    <p className="font-bold text-amber-300 text-xs">Vérifications indispensables sur Firebase :</p>
+                    <p className="font-bold text-amber-300 text-xs">Rappels indispensables :</p>
                     <ol className="list-decimal list-inside space-y-1 text-slate-400 text-[11px]">
-                      <li>Dans <strong className="text-white">Cloud Firestore</strong> &gt; onglet <strong className="text-amber-400">Règles</strong> (Rules), assurez-vous d'avoir : <br/>
-                        <code className="text-amber-300 block bg-[#18080a] p-1.5 rounded mt-1 font-mono">allow read, write: if true;</code>
-                      </li>
-                      <li>Dans <strong className="text-white">Authentication</strong> &gt; <strong className="text-white">Sign-in method</strong>, assurez-vous que <strong className="text-amber-400">Anonyme</strong> est <span className="text-emerald-400 font-bold">Activé</span>.</li>
+                      <li>Dans <strong className="text-white">Cloud Firestore &gt; Règles</strong> : vérifier que <code className="text-amber-300">allow read, write: if true;</code> est présent.</li>
+                      <li>Dans <strong className="text-white">Authentication &gt; Sign-in method</strong> : vérifier que <strong className="text-amber-400">Anonyme</strong> est activé.</li>
                     </ol>
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">Collez ici le bloc de code copié de Firebase :</label>
+                    <label className="block text-slate-300 font-bold mb-1">Collez le code fourni par Firebase :</label>
                     <textarea
                       rows={5}
                       value={firebaseConfigInput}
                       onChange={(e) => setFirebaseConfigInput(e.target.value)}
-                      placeholder='const firebaseConfig = {&#10;  apiKey: "AIzaSy...",&#10;  projectId: "mon-tournoi",&#10;  ...&#10;};'
+                      placeholder={'const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  projectId: "mon-projet",\n  ...\n};'}
                       className="w-full bg-[#0b0304] border border-red-900 rounded-xl p-3 font-mono text-xs text-amber-200 focus:outline-none focus:border-amber-400"
                     />
                     <div className="flex justify-between items-center mt-1 text-[11px] text-slate-400">
-                      <span>Collez l'ensemble du texte, même avec les balises.</span>
+                      <span>Accepte le texte JavaScript brut ou le format JSON.</span>
                       <button
                         type="button"
                         onClick={async () => {
@@ -1705,13 +1792,13 @@
                             const text = await navigator.clipboard.readText();
                             if (text) {
                               setFirebaseConfigInput(text);
-                              showToast("Texte collé !");
+                              showToast("Texte collé depuis le presse-papier !");
                             }
                           } catch {
                             showToast("Cliquez dans la case et appuyez sur CTRL+V", "error");
                           }
                         }}
-                        className="text-amber-400 hover:text-amber-300 underline font-semibold"
+                        className="text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer"
                       >
                         📋 Coller le presse-papier
                       </button>
@@ -1720,6 +1807,7 @@
 
                   <div className="flex gap-2 justify-end pt-2 border-t border-red-950">
                     <button
+                      type="button"
                       onClick={() => setFirebaseModalOpen(false)}
                       className="px-4 py-2 text-slate-400 hover:text-white"
                     >
@@ -1727,6 +1815,7 @@
                     </button>
                     {firebaseCustomConfig && (
                       <button
+                        type="button"
                         onClick={() => {
                           localStorage.removeItem('cslv_fb_cfg');
                           setFirebaseCustomConfig(null);
@@ -1736,68 +1825,80 @@
                         }}
                         className="px-3 py-2 bg-rose-950 text-rose-300 border border-rose-800 rounded-xl font-bold"
                       >
-                        Désactiver le Cloud
+                        Désactiver
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => {
                         try {
-                          let raw = firebaseConfigInput.trim();
+                          const raw = (firebaseConfigInput || '').trim();
                           if (!raw) {
-                            showToast("Le champ est vide", "error");
+                            showToast("Veuillez d'abord coller le code Firebase !", "error");
                             return;
                           }
 
-                          // Extraction robuste des valeurs même si c'est du javascript brut ou JSON
-                          const extractField = (name) => {
-                            const regex = new RegExp(`['"]?${name}['"]?\\s*:\\s*['"]([^'"]+)['"]`);
-                            const match = raw.match(regex);
-                            return match ? match[1] : null;
+                          // Extraction universelle insensible aux guillemets, virgules ou espacements
+                          const extractKey = (keyName) => {
+                            const patterns = [
+                              new RegExp(`["']?${keyName}["']?\\s*:\\s*["'\`]([^"'\`]+)["'\`]`, 'i'),
+                              new RegExp(`${keyName}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`, 'i')
+                            ];
+                            for (const pat of patterns) {
+                              const match = raw.match(pat);
+                              if (match && match[1]) return match[1].trim();
+                            }
+                            return null;
                           };
 
-                          const apiKey = extractField('apiKey');
-                          const projectId = extractField('projectId');
-                          const authDomain = extractField('authDomain') || (projectId ? `${projectId}.firebaseapp.com` : '');
-                          const storageBucket = extractField('storageBucket') || (projectId ? `${projectId}.firebasestorage.app` : '');
-                          const messagingSenderId = extractField('messagingSenderId') || '';
-                          const appId = extractField('appId') || '';
+                          let apiKey = extractKey('apiKey');
+                          let projectId = extractKey('projectId');
+                          let authDomain = extractKey('authDomain');
+                          let storageBucket = extractKey('storageBucket');
+                          let messagingSenderId = extractKey('messagingSenderId');
+                          let appId = extractKey('appId');
 
+                          // Si la regex n'a rien trouvé, tentons une lecture JSON directe
                           if (!apiKey || !projectId) {
-                            // Tentative JSON pur
                             const start = raw.indexOf('{');
                             const end = raw.lastIndexOf('}');
                             if (start !== -1 && end !== -1) {
-                              const jsonPart = raw.substring(start, end + 1);
-                              const parsed = JSON.parse(jsonPart);
-                              if (parsed.apiKey && parsed.projectId) {
-                                localStorage.setItem('cslv_fb_cfg', JSON.stringify(parsed));
-                                setFirebaseCustomConfig(parsed);
-                                setFirebaseModalOpen(false);
-                                showToast("Connecté ! Tentative de synchronisation...");
-                                return;
-                              }
+                              try {
+                                const parsed = JSON.parse(raw.substring(start, end + 1));
+                                apiKey = apiKey || parsed.apiKey;
+                                projectId = projectId || parsed.projectId;
+                                authDomain = authDomain || parsed.authDomain;
+                                storageBucket = storageBucket || parsed.storageBucket;
+                                messagingSenderId = messagingSenderId || parsed.messagingSenderId;
+                                appId = appId || parsed.appId;
+                              } catch(e) {}
                             }
-                            throw new Error("Clés apiKey et projectId introuvables");
+                          }
+
+                          if (!apiKey || !projectId) {
+                            showToast("Impossible de trouver apiKey ou projectId dans le texte collé.", "error");
+                            return;
                           }
 
                           const configObj = {
                             apiKey,
-                            authDomain,
                             projectId,
-                            storageBucket,
-                            messagingSenderId,
-                            appId
+                            authDomain: authDomain || `${projectId}.firebaseapp.com`,
+                            storageBucket: storageBucket || `${projectId}.firebasestorage.app`,
+                            messagingSenderId: messagingSenderId || '',
+                            appId: appId || ''
                           };
 
                           localStorage.setItem('cslv_fb_cfg', JSON.stringify(configObj));
                           setFirebaseCustomConfig(configObj);
                           setFirebaseModalOpen(false);
-                          showToast("Clés enregistrées avec succès !");
+                          showToast("Paramètres enregistrés ! Connexion en cours...");
                         } catch (err) {
-                          showToast("Erreur de format : collez l'objet firebaseConfig complet", "error");
+                          console.error(err);
+                          showToast("Erreur lors de l'analyse du texte collé", "error");
                         }
                       }}
-                      className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl"
+                      className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black rounded-xl cursor-pointer"
                     >
                       Enregistrer & Tester
                     </button>
