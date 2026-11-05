@@ -246,6 +246,11 @@
       const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
       const [selectedQrType, setSelectedQrType] = useState('viewer');
       const [showPosterModal, setShowPosterModal] = useState(false);
+      const [publicWebUrl, setPublicWebUrl] = useState(() => {
+        try {
+          return localStorage.getItem('cslv_public_url') || '';
+        } catch { return ''; }
+      });
 
       // Charger depuis stockage local au démarrage & détecter la clé cloud dans l'URL
       useEffect(() => {
@@ -273,7 +278,7 @@
                 };
                 setFirebaseCustomConfig(completeConfig);
                 localStorage.setItem('cslv_fb_cfg', JSON.stringify(completeConfig));
-                showToast("Connexion au direct en cours via le QR code...", "success");
+                showToast("Connexion au direct Cloud établie !", "success");
               }
             } catch (err) {
               console.warn("Impossible de décoder le paramètre cloud de l'URL", err);
@@ -733,66 +738,92 @@
 
       const copyShareLink = (role) => {
         const url = getFullShareUrl(role);
-        navigator.clipboard?.writeText(url).then(() => {
-          setCopiedLinkType(role);
-          showToast(`Lien ${role === 'viewer' ? 'Public' : 'Organisateur'} copié !`);
-          setTimeout(() => setCopiedLinkType(null), 2000);
-        });
-      };
-
-      // Construit un lien qui embarque la clé cloud pour que les téléphones se connectent sans rien configurer
-      const getFullShareUrl = (role) => {
-        // Obtenir l'URL de base propre
-        const currentUrl = new URL(window.location.href);
-        currentUrl.search = '';
-        currentUrl.searchParams.set('role', role);
-
-        if (!firebaseCustomConfig) return currentUrl.toString();
-
+        
+        // Méthode de copie ultra-compatible (évite les blocages iFrame et autorisations navigateur)
         try {
-          // Embarquer les clés complètes nécessaires à Firebase pour que la connexion fonctionne à 100%
-          const cloudConfig = {
-            apiKey: firebaseCustomConfig.apiKey,
-            projectId: firebaseCustomConfig.projectId,
-            authDomain: firebaseCustomConfig.authDomain || `${firebaseCustomConfig.projectId}.firebaseapp.com`,
-            appId: firebaseCustomConfig.appId || `1:web:${firebaseCustomConfig.projectId}`
-          };
-          const jsonStr = JSON.stringify(cloudConfig);
-          const cloudParam = btoa(unescape(encodeURIComponent(jsonStr)));
-          currentUrl.searchParams.set('cloud', cloudParam);
-          return currentUrl.toString();
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(url).then(() => {
+              setCopiedLinkType(role);
+              showToast(`Lien ${role === 'viewer' ? 'Public' : 'Organisateur'} copié !`);
+              setTimeout(() => setCopiedLinkType(null), 2500);
+            }).catch(() => fallbackCopy(url, role));
+          } else {
+            fallbackCopy(url, role);
+          }
         } catch {
-          return currentUrl.toString();
+          fallbackCopy(url, role);
         }
       };
 
-      // Générer le QR Code proprement dès l'ouverture de la modale ou le changement de type
+      const fallbackCopy = (text, role) => {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          setCopiedLinkType(role);
+          showToast(`Lien ${role === 'viewer' ? 'Public' : 'Organisateur'} copié !`);
+          setTimeout(() => setCopiedLinkType(null), 2500);
+        } catch (err) {
+          showToast("Sélectionnez le texte et appuyez sur CTRL+C", "error");
+        }
+        document.body.removeChild(textArea);
+      };
+
+      // Construit un lien universel qui fonctionne aussi bien en ligne qu'en local
+      const getFullShareUrl = (role) => {
+        let base = '';
+
+        // Si l'utilisateur a renseigné une adresse web publique (ex: netlify ou github.io)
+        if (publicWebUrl && publicWebUrl.trim().startsWith('http')) {
+          base = publicWebUrl.trim().split('?')[0];
+        } else if (window.location.protocol.startsWith('http')) {
+          base = window.location.origin + window.location.pathname;
+        } else {
+          // Si ouvert en fichier local file://
+          base = window.location.href.split('?')[0];
+        }
+
+        const url = new URL(base, window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tournoi-cslv.app');
+        url.searchParams.set('role', role);
+
+        if (firebaseCustomConfig && firebaseCustomConfig.apiKey && firebaseCustomConfig.projectId) {
+          try {
+            const cloudPayload = {
+              apiKey: firebaseCustomConfig.apiKey,
+              projectId: firebaseCustomConfig.projectId,
+              authDomain: firebaseCustomConfig.authDomain || `${firebaseCustomConfig.projectId}.firebaseapp.com`,
+              appId: firebaseCustomConfig.appId || `1:web:${firebaseCustomConfig.projectId}`
+            };
+            const jsonStr = JSON.stringify(cloudPayload);
+            const cloudParam = btoa(unescape(encodeURIComponent(jsonStr)));
+            url.searchParams.set('cloud', cloudParam);
+          } catch(e) {}
+        }
+
+        return url.toString();
+      };
+
+      // Régénérer le QR Code à chaque fois
       useEffect(() => {
         if (!isShareModalOpen && !showPosterModal) return;
 
         const targetUrl = getFullShareUrl(userRole === 'editor' ? selectedQrType : 'viewer');
-
-        // Utiliser une passerelle haute résolution directe infaillible pour le scan smartphone
-        const quickChartUrl = `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=300&margin=2&ecLevel=L`;
+        const encoded = encodeURIComponent(targetUrl);
+        const quickChartUrl = `https://quickchart.io/qr?text=${encoded}&size=300&margin=2&ecLevel=L`;
         setQrCodeDataUrl(quickChartUrl);
 
-        // Essayer en parallèle le canvas local si supporté
         if (window.QRCode && window.QRCode.toDataURL) {
-          window.QRCode.toDataURL(
-            targetUrl,
-            {
-              width: 300,
-              margin: 2,
-              errorCorrectionLevel: 'L'
-            },
-            (err, url) => {
-              if (!err && url) {
-                setQrCodeDataUrl(url);
-              }
-            }
-          );
+          window.QRCode.toDataURL(targetUrl, { width: 300, margin: 2, errorCorrectionLevel: 'L' }, (err, url) => {
+            if (!err && url) setQrCodeDataUrl(url);
+          });
         }
-      }, [isShareModalOpen, selectedQrType, firebaseCustomConfig, showPosterModal, userRole]);
+      }, [isShareModalOpen, selectedQrType, firebaseCustomConfig, showPosterModal, userRole, publicWebUrl]);
 
       const stats = useMemo(() => {
         const scorers = {};
@@ -805,19 +836,26 @@
         });
 
         matches.forEach(m => {
-          if (m.events) {
+          if (m.events && Array.isArray(m.events)) {
             m.events.forEach(e => {
               if (e.type === 'goal') {
                 totalGoals++;
                 const key = `${e.player}__${e.teamId}`;
-                if (!scorers[key]) scorers[key] = { player: e.player, teamId: e.teamId, count: 0 };
+                if (!scorers[key]) {
+                  scorers[key] = { player: e.player, teamId: e.teamId, count: 0 };
+                }
                 scorers[key].count++;
               }
               if (e.type === 'yellow' || e.type === 'red') {
                 totalCards++;
                 if (fairplay[e.teamId]) {
-                  if (e.type === 'yellow') { fairplay[e.teamId].yellow++; fairplay[e.teamId].points += 1; }
-                  else { fairplay[e.teamId].red++; fairplay[e.teamId].points += 3; }
+                  if (e.type === 'yellow') {
+                    fairplay[e.teamId].yellow++;
+                    fairplay[e.teamId].points += 1;
+                  } else {
+                    fairplay[e.teamId].red++;
+                    fairplay[e.teamId].points += 3;
+                  }
                 }
               }
             });
@@ -1883,36 +1921,37 @@
                   </div>
                 )}
 
+                {/* Validation de la feuille de match */}
                 <div className="flex justify-end gap-2 pt-3 border-t border-red-950">
                   <button
                     type="button"
                     onClick={() => setEditingMatch(null)}
                     className="px-4 py-2 text-xs text-slate-400 hover:text-white"
                   >
-                    Annuler
+                    Fermer
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      let updated = matches.map(m => m.id === editingMatch.id ? editingMatch : m);
-                      updated = updateKnockoutProgression(updated);
-                      setMatches(updated);
+                      const updatedList = matches.map(m => m.id === editingMatch.id ? editingMatch : m);
+                      const finalMatches = updateKnockoutProgression(updatedList);
+                      setMatches(finalMatches);
                       setEditingMatch(null);
-                      showToast('Résultats et Homme du match enregistrés !');
+                      showToast("Feuille de match enregistrée !");
                     }}
-                    className="px-6 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg cursor-pointer"
+                    className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs shadow-lg"
                   >
-                    Valider & Publier
+                    Valider & Enregistrer
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* MODAL DE PARTAGE MODIFIÉE : SÉCURISÉE EN MODE LECTEUR */}
+          {/* MODAL DE PARTAGE CORRIGÉE & SÉCURISÉE */}
           {isShareModalOpen && (
             <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex justify-between items-center pb-2 border-b border-red-950">
                   <h3 className="font-bold text-white text-base">
                     {userRole === 'editor' ? 'Partager le Tournoi' : 'Lien Public & QR Code'}
@@ -1920,13 +1959,41 @@
                   <button onClick={() => setIsShareModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
 
+                {/* Avertissement clair si l'application est ouverte en fichier local file:/// */}
+                {window.location.protocol === 'file:' && userRole === 'editor' && (
+                  <div className="p-3 bg-amber-950/60 border border-amber-600/60 rounded-xl text-xs text-amber-200 space-y-2">
+                    <div className="flex items-center gap-2 font-bold text-amber-300">
+                      <span>💡</span>
+                      <span>Vous utilisez l'application depuis votre disque dur local (file://)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      Un smartphone ne peut pas ouvrir un lien pointant vers <code className="text-white">file:///C:/...</code>. Pour que les liens et QR codes fonctionnent sur tous les smartphones :
+                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-white block">
+                        Indiquez l'adresse web où vous avez déposé le fichier (Netlify, Vercel ou GitHub) :
+                      </label>
+                      <input
+                        type="url"
+                        placeholder="https://mon-tournoi.netlify.app"
+                        value={publicWebUrl}
+                        onChange={(e) => {
+                          setPublicWebUrl(e.target.value);
+                          localStorage.setItem('cslv_public_url', e.target.value);
+                        }}
+                        className="w-full bg-[#0b0304] border border-amber-500/50 rounded-lg p-2 text-white font-mono text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Lien Public Spectateur (Affiché pour tout le monde) */}
                 <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-amber-400 block">Lien Public (Spectateurs / Parents / Joueurs)</span>
                     {firebaseCustomConfig && (
                       <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                        ⚡ Direct Live
+                        ⚡ Direct Live Actif
                       </span>
                     )}
                   </div>
@@ -1935,13 +2002,14 @@
                       type="text"
                       readOnly
                       value={getFullShareUrl('viewer')}
-                      className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
+                      className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate select-all"
+                      onClick={(e) => e.target.select()}
                     />
                     <button
                       onClick={() => copyShareLink('viewer')}
-                      className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg text-xs"
+                      className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1 transition"
                     >
-                      {copiedLinkType === 'viewer' ? 'Copié !' : 'Copier'}
+                      {copiedLinkType === 'viewer' ? '✓ Copié !' : 'Copier'}
                     </button>
                   </div>
                 </div>
@@ -1962,13 +2030,14 @@
                         type="text"
                         readOnly
                         value={getFullShareUrl('editor')}
-                        className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
+                        className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate select-all"
+                        onClick={(e) => e.target.select()}
                       />
                       <button
                         onClick={() => copyShareLink('editor')}
-                        className="px-3 py-1 bg-[#25090d] text-amber-300 border border-amber-500/30 font-bold rounded-lg text-xs"
+                        className="px-4 py-1.5 bg-[#25090d] hover:bg-[#380e14] text-amber-300 border border-amber-500/30 font-bold rounded-lg text-xs flex items-center gap-1 transition"
                       >
-                        {copiedLinkType === 'editor' ? 'Copié !' : 'Copier'}
+                        {copiedLinkType === 'editor' ? '✓ Copié !' : 'Copier'}
                       </button>
                     </div>
                   </div>
@@ -1984,7 +2053,7 @@
                         className="w-36 h-36 object-contain block"
                         onError={(e) => {
                           const targetUrl = getFullShareUrl(userRole === 'editor' ? selectedQrType : 'viewer');
-                          e.target.src = `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=180&margin=2`;
+                          e.target.src = `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=200&margin=2`;
                         }}
                       />
                     ) : (
@@ -2061,7 +2130,9 @@
                   <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 flex justify-between items-center">
                     <div>
                       <h4 className="text-xs font-bold text-white">Synchronisation Cloud (Firebase)</h4>
-                      <p className="text-[11px] text-slate-400">Statut : <span className="font-bold text-amber-300">{cloudStatus}</span></p>
+                      <p className="text-[11px] text-slate-400">
+                        Statut : <span className={`font-bold ${cloudStatus === 'connected' ? 'text-emerald-400' : 'text-amber-300'}`}>{cloudStatus === 'connected' ? 'Connecté (Live)' : cloudStatus}</span>
+                      </p>
                     </div>
                     <button
                       onClick={() => {
