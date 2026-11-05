@@ -42,10 +42,18 @@
       scrollbar-width: none;
     }
     @media print {
-      header, .no-print {
-        display: none !important;
+      body * {
+        visibility: hidden;
       }
-      body {
+      #printable-qr-poster, #printable-qr-poster * {
+        visibility: visible;
+      }
+      #printable-qr-poster {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        display: block !important;
         background: white !important;
         color: black !important;
       }
@@ -237,6 +245,7 @@
       const [notification, setNotification] = useState(null);
       const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
       const [selectedQrType, setSelectedQrType] = useState('viewer');
+      const [showPosterModal, setShowPosterModal] = useState(false);
 
       // Charger depuis stockage local au démarrage & détecter la clé cloud dans l'URL
       useEffect(() => {
@@ -1432,13 +1441,21 @@
                             if (userRole === 'editor') {
                               setEditingMatch(JSON.parse(JSON.stringify(m)));
                               setGoalTeamId(m.team1Id || '');
+                              setCardTeamId(m.team1Id || '');
                             }
                           }}
                           className={`p-4 rounded-xl border ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/40' : ''} bg-[#150709] border-red-950`}
                         >
                           <div className="flex justify-between text-xs text-slate-400 mb-2">
                             <span className="font-mono text-amber-400">{m.startTime} - {m.endTime} &bull; {m.fieldName}</span>
-                            <span className={m.status === 'finished' ? 'text-amber-300 font-bold' : 'text-slate-500'}>
+                            <span className={
+                              m.status === 'live' 
+                                ? 'text-emerald-400 font-black animate-pulse flex items-center gap-1.5' 
+                                : m.status === 'pending'
+                                ? 'text-cyan-400 font-bold bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/60'
+                                : 'text-amber-300 font-bold'
+                            }>
+                              {m.status === 'live' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>}
                               {m.status === 'finished' ? 'Terminé' : m.status === 'live' ? 'En direct' : 'À venir'}
                             </span>
                           </div>
@@ -1450,6 +1467,14 @@
                             </div>
                             <span className="font-bold text-white text-sm text-right">{t2.name}</span>
                           </div>
+
+                          {m.mvp && (
+                            <div className="mt-2 pt-2 border-t border-red-950/70 flex items-center gap-1.5 text-xs text-amber-300">
+                              <span>⭐ Homme du Match :</span>
+                              <strong className="text-white font-semibold">{m.mvp}</strong>
+                            </div>
+                          )}
+
                           {userRole === 'editor' && (
                             <div className="text-[10px] text-amber-400/60 text-right mt-1">Cliquer pour saisir le résultat</div>
                           )}
@@ -1573,26 +1598,52 @@
                   </div>
                 </div>
 
-                <div className="bg-[#150709] border border-red-950 rounded-2xl p-4">
-                  <h3 className="font-bold text-amber-300 text-sm mb-3">Top Buteurs</h3>
-                  {stats.topScorers.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic">Aucun buteur enregistré</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {stats.topScorers.map((s, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-xs bg-[#0b0304] p-2 rounded-lg border border-red-950">
-                          <span className="font-bold text-white">{idx + 1}. {s.player} ({getTeam(s.teamId).name})</span>
-                          <span className="font-mono text-amber-400 font-bold">{s.count} but(s)</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                {/* Buteurs & Hommes du Match */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-4">
+                    <h3 className="font-bold text-amber-300 text-sm mb-3">Top Buteurs</h3>
+                    {stats.topScorers.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">Aucun buteur enregistré</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {stats.topScorers.map((s, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-xs bg-[#0b0304] p-2 rounded-lg border border-red-950">
+                            <span className="font-bold text-white">{idx + 1}. {s.player} ({getTeam(s.teamId).name})</span>
+                            <span className="font-mono text-amber-400 font-bold">{s.count} but(s)</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-4">
+                    <h3 className="font-bold text-amber-300 text-sm mb-3 flex items-center gap-1.5">
+                      <span>⭐</span> Élus "Homme du Match"
+                    </h3>
+                    {matches.filter(m => m.mvp).length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">Aucun joueur désigné pour l'instant</p>
+                    ) : (
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {matches.filter(m => m.mvp).map(m => (
+                          <div key={m.id} className="flex justify-between items-center text-xs bg-[#0b0304] p-2 rounded-lg border border-red-950">
+                            <div>
+                              <strong className="text-white block">{m.mvp}</strong>
+                              <span className="text-[10px] text-slate-400">{getTeam(m.team1Id).name} vs {getTeam(m.team2Id).name}</span>
+                            </div>
+                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold">
+                              {m.stage}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
           </main>
 
-          {/* MODAL FEUILLE DE MATCH / SAISIE DE SCORE */}
+          {/* MODAL FEUILLE DE MATCH / SAISIE DE SCORE AVEC LISTE DÉROULANTE JOUEURS ET MEILLEUR JOUEUR */}
           {editingMatch && userRole === 'editor' && (
             <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1631,14 +1682,14 @@
                   </div>
                 </div>
 
-                {/* Statut du match */}
+                {/* Statut du match avec En direct en vert et À venir en cyan */}
                 <div className="mb-4">
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Statut</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Statut du Match</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { id: 'pending', label: 'À venir' },
-                      { id: 'live', label: 'En direct' },
-                      { id: 'finished', label: 'Terminé' }
+                      { id: 'pending', label: 'À venir', activeColor: 'bg-cyan-900/60 border-cyan-400 text-cyan-200' },
+                      { id: 'live', label: 'En direct 🔴', activeColor: 'bg-emerald-600 border-emerald-400 text-white animate-pulse' },
+                      { id: 'finished', label: 'Terminé', activeColor: 'bg-amber-500 border-amber-300 text-slate-950' }
                     ].map(st => (
                       <button
                         key={st.id}
@@ -1646,8 +1697,8 @@
                         onClick={() => setEditingMatch({ ...editingMatch, status: st.id })}
                         className={`py-2 rounded-lg text-xs font-bold border transition ${
                           editingMatch.status === st.id
-                            ? 'bg-amber-500 text-slate-950 border-amber-400'
-                            : 'bg-[#0b0304] text-slate-400 border-red-950'
+                            ? `${st.activeColor} shadow-md`
+                            : 'bg-[#0b0304] text-slate-400 border-red-950 hover:text-white'
                         }`}
                       >
                         {st.label}
@@ -1656,30 +1707,82 @@
                   </div>
                 </div>
 
-                {/* Ajouter un buteur */}
+                {/* Homme du match (Meilleur joueur) */}
+                <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950 mb-4">
+                  <label className="text-xs font-bold text-amber-300 block mb-1.5 flex items-center gap-1.5">
+                    <span>⭐</span> Homme du Match (Meilleur joueur)
+                  </label>
+                  <select
+                    value={editingMatch.mvp || ''}
+                    onChange={(e) => setEditingMatch({ ...editingMatch, mvp: e.target.value })}
+                    className="w-full bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="">-- Choisir le meilleur joueur du match --</option>
+                    <optgroup label={getTeam(editingMatch.team1Id).name}>
+                      {(getTeam(editingMatch.team1Id).players || []).map((p, idx) => (
+                        <option key={`p1-${idx}`} value={`${p} (${getTeam(editingMatch.team1Id).name})`}>
+                          {p}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label={getTeam(editingMatch.team2Id).name}>
+                      {(getTeam(editingMatch.team2Id).players || []).map((p, idx) => (
+                        <option key={`p2-${idx}`} value={`${p} (${getTeam(editingMatch.team2Id).name})`}>
+                          {p}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Ajouter un buteur avec menu déroulant */}
                 <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950 mb-4">
                   <span className="text-xs font-bold text-amber-300 block mb-2">⚽ Ajouter un but</span>
-                  <div className="flex gap-2 mb-2">
-                    <select
-                      value={goalTeamId}
-                      onChange={(e) => setGoalTeamId(e.target.value)}
-                      className="flex-1 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
-                    >
-                      <option value={editingMatch.team1Id}>{editingMatch.team1Id ? getTeam(editingMatch.team1Id).name : 'Équipe 1'}</option>
-                      <option value={editingMatch.team2Id}>{editingMatch.team2Id ? getTeam(editingMatch.team2Id).name : 'Équipe 2'}</option>
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="Nom du buteur"
-                      value={goalScorerName}
-                      onChange={(e) => setGoalScorerName(e.target.value)}
-                      className="flex-1 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
-                    />
+                  <div className="space-y-2 mb-2">
+                    <div className="flex gap-2">
+                      <select
+                        value={goalTeamId}
+                        onChange={(e) => {
+                          setGoalTeamId(e.target.value);
+                          setGoalScorerName('');
+                        }}
+                        className="w-1/2 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
+                      >
+                        <option value={editingMatch.team1Id}>{editingMatch.team1Id ? getTeam(editingMatch.team1Id).name : 'Équipe 1'}</option>
+                        <option value={editingMatch.team2Id}>{editingMatch.team2Id ? getTeam(editingMatch.team2Id).name : 'Équipe 2'}</option>
+                      </select>
+
+                      {/* Menu déroulant des joueurs de l'équipe sélectionnée */}
+                      <select
+                        value={goalScorerName}
+                        onChange={(e) => setGoalScorerName(e.target.value)}
+                        className="w-1/2 bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2 font-semibold"
+                      >
+                        <option value="">-- Joueur --</option>
+                        {(getTeam(goalTeamId || editingMatch.team1Id).players || []).map((p, idx) => (
+                          <option key={idx} value={p}>{p}</option>
+                        ))}
+                        <option value="__custom__">Autre (saisie libre)...</option>
+                      </select>
+                    </div>
+
+                    {goalScorerName === '__custom__' && (
+                      <input
+                        type="text"
+                        placeholder="Tapez le prénom et nom du buteur..."
+                        onChange={(e) => setGoalScorerName(e.target.value)}
+                        className="w-full bg-[#18080a] border border-red-900 text-xs text-white rounded-lg p-2"
+                      />
+                    )}
                   </div>
+
                   <button
                     type="button"
                     onClick={() => {
-                      if (!goalScorerName.trim() || !goalTeamId) return;
+                      if (!goalScorerName.trim() || goalScorerName === '__custom__' || !goalTeamId) {
+                        showToast("Veuillez sélectionner ou saisir un joueur !", "error");
+                        return;
+                      }
                       const isT1 = goalTeamId === editingMatch.team1Id;
                       const newS1 = isT1 ? (Number(editingMatch.score1) || 0) + 1 : Number(editingMatch.score1) || 0;
                       const newS2 = !isT1 ? (Number(editingMatch.score2) || 0) + 1 : Number(editingMatch.score2) || 0;
@@ -1697,6 +1800,35 @@
                     + Enregistrer le but (+1 au score)
                   </button>
                 </div>
+
+                {/* Historique des événements */}
+                {editingMatch.events && editingMatch.events.length > 0 && (
+                  <div className="mb-4">
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">Événements du match</label>
+                    <div className="space-y-1">
+                      {editingMatch.events.map(ev => (
+                        <div key={ev.id} className="flex justify-between items-center text-xs bg-[#0b0304] px-2.5 py-1.5 rounded-lg border border-red-950">
+                          <span>⚽ {ev.player} ({getTeam(ev.teamId).name})</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isT1 = ev.teamId === editingMatch.team1Id;
+                              setEditingMatch({
+                                ...editingMatch,
+                                score1: isT1 ? Math.max(0, (editingMatch.score1 || 0) - 1) : editingMatch.score1,
+                                score2: !isT1 ? Math.max(0, (editingMatch.score2 || 0) - 1) : editingMatch.score2,
+                                events: editingMatch.events.filter(x => x.id !== ev.id)
+                              });
+                            }}
+                            className="text-slate-500 hover:text-rose-400 font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-red-950">
                   <button
@@ -1724,21 +1856,24 @@
             </div>
           )}
 
-          {/* MODAL DE PARTAGE */}
+          {/* MODAL DE PARTAGE MODIFIÉE : SÉCURISÉE EN MODE LECTEUR */}
           {isShareModalOpen && (
             <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
                 <div className="flex justify-between items-center pb-2 border-b border-red-950">
-                  <h3 className="font-bold text-white text-base">Partager le Tournoi</h3>
+                  <h3 className="font-bold text-white text-base">
+                    {userRole === 'editor' ? 'Partager le Tournoi' : 'Lien Public & QR Code'}
+                  </h3>
                   <button onClick={() => setIsShareModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
 
+                {/* Lien Public Spectateur (Affiché pour tout le monde) */}
                 <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-amber-400 block">Lien Public (Spectateurs / Joueurs)</span>
+                    <span className="text-xs font-bold text-amber-400 block">Lien Public (Spectateurs / Parents / Joueurs)</span>
                     {firebaseCustomConfig && (
                       <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                        ⚡ Synchro Live Incluse
+                        ⚡ Direct Live
                       </span>
                     )}
                   </div>
@@ -1758,30 +1893,33 @@
                   </div>
                 </div>
 
-                <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-red-400 block">Lien Privé (Organisateurs / Saisie)</span>
-                    {firebaseCustomConfig && (
-                      <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                        ⚡ Synchro Live Incluse
-                      </span>
-                    )}
+                {/* Lien Privé Organisateur : Masqué pour les spectateurs */}
+                {userRole === 'editor' && (
+                  <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-red-400 block">Lien Privé (Organisateurs / Saisie)</span>
+                      {firebaseCustomConfig && (
+                        <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                          ⚡ Synchro Live Incluse
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={getFullShareUrl('editor')}
+                        className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
+                      />
+                      <button
+                        onClick={() => copyShareLink('editor')}
+                        className="px-3 py-1 bg-[#25090d] text-amber-300 border border-amber-500/30 font-bold rounded-lg text-xs"
+                      >
+                        {copiedLinkType === 'editor' ? 'Copié !' : 'Copier'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={getFullShareUrl('editor')}
-                      className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
-                    />
-                    <button
-                      onClick={() => copyShareLink('editor')}
-                      className="px-3 py-1 bg-[#25090d] text-amber-300 border border-amber-500/30 font-bold rounded-lg text-xs"
-                    >
-                      {copiedLinkType === 'editor' ? 'Copié !' : 'Copier'}
-                    </button>
-                  </div>
-                </div>
+                )}
 
                 {/* QR CODE DYNAMIQUE POUR SMARTPHONE */}
                 <div className="p-4 bg-[#0b0304] rounded-xl border border-red-950 flex flex-col sm:flex-row items-center gap-4">
@@ -1792,7 +1930,7 @@
                         alt="QR Code d'accès direct au tournoi" 
                         className="w-36 h-36 object-contain block"
                         onError={(e) => {
-                          const targetUrl = getFullShareUrl(selectedQrType);
+                          const targetUrl = getFullShareUrl(userRole === 'editor' ? selectedQrType : 'viewer');
                           e.target.src = `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=180&margin=2`;
                         }}
                       />
@@ -1803,78 +1941,193 @@
                   <div className="flex-1 text-center sm:text-left space-y-2">
                     <div>
                       <h4 className="text-xs font-bold text-amber-300 flex items-center justify-center sm:justify-start gap-1.5">
-                        <span>📱</span> Flashez pour ouvrir sur smartphone
+                        <span>📱</span> Flashez avec votre smartphone
                       </h4>
                       <p className="text-[11px] text-slate-300 mt-1">
-                        Ce QR code intègre le lien et la clé de synchronisation Cloud. Vos scores s'actualisent en direct !
+                        Scannez ce QR Code avec l'appareil photo pour suivre les classements et scores en direct.
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+                    {/* Choix QR code : Uniquement en mode Organisateur */}
+                    {userRole === 'editor' ? (
+                      <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedQrType('viewer');
+                            showToast("QR Code Spectateur activé");
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                            selectedQrType === 'viewer'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                              : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          }`}
+                        >
+                          👁 QR Public (Spectateurs)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedQrType('editor');
+                            showToast("QR Code Organisateur activé");
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                            selectedQrType === 'editor'
+                              ? 'bg-red-600 text-white border-red-500 shadow-md'
+                              : 'bg-red-950/40 hover:bg-red-900/40 text-red-300 border-red-800'
+                          }`}
+                        >
+                          🔒 QR Admin (Organisateurs)
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-emerald-400 font-bold bg-emerald-950/40 p-2 rounded-lg border border-emerald-900">
+                        Accès Direct Spectateur &bull; Sans inscription
+                      </div>
+                    )}
+
+                    {/* Bouton pour Imprimer l'affiche officielle */}
+                    <div className="pt-2">
                       <button
                         type="button"
                         onClick={() => {
-                          setSelectedQrType('viewer');
-                          showToast("QR Code Spectateur activé");
+                          setIsShareModalOpen(false);
+                          setShowPosterModal(true);
                         }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                          selectedQrType === 'viewer'
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
-                            : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
-                        }`}
+                        className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-red-900 to-red-800 hover:from-red-800 text-amber-300 border border-amber-500/40 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow"
                       >
-                        👁 QR Public (Spectateurs)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedQrType('editor');
-                          showToast("QR Code Organisateur activé");
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                          selectedQrType === 'editor'
-                            ? 'bg-red-600 text-white border-red-500 shadow-md'
-                            : 'bg-red-950/40 hover:bg-red-900/40 text-red-300 border-red-800'
-                        }`}
-                      >
-                        🔒 QR Admin (Organisateurs)
+                        <span>🖨️</span>
+                        <span>Imprimer l'Affiche QR Code (Format A4)</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 flex justify-between items-center">
-                  <div>
-                    <h4 className="text-xs font-bold text-white">Synchronisation Cloud (Firebase)</h4>
-                    <p className="text-[11px] text-slate-400">Statut : <span className="font-bold text-amber-300">{cloudStatus}</span></p>
+                {/* Bloc Synchronisation Cloud Firebase : Uniquement en mode Organisateur */}
+                {userRole === 'editor' && (
+                  <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 flex justify-between items-center">
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Synchronisation Cloud (Firebase)</h4>
+                      <p className="text-[11px] text-slate-400">Statut : <span className="font-bold text-amber-300">{cloudStatus}</span></p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsShareModalOpen(false);
+                        setFirebaseConfigInput(firebaseCustomConfig ? JSON.stringify(firebaseCustomConfig, null, 2) : '');
+                        setFirebaseModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold"
+                    >
+                      ⚡ Configurer
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      setIsShareModalOpen(false);
-                      setFirebaseConfigInput(firebaseCustomConfig ? JSON.stringify(firebaseCustomConfig, null, 2) : '');
-                      setFirebaseModalOpen(true);
-                    }}
-                    className="px-3 py-1.5 bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold"
-                  >
-                    ⚡ Configurer
-                  </button>
+                )}
+
+                {/* Export et Import JSON : Uniquement en mode Organisateur */}
+                {userRole === 'editor' && (
+                  <div className="flex justify-between gap-2 pt-2 border-t border-red-950">
+                    <button
+                      onClick={exportTournamentJSON}
+                      className="flex-1 py-2 bg-[#25090d] text-amber-300 border border-red-950 text-xs rounded-xl font-bold"
+                    >
+                      Exporter (.json)
+                    </button>
+                    <label className="flex-1 py-2 bg-[#25090d] text-amber-300 border border-red-950 text-xs rounded-xl font-bold text-center cursor-pointer">
+                      Importer (.json)
+                      <input type="file" accept=".json" onChange={importTournamentJSON} className="hidden" />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MODALE ET VUE D'IMPRESSION AFFICHE QR CODE OFFICIELLE CS LA VERPILLIÈRE */}
+          {showPosterModal && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+                <div className="flex justify-between items-center pb-2 border-b border-red-950">
+                  <h3 className="font-bold text-white text-base">Aperçu de l'Affiche QR Code</h3>
+                  <button onClick={() => setShowPosterModal(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
 
-                <div className="flex justify-between gap-2 pt-2 border-t border-red-950">
+                <div className="bg-white text-slate-950 p-6 rounded-2xl shadow-inner text-center space-y-4 border-4 border-amber-500">
+                  <div className="flex justify-center">
+                    <ClubLogo className="w-20 h-20" customLogo={customLogoUrl} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase text-red-900 tracking-wide">{config.name}</h2>
+                    <p className="text-xs font-black text-amber-600 uppercase tracking-widest mt-0.5">Club Sportif La Verpillière &bull; Sang et Or 1939</p>
+                  </div>
+
+                  <div className="bg-slate-100 p-4 rounded-2xl border-2 border-dashed border-red-900 max-w-[220px] mx-auto">
+                    <img 
+                      src={qrCodeDataUrl || `https://quickchart.io/qr?text=${encodeURIComponent(getFullShareUrl('viewer'))}&size=250&margin=2`} 
+                      alt="QR Code Spectateurs"
+                      className="w-full h-auto mx-auto"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-base font-black text-red-950">FLASHEZ POUR SUIVRE LES SCORES EN DIRECT !</h3>
+                    <p className="text-xs text-slate-700 font-semibold">
+                      Ouvrez votre appareil photo &bull; Calendrier, résultats et classements actualisés à la seconde.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-red-950">
                   <button
-                    onClick={exportTournamentJSON}
-                    className="flex-1 py-2 bg-[#25090d] text-amber-300 border border-red-950 text-xs rounded-xl font-bold"
+                    onClick={() => setShowPosterModal(false)}
+                    className="px-4 py-2 text-xs text-slate-400 hover:text-white"
                   >
-                    Exporter (.json)
+                    Fermer
                   </button>
-                  <label className="flex-1 py-2 bg-[#25090d] text-amber-300 border border-red-950 text-xs rounded-xl font-bold text-center cursor-pointer">
-                    Importer (.json)
-                    <input type="file" accept=".json" onChange={importTournamentJSON} className="hidden" />
-                  </label>
+                  <button
+                    onClick={() => window.print()}
+                    className="px-6 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-lg"
+                  >
+                    <span>🖨️</span>
+                    <span>Lancer l'impression A4</span>
+                  </button>
                 </div>
               </div>
             </div>
           )}
+
+          {/* SECTION D'IMPRESSION CACHÉE À L'ÉCRAN (Active uniquement lors de l'impression papier / PDF) */}
+          <div id="printable-qr-poster" className="hidden p-10 max-w-2xl mx-auto text-center font-sans">
+            <div className="border-8 border-red-900 p-10 rounded-3xl space-y-6">
+              <div className="flex justify-center mb-2">
+                <ClubLogo className="w-32 h-32" customLogo={customLogoUrl} />
+              </div>
+              <div>
+                <h1 className="text-3xl font-black uppercase text-red-950 tracking-wider">{config.name}</h1>
+                <p className="text-sm font-black text-amber-700 uppercase tracking-widest mt-1">Club Sportif La Verpillière &bull; Sang et Or 1939</p>
+              </div>
+
+              <div className="p-6 bg-slate-50 border-4 border-dashed border-red-900 rounded-3xl max-w-sm mx-auto my-4">
+                <img 
+                  src={qrCodeDataUrl || `https://quickchart.io/qr?text=${encodeURIComponent(getFullShareUrl('viewer'))}&size=350&margin=2`} 
+                  alt="QR Code Public" 
+                  className="w-72 h-72 mx-auto"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-red-950 uppercase tracking-wide">
+                  📱 Scannez pour suivre les scores en direct !
+                </h2>
+                <p className="text-base text-slate-700 font-bold max-w-md mx-auto">
+                  Approchez l'appareil photo de votre téléphone pour accéder immédiatement au calendrier, aux classements des poules et aux statistiques.
+                </p>
+              </div>
+
+              <div className="pt-6 border-t-2 border-red-900 text-xs text-slate-500 uppercase tracking-widest font-black">
+                CSLV 1939 &bull; Entrée Libre &bull; Buvette & Restauration sur place
+              </div>
+            </div>
+          </div>
 
           {/* MODAL CONFIGURATION FIREBASE GUIDE CORRIGÉE */}
           {firebaseModalOpen && (
