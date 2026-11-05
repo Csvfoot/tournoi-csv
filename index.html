@@ -721,12 +721,31 @@
 
       // Générer le QR Code lorsque la modale de partage est ouverte
       useEffect(() => {
-        if (isShareModalOpen && window.QRCode) {
-          const viewerUrl = getFullShareUrl('viewer');
-          window.QRCode.toDataURL(viewerUrl, { width: 200, margin: 1, color: { dark: '#000000', light: '#ffffff' } }, (err, url) => {
-            if (!err && url) setQrCodeDataUrl(url);
-          });
+        if (!isShareModalOpen) return;
+
+        const viewerUrl = getFullShareUrl('viewer');
+
+        // Tentative 1 : via la bibliothèque QRCode locale si disponible
+        if (window.QRCode && window.QRCode.toDataURL) {
+          try {
+            window.QRCode.toDataURL(
+              viewerUrl,
+              { width: 220, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } },
+              (err, url) => {
+                if (!err && url) {
+                  setQrCodeDataUrl(url);
+                  return;
+                }
+                // Secours API si erreur locale
+                setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(viewerUrl)}`);
+              }
+            );
+            return;
+          } catch(e) {}
         }
+
+        // Secours direct haute compatibilité
+        setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(viewerUrl)}`);
       }, [isShareModalOpen, firebaseCustomConfig]);
 
       const stats = useMemo(() => {
@@ -1755,23 +1774,56 @@
 
                 {/* QR CODE DYNAMIQUE POUR SMARTPHONE */}
                 <div className="p-4 bg-[#0b0304] rounded-xl border border-red-950 flex flex-col sm:flex-row items-center gap-4">
-                  {qrCodeDataUrl ? (
-                    <img src={qrCodeDataUrl} alt="QR Code du Tournoi" className="w-24 h-24 rounded-lg bg-white p-1 shadow-md flex-shrink-0" />
-                  ) : (
-                    <div className="w-24 h-24 rounded-lg bg-zinc-800 flex items-center justify-center text-xs text-zinc-400">QR Code</div>
-                  )}
-                  <div className="flex-1 text-center sm:text-left">
-                    <h4 className="text-xs font-bold text-white mb-1">Flashez ce QR Code avec votre téléphone</h4>
-                    <p className="text-[11px] text-slate-400 mb-2">
-                      Il transmet automatiquement les paramètres cloud : votre téléphone passera directement en direct 🟢 sans aucune manipulation !
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => window.print()}
-                      className="text-[11px] text-amber-400 hover:text-amber-300 underline font-semibold"
-                    >
-                      🖨 Imprimer l'affiche avec ce QR Code
-                    </button>
+                  <div className="relative bg-white p-2 rounded-xl shadow-lg flex-shrink-0 flex items-center justify-center min-w-[140px] min-h-[140px]">
+                    {qrCodeDataUrl ? (
+                      <img 
+                        src={qrCodeDataUrl} 
+                        alt="QR Code d'accès direct au tournoi" 
+                        className="w-32 h-32 object-contain"
+                        onError={(e) => {
+                          // Ultime secours SVG / Canvas en cas de coupure totale du web
+                          const viewerUrl = getFullShareUrl('viewer');
+                          e.target.src = `https://quickchart.io/qr?text=${encodeURIComponent(viewerUrl)}&size=200`;
+                        }}
+                      />
+                    ) : (
+                      <div className="text-zinc-500 text-xs font-semibold animate-pulse">Génération QR...</div>
+                    )}
+                  </div>
+                  <div className="flex-1 text-center sm:text-left space-y-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-300 flex items-center justify-center sm:justify-start gap-1.5">
+                        <span>📱</span> Flashez pour ouvrir sur smartphone
+                      </h4>
+                      <p className="text-[11px] text-slate-300 mt-1">
+                        Ce QR Code contient l'accès direct et <strong>la clé de connexion en direct</strong>. Votre téléphone passera immédiatement en vert 🟢 sans rien avoir à taper !
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const viewerUrl = getFullShareUrl('viewer');
+                          setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(viewerUrl)}`);
+                          showToast("QR Code Spectateur activé");
+                        }}
+                        className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-bold"
+                      >
+                        QR Public (Spectateurs)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const editorUrl = getFullShareUrl('editor');
+                          setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(editorUrl)}`);
+                          showToast("QR Code Organisateur activé");
+                        }}
+                        className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800 rounded-lg text-[11px] font-bold"
+                      >
+                        QR Admin (Organisateurs)
+                      </button>
+                    </div>
                   </div>
                 </div>
 
