@@ -20,6 +20,8 @@
 
   <!-- Lucide Icons autonomes -->
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Générateur de QR Code autonome pour affichage direct à l'écran -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@700&display=swap');
@@ -233,10 +235,27 @@
       const [cardTeamId, setCardTeamId] = useState('');
       const [cardType, setCardType] = useState('yellow');
       const [notification, setNotification] = useState(null);
+      const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
 
-      // Charger depuis stockage local au démarrage
+      // Charger depuis stockage local au démarrage & détecter la clé cloud dans l'URL
       useEffect(() => {
         try {
+          const params = new URLSearchParams(window.location.search);
+
+          // 1. Détection automatique de la configuration cloud dans le lien partagé
+          const cloudParam = params.get('cloud');
+          if (cloudParam) {
+            try {
+              const decoded = JSON.parse(decodeURIComponent(atob(cloudParam)));
+              if (decoded && decoded.apiKey && decoded.projectId) {
+                setFirebaseCustomConfig(decoded);
+                localStorage.setItem('cslv_fb_cfg', JSON.stringify(decoded));
+              }
+            } catch (err) {
+              console.warn("Impossible de décoder le paramètre cloud de l'URL", err);
+            }
+          }
+
           const savedData = localStorage.getItem('cslv_tournament_data');
           if (savedData) {
             const parsed = JSON.parse(savedData);
@@ -247,9 +266,8 @@
             if (parsed.customLogoUrl) setCustomLogoUrl(parsed.customLogoUrl);
           }
           const savedFb = localStorage.getItem('cslv_fb_cfg');
-          if (savedFb) setFirebaseCustomConfig(JSON.parse(savedFb));
+          if (savedFb && !cloudParam) setFirebaseCustomConfig(JSON.parse(savedFb));
 
-          const params = new URLSearchParams(window.location.search);
           if (params.get('role') === 'viewer') {
             setUserRole('viewer');
             setActiveTab('matches');
@@ -681,13 +699,35 @@
       };
 
       const copyShareLink = (role) => {
-        const url = `${window.location.origin}${window.location.pathname}?role=${role}`;
+        const url = getFullShareUrl(role);
         navigator.clipboard?.writeText(url).then(() => {
           setCopiedLinkType(role);
           showToast(`Lien ${role === 'viewer' ? 'Public' : 'Organisateur'} copié !`);
           setTimeout(() => setCopiedLinkType(null), 2000);
         });
       };
+
+      // Construit un lien qui embarque la clé cloud pour que les téléphones se connectent sans rien configurer
+      const getFullShareUrl = (role) => {
+        const base = `${window.location.origin}${window.location.pathname}?role=${role}`;
+        if (!firebaseCustomConfig) return base;
+        try {
+          const cloudString = btoa(encodeURIComponent(JSON.stringify(firebaseCustomConfig)));
+          return `${base}&cloud=${cloudString}`;
+        } catch {
+          return base;
+        }
+      };
+
+      // Générer le QR Code lorsque la modale de partage est ouverte
+      useEffect(() => {
+        if (isShareModalOpen && window.QRCode) {
+          const viewerUrl = getFullShareUrl('viewer');
+          window.QRCode.toDataURL(viewerUrl, { width: 200, margin: 1, color: { dark: '#000000', light: '#ffffff' } }, (err, url) => {
+            if (!err && url) setQrCodeDataUrl(url);
+          });
+        }
+      }, [isShareModalOpen, firebaseCustomConfig]);
 
       const stats = useMemo(() => {
         const scorers = {};
@@ -1664,12 +1704,19 @@
                 </div>
 
                 <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
-                  <span className="text-xs font-bold text-amber-400 block">Lien Public (Spectateurs / Joueurs)</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-amber-400 block">Lien Public (Spectateurs / Joueurs)</span>
+                    {firebaseCustomConfig && (
+                      <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                        ⚡ Synchro Live Incluse
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       readOnly
-                      value={`${window.location.origin}${window.location.pathname}?role=viewer`}
+                      value={getFullShareUrl('viewer')}
                       className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
                     />
                     <button
@@ -1682,12 +1729,19 @@
                 </div>
 
                 <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950 space-y-1">
-                  <span className="text-xs font-bold text-red-400 block">Lien Privé (Organisateurs / Saisie)</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-red-400 block">Lien Privé (Organisateurs / Saisie)</span>
+                    {firebaseCustomConfig && (
+                      <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                        ⚡ Synchro Live Incluse
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       readOnly
-                      value={`${window.location.origin}${window.location.pathname}?role=editor`}
+                      value={getFullShareUrl('editor')}
                       className="flex-1 bg-[#18080a] border border-red-950 text-xs text-slate-300 p-2 rounded-lg font-mono truncate"
                     />
                     <button
@@ -1695,6 +1749,28 @@
                       className="px-3 py-1 bg-[#25090d] text-amber-300 border border-amber-500/30 font-bold rounded-lg text-xs"
                     >
                       {copiedLinkType === 'editor' ? 'Copié !' : 'Copier'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* QR CODE DYNAMIQUE POUR SMARTPHONE */}
+                <div className="p-4 bg-[#0b0304] rounded-xl border border-red-950 flex flex-col sm:flex-row items-center gap-4">
+                  {qrCodeDataUrl ? (
+                    <img src={qrCodeDataUrl} alt="QR Code du Tournoi" className="w-24 h-24 rounded-lg bg-white p-1 shadow-md flex-shrink-0" />
+                  ) : (
+                    <div className="w-24 h-24 rounded-lg bg-zinc-800 flex items-center justify-center text-xs text-zinc-400">QR Code</div>
+                  )}
+                  <div className="flex-1 text-center sm:text-left">
+                    <h4 className="text-xs font-bold text-white mb-1">Flashez ce QR Code avec votre téléphone</h4>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      Il transmet automatiquement les paramètres cloud : votre téléphone passera directement en direct 🟢 sans aucune manipulation !
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 underline font-semibold"
+                    >
+                      🖨 Imprimer l'affiche avec ce QR Code
                     </button>
                   </div>
                 </div>
