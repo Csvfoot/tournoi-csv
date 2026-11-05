@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournoi CS La Verpillière - 1939</title>
+  
+  <!-- Tailwind CSS pour le style moderne Sang et Or -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React, ReactDOM et Babel pour exécuter l'application directement dans le navigateur -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lucide Icons autonomes -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0e0708;
+      color: #f1f5f9;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Masquer la scrollbar tout en permettant le défilement */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    @media print {
+      header, .no-print {
+        display: none !important;
+      }
+      body {
+        background: white !important;
+        color: black !important;
+      }
+    }
+  </style>
+</head>
+<body class="selection:bg-amber-500 selection:text-slate-950">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    const TEAM_COLORS = [
+      '#DC2626', '#EAB308', '#991B1B', '#F59E0B', 
+      '#B91C1C', '#FBBF24', '#7F1D1D', '#3B82F6'
+    ];
+
+    const DEFAULT_FIELDS = [
+      { id: 'f1', name: 'Terrain Honneur (Pelouse)' },
+      { id: 'f2', name: 'Terrain Annexe (Synthétique)' }
+    ];
+
+    const DEMO_TEAMS = [
+      { id: 't1', name: 'CS La Verpillière (1)', color: '#DC2626', players: ['Enzo R.', 'Lucas M.', 'Alexandre G.', 'Sofiane B.'] },
+      { id: 't2', name: 'CS La Verpillière (2)', color: '#EAB308', players: ['Hugo L.', 'Kylian V.', 'Antoine P.', 'Marc T.'] },
+      { id: 't3', name: 'Olympique Nord Isère', color: '#B91C1C', players: ['Romain F.', 'Youssef H.', 'Clément M.', 'Maxime B.'] },
+      { id: 't4', name: 'FC Vallée du Guiers', color: '#F59E0B', players: ['Karim Z.', 'Benoît R.', 'David S.', 'Thomas N.'] },
+      { id: 't5', name: 'AS Saint-Quentin', color: '#991B1B', players: ['Gabriel K.', 'Paul E.', 'Julien D.', 'Florian C.'] },
+      { id: 't6', name: 'Bourgoin Jallieu FC', color: '#FBBF24', players: ['Adrien B.', 'Loïc V.', 'Quentin R.', 'Samir A.'] },
+      { id: 't7', name: 'FC L\'Isle d\'Abeau', color: '#7F1D1D', players: ['Nicolas M.', 'Mathieu J.', 'Sébastien L.', 'Dylan P.'] },
+      { id: 't8', name: 'US Villefontaine', color: '#3B82F6', players: ['Valentin B.', 'Théo C.', 'Arthur G.', 'Pierre F.'] }
+    ];
+
+    // Blason Officiel CS La Verpillière
+    function ClubLogo({ className = "w-11 h-11", customLogo = null }) {
+      if (customLogo) {
+        return (
+          <img 
+            src={customLogo} 
+            alt="Logo CS La Verpillière" 
+            className={`${className} object-contain rounded-full shadow-md border-2 border-amber-400`}
+          />
+        );
+      }
+
+      return (
+        <svg 
+          viewBox="0 0 200 200" 
+          className={`${className} flex-shrink-0 drop-shadow-[0_4px_8px_rgba(234,179,8,0.35)]`}
+        >
+          <defs>
+            <linearGradient id="goldRing" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FDE047" />
+              <stop offset="35%" stopColor="#EAB308" />
+              <stop offset="70%" stopColor="#CA8A04" />
+              <stop offset="100%" stopColor="#FEF08A" />
+            </linearGradient>
+            <radialGradient id="redBadge" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#991B1B" />
+              <stop offset="60%" stopColor="#7F1D1D" />
+              <stop offset="100%" stopColor="#450A0A" />
+            </radialGradient>
+            <linearGradient id="shieldRed" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#B91C1C" />
+              <stop offset="100%" stopColor="#5B0E0E" />
+            </linearGradient>
+            <clipPath id="shieldClip">
+              <path d="M 50 48 L 150 48 C 150 48 152 105 150 115 C 147 135 100 162 100 162 C 100 162 53 135 50 115 Z" />
+            </clipPath>
+            <path id="textCircleTop" d="M 32,100 A 68,68 0 1,1 168,100" />
+            <path id="textCircleBottom" d="M 168,100 A 68,68 0 0,1 32,100" />
+          </defs>
+
+          <circle cx="100" cy="100" r="96" fill="url(#goldRing)" />
+          <circle cx="100" cy="100" r="92" fill="#450A0A" />
+          <circle cx="100" cy="100" r="88" fill="url(#redBadge)" stroke="url(#goldRing)" strokeWidth="2.5" />
+          <circle cx="100" cy="100" r="68" fill="none" stroke="url(#goldRing)" strokeWidth="2" />
+
+          <text fill="#FFFFFF" fontSize="13" fontWeight="900" letterSpacing="2.5" fontFamily="sans-serif">
+            <textPath href="#textCircleTop" startOffset="50%" textAnchor="middle">
+              CLUB SPORTIF
+            </textPath>
+          </text>
+
+          <text fill="#FFFFFF" fontSize="11.5" fontWeight="900" letterSpacing="2.5" fontFamily="sans-serif">
+            <textPath href="#textCircleBottom" startOffset="50%" textAnchor="middle">
+              LA VERPILLIÈRE
+            </textPath>
+          </text>
+
+          <text x="28" y="96" fill="#FDE047" fontSize="11" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">19</text>
+          <circle cx="28" cy="110" r="6.5" fill="#B91C1C" stroke="url(#goldRing)" strokeWidth="1.5" />
+          <path d="M 24 110 Q 28 106 32 110 M 28 104 L 28 116" stroke="url(#goldRing)" strokeWidth="1" />
+
+          <text x="172" y="96" fill="#FDE047" fontSize="11" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">39</text>
+          <circle cx="172" cy="110" r="6.5" fill="#B91C1C" stroke="url(#goldRing)" strokeWidth="1.5" />
+          <path d="M 168 110 Q 172 106 176 110 M 172 104 L 172 116" stroke="url(#goldRing)" strokeWidth="1" />
+
+          <g>
+            <path d="M 50 48 L 150 48 C 150 48 152 105 150 115 C 147 135 100 162 100 162 C 100 162 53 135 50 115 Z" fill="url(#shieldRed)" stroke="url(#goldRing)" strokeWidth="3" />
+            
+            <g clipPath="url(#shieldClip)">
+              <path d="M 45 106 L 155 106 L 155 170 L 45 170 Z" fill="#991B1B" />
+              <path d="M 40 112 L 65 170 L 80 170 L 55 112 Z" fill="#EAB308" opacity="0.95" />
+              <path d="M 68 110 L 98 170 L 113 170 L 83 110 Z" fill="#EAB308" opacity="0.95" />
+              <path d="M 98 108 L 132 170 L 147 170 L 113 108 Z" fill="#EAB308" opacity="0.95" />
+              <path d="M 128 106 L 158 155 L 165 145 L 143 106 Z" fill="#EAB308" opacity="0.95" />
+              <line x1="50" y1="106" x2="150" y2="106" stroke="url(#goldRing)" strokeWidth="2.5" />
+            </g>
+
+            {/* Dauphin */}
+            <path 
+              d="M 120 48 C 145 54 148 76 135 94 C 122 108 98 100 95 91 C 112 95 125 84 121 72 C 117 61 98 62 82 72 C 78 75 72 75 75 72 C 86 58 102 46 120 48 Z" 
+              fill="url(#goldRing)" 
+              stroke="#78350F" 
+              strokeWidth="0.8" 
+            />
+            <path d="M 92 88 C 86 98 100 102 110 99 C 102 96 98 92 92 88 Z" fill="url(#goldRing)" />
+            <path d="M 93 91 L 88 105 L 102 101 L 108 105 Z" fill="url(#goldRing)" stroke="#78350F" strokeWidth="0.6" />
+            
+            {/* Ballon */}
+            <circle cx="72" cy="71" r="9" fill="#FEF08A" stroke="#78350F" strokeWidth="1" />
+            <circle cx="72" cy="71" r="4" fill="#991B1B" />
+            <path d="M 72 62 L 72 67 M 72 75 L 72 80 M 63 71 L 68 71 M 76 71 L 81 71" stroke="#991B1B" strokeWidth="0.8" />
+
+            {/* Renard */}
+            <g transform="translate(68, 107) scale(0.68)">
+              <path 
+                d="M 6 42 Q 18 36 28 32 Q 40 20 48 10 Q 52 14 54 18 Q 62 14 66 18 Q 58 24 54 30 Q 56 36 68 44 Q 60 48 48 44 Q 38 46 32 54 L 22 56 Q 26 48 20 46 Z" 
+                fill="url(#goldRing)" 
+                stroke="#78350F" 
+                strokeWidth="1.2" 
+              />
+              <path 
+                d="M 6 42 Q -12 36 -18 20 Q -4 28 4 32 Q -8 18 2 12 Q 2 24 10 32 Z" 
+                fill="url(#goldRing)" 
+                stroke="#78350F" 
+                strokeWidth="1" 
+              />
+              <path d="M -12 20 Q -4 28 2 26 Z" fill="#991B1B" />
+            </g>
+          </g>
+        </svg>
+      );
+    }
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('config');
+      const [userRole, setUserRole] = useState('editor');
+      const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+      const [copiedLinkType, setCopiedLinkType] = useState(null);
+      const [customLogoUrl, setCustomLogoUrl] = useState(null);
+
+      const [config, setConfig] = useState({
+        name: 'Tournoi du CS La Verpillière',
+        format: 'groups_knockout',
+        duration: 20,
+        breakDuration: 10,
+        startTime: '09:00',
+        hasLunchBreak: true,
+        lunchStart: '12:30',
+        lunchEnd: '13:30',
+        pointsWin: 3,
+        pointsDraw: 1,
+        pointsLoss: 0,
+        qualifiersPerGroup: 2
+      });
+
+      const [fields, setFields] = useState(DEFAULT_FIELDS);
+      const [newFieldName, setNewFieldName] = useState('');
+      const [scheduleViewMode, setScheduleViewMode] = useState('chrono');
+      const [teams, setTeams] = useState(DEMO_TEAMS);
+      const [newTeamName, setNewTeamName] = useState('');
+      const [selectedColor, setSelectedColor] = useState(TEAM_COLORS[0]);
+      const [matches, setMatches] = useState([]);
+      const [editingMatch, setEditingMatch] = useState(null);
+      const [goalScorerName, setGoalScorerName] = useState('');
+      const [goalTeamId, setGoalTeamId] = useState('');
+      const [cardPlayerName, setCardPlayerName] = useState('');
+      const [cardTeamId, setCardTeamId] = useState('');
+      const [cardType, setCardType] = useState('yellow');
+      const [notification, setNotification] = useState(null);
+
+      // Charger depuis localStorage au démarrage si disponible
+      useEffect(() => {
+        try {
+          const savedData = localStorage.getItem('cslv_tournament_data');
+          if (savedData) {
+            const parsed = JSON.parse(savedData);
+            if (parsed.config) setConfig(parsed.config);
+            if (parsed.fields) setFields(parsed.fields);
+            if (parsed.teams) setTeams(parsed.teams);
+            if (parsed.matches) setMatches(parsed.matches);
+            if (parsed.customLogoUrl) setCustomLogoUrl(parsed.customLogoUrl);
+          }
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('role') === 'viewer') {
+            setUserRole('viewer');
+            setActiveTab('matches');
+          }
+        } catch(e) {}
+      }, []);
+
+      // Sauvegarde automatique dans le navigateur
+      useEffect(() => {
+        try {
+          const toSave = { config, fields, teams, matches, customLogoUrl };
+          localStorage.setItem('cslv_tournament_data', JSON.stringify(toSave));
+        } catch(e) {}
+      }, [config, fields, teams, matches, customLogoUrl]);
+
+      const showToast = (message, type = 'success') => {
+        setNotification({ message, type });
+        setTimeout(() => setNotification(null), 3000);
+      };
+
+      const timeToMinutes = (timeStr) => {
+        if (!timeStr) return 0;
+        const [h, m] = timeStr.split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+
+      const minutesToTime = (totalMinutes) => {
+        const mins = Math.max(0, Math.floor(totalMinutes));
+        const h = Math.floor(mins / 60) % 24;
+        const m = mins % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      };
+
+      const generateSchedule = () => {
+        if (teams.length < 2) {
+          showToast('Il faut au moins 2 équipes !', 'error');
+          return;
+        }
+        if (fields.length === 0) {
+          showToast('Ajoutez au moins 1 terrain !', 'error');
+          return;
+        }
+
+        let rawMatches = [];
+
+        if (config.format === 'round_robin') {
+          rawMatches = generateRoundRobin(teams, 'Poule Unique');
+        } else if (config.format === 'groups_knockout') {
+          if (teams.length < 4) {
+            showToast('Au moins 4 équipes nécessaires', 'error');
+            return;
+          }
+          const half = Math.ceil(teams.length / 2);
+          const groupA = teams.slice(0, half);
+          const groupB = teams.slice(half);
+
+          const matchesA = generateRoundRobin(groupA, 'Poule A');
+          const matchesB = generateRoundRobin(groupB, 'Poule B');
+
+          const interleaved = [];
+          const maxLen = Math.max(matchesA.length, matchesB.length);
+          for (let i = 0; i < maxLen; i++) {
+            if (matchesA[i]) interleaved.push(matchesA[i]);
+            if (matchesB[i]) interleaved.push(matchesB[i]);
+          }
+
+          const semi1 = {
+            id: 'ko-semi-1', stage: 'Demi-Finale 1', group: 'Phase Finale',
+            team1Id: null, team2Id: null, placeholder1: '1er Poule A', placeholder2: '2ème Poule B',
+            score1: null, score2: null, pens1: null, pens2: null, status: 'pending', round: 99, events: []
+          };
+          const semi2 = {
+            id: 'ko-semi-2', stage: 'Demi-Finale 2', group: 'Phase Finale',
+            team1Id: null, team2Id: null, placeholder1: '1er Poule B', placeholder2: '2ème Poule A',
+            score1: null, score2: null, pens1: null, pens2: null, status: 'pending', round: 99, events: []
+          };
+          const finalMatch = {
+            id: 'ko-final', stage: 'Grande Finale', group: 'Phase Finale',
+            team1Id: null, team2Id: null, placeholder1: 'Vainqueur Demi 1', placeholder2: 'Vainqueur Demi 2',
+            score1: null, score2: null, pens1: null, pens2: null, status: 'pending', round: 100, events: []
+          };
+
+          rawMatches = [...interleaved, semi1, semi2, finalMatch];
+        }
+
+        const scheduled = scheduleMatchesAcrossFields(rawMatches);
+        setMatches(scheduled);
+        showToast(`Planning généré : ${scheduled.length} matchs sur ${fields.length} terrain(s) !`);
+        setActiveTab('matches');
+      };
+
+      const scheduleMatchesAcrossFields = (matchList) => {
+        const matchDur = parseInt(config.duration, 10) || 20;
+        const breakDur = parseInt(config.breakDuration, 10) || 10;
+        const tourneyStartMin = timeToMinutes(config.startTime || '09:00');
+        const lunchStartMin = config.hasLunchBreak ? timeToMinutes(config.lunchStart || '12:30') : -1;
+        const lunchEndMin = config.hasLunchBreak ? timeToMinutes(config.lunchEnd || '13:30') : -1;
+
+        const fieldAvailability = fields.map(f => ({
+          fieldId: f.id,
+          fieldName: f.name,
+          nextAvailableMin: tourneyStartMin
+        }));
+
+        return matchList.map(match => {
+          fieldAvailability.sort((a, b) => a.nextAvailableMin - b.nextAvailableMin);
+          const chosenField = fieldAvailability[0];
+
+          let startMin = chosenField.nextAvailableMin;
+          if (config.hasLunchBreak && startMin < lunchEndMin && (startMin + matchDur) > lunchStartMin) {
+            startMin = Math.max(startMin, lunchEndMin);
+          }
+
+          const endMin = startMin + matchDur;
+          chosenField.nextAvailableMin = endMin + breakDur;
+
+          return {
+            ...match,
+            fieldId: chosenField.fieldId,
+            fieldName: chosenField.fieldName,
+            startTime: minutesToTime(startMin),
+            endTime: minutesToTime(endMin)
+          };
+        });
+      };
+
+      const generateRoundRobin = (teamList, groupName) => {
+        let t = [...teamList];
+        if (t.length % 2 !== 0) t.push({ id: 'bye', name: 'Exempt', isBye: true });
+        const n = t.length;
+        const rounds = n - 1;
+        const matchesPerRound = n / 2;
+        const generated = [];
+
+        for (let round = 0; round < rounds; round++) {
+          for (let match = 0; match < matchesPerRound; match++) {
+            const home = (round + match) % (n - 1);
+            let away = (n - 1 - match + round) % (n - 1);
+            if (match === 0) away = n - 1;
+
+            const homeTeam = t[home];
+            const awayTeam = t[away];
+
+            if (!homeTeam.isBye && !awayTeam.isBye) {
+              generated.push({
+                id: `m-${groupName}-${round + 1}-${homeTeam.id}-${awayTeam.id}`,
+                group: groupName,
+                stage: `Journée ${round + 1}`,
+                team1Id: homeTeam.id,
+                team2Id: awayTeam.id,
+                score1: null,
+                score2: null,
+                status: 'pending',
+                events: [],
+                round: round + 1
+              });
+            }
+          }
+        }
+        return generated;
+      };
+
+      const calculateStandings = (groupFilter = null) => {
+        const table = {};
+        teams.forEach(t => {
+          table[t.id] = { team: t, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0, form: [] };
+        });
+
+        matches.forEach(m => {
+          if (m.status === 'finished' && m.team1Id && m.team2Id) {
+            if (groupFilter && m.group !== groupFilter) return;
+
+            const s1 = Number(m.score1 ?? 0);
+            const s2 = Number(m.score2 ?? 0);
+            const t1 = table[m.team1Id];
+            const t2 = table[m.team2Id];
+
+            if (t1 && t2) {
+              t1.played += 1; t2.played += 1;
+              t1.gf += s1; t1.ga += s2;
+              t2.gf += s2; t2.ga += s1;
+
+              if (s1 > s2) {
+                t1.won += 1; t1.points += config.pointsWin; t1.form.push('W');
+                t2.lost += 1; t2.points += config.pointsLoss; t2.form.push('L');
+              } else if (s1 < s2) {
+                t2.won += 1; t2.points += config.pointsWin; t2.form.push('W');
+                t1.lost += 1; t1.points += config.pointsLoss; t1.form.push('L');
+              } else {
+                t1.drawn += 1; t2.drawn += 1;
+                t1.points += config.pointsDraw; t2.points += config.pointsDraw;
+                t1.form.push('D'); t2.form.push('D');
+              }
+              t1.gd = t1.gf - t1.ga;
+              t2.gd = t2.gf - t2.ga;
+            }
+          }
+        });
+
+        const result = Object.values(table);
+        const activeInGroup = groupFilter 
+          ? result.filter(row => matches.some(m => m.group === groupFilter && (m.team1Id === row.team.id || m.team2Id === row.team.id)))
+          : result;
+
+        return activeInGroup.sort((a, b) => b.points !== a.points ? b.points - a.points : b.gd !== a.gd ? b.gd - a.gd : b.gf - a.gf);
+      };
+
+      const updateKnockoutProgression = (updatedMatches) => {
+        let newM = [...updatedMatches];
+        if (config.format === 'groups_knockout') {
+          const standingsA = calculateStandings('Poule A');
+          const standingsB = calculateStandings('Poule B');
+          const allFinishedA = newM.filter(m => m.group === 'Poule A').every(m => m.status === 'finished');
+          const allFinishedB = newM.filter(m => m.group === 'Poule B').every(m => m.status === 'finished');
+
+          if (allFinishedA && standingsA.length >= 2) {
+            newM = newM.map(m => {
+              if (m.id === 'ko-semi-1') return { ...m, team1Id: standingsA[0].team.id };
+              if (m.id === 'ko-semi-2') return { ...m, team2Id: standingsA[1].team.id };
+              return m;
+            });
+          }
+          if (allFinishedB && standingsB.length >= 2) {
+            newM = newM.map(m => {
+              if (m.id === 'ko-semi-2') return { ...m, team1Id: standingsB[0].team.id };
+              if (m.id === 'ko-semi-1') return { ...m, team2Id: standingsB[1].team.id };
+              return m;
+            });
+          }
+
+          const semi1 = newM.find(m => m.id === 'ko-semi-1');
+          const semi2 = newM.find(m => m.id === 'ko-semi-2');
+          const getWinner = (m) => {
+            if (!m || m.status !== 'finished') return null;
+            if (m.score1 > m.score2) return m.team1Id;
+            if (m.score2 > m.score1) return m.team2Id;
+            if ((m.pens1 || 0) > (m.pens2 || 0)) return m.team1Id;
+            return m.team2Id;
+          };
+          const w1 = getWinner(semi1);
+          const w2 = getWinner(semi2);
+
+          newM = newM.map(m => {
+            if (m.id === 'ko-final') return { ...m, team1Id: w1 || m.team1Id, team2Id: w2 || m.team2Id };
+            return m;
+          });
+        }
+        return newM;
+      };
+
+      const getTeam = (id) => teams.find(t => t.id === id) || { name: 'Équipe inconnue', color: '#64748B' };
+
+      const exportTournamentJSON = () => {
+        const data = { config, fields, teams, matches, customLogoUrl };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Tournoi_CS_La_Verpilliere.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Fichier du tournoi exporté !');
+      };
+
+      const importTournamentJSON = (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const imported = JSON.parse(e.target.result);
+            if (imported.config) setConfig(imported.config);
+            if (imported.fields) setFields(imported.fields);
+            if (imported.teams) setTeams(imported.teams);
+            if (imported.matches) setMatches(imported.matches);
+            if (imported.customLogoUrl) setCustomLogoUrl(imported.customLogoUrl);
+            showToast('Tournoi restauré avec succès !');
+          } catch {
+            showToast('Fichier JSON invalide', 'error');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const copyShareLink = (role) => {
+        const url = `${window.location.origin}${window.location.pathname}?role=${role}`;
+        navigator.clipboard?.writeText(url).then(() => {
+          setCopiedLinkType(role);
+          showToast(`Lien ${role === 'viewer' ? 'Public' : 'Organisateur'} copié !`);
+          setTimeout(() => setCopiedLinkType(null), 2000);
+        });
+      };
+
+      const stats = useMemo(() => {
+        const scorers = {};
+        const fairplay = {};
+        let totalGoals = 0;
+        let totalCards = 0;
+
+        teams.forEach(t => {
+          fairplay[t.id] = { team: t, yellow: 0, red: 0, points: 0 };
+        });
+
+        matches.forEach(m => {
+          if (m.events) {
+            m.events.forEach(e => {
+              if (e.type === 'goal') {
+                totalGoals++;
+                const key = `${e.player}__${e.teamId}`;
+                if (!scorers[key]) scorers[key] = { player: e.player, teamId: e.teamId, count: 0 };
+                scorers[key].count++;
+              }
+              if (e.type === 'yellow' || e.type === 'red') {
+                totalCards++;
+                if (fairplay[e.teamId]) {
+                  if (e.type === 'yellow') { fairplay[e.teamId].yellow++; fairplay[e.teamId].points += 1; }
+                  else { fairplay[e.teamId].red++; fairplay[e.teamId].points += 3; }
+                }
+              }
+            });
+          }
+        });
+
+        return {
+          topScorers: Object.values(scorers).sort((a, b) => b.count - a.count).slice(0, 5),
+          fairPlayRank: Object.values(fairplay).sort((a, b) => a.points - b.points),
+          totalGoals,
+          totalCards,
+          completedMatches: matches.filter(m => m.status === 'finished').length,
+          totalMatches: matches.length
+        };
+      }, [matches, teams]);
+
+      return (
+        <div className="min-h-screen bg-[#0e0708] text-slate-100 flex flex-col font-sans">
+          {notification && (
+            <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border text-sm animate-bounce ${
+              notification.type === 'error' ? 'bg-rose-950 border-rose-600 text-rose-200' : 'bg-red-950 border-amber-500 text-amber-200'
+            }`}>
+              <span>{notification.message}</span>
+            </div>
+          )}
+
+          {/* En-tête officiel Sang et Or */}
+          <header className="border-b border-red-950 bg-gradient-to-r from-[#200507] via-[#170507] to-[#1a0709] sticky top-0 z-40 shadow-xl">
+            <div className="max-w-7xl mx-auto px-4 h-18 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <ClubLogo className="w-12 h-12" customLogo={customLogoUrl} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="font-black text-lg text-white">{config.name}</h1>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                      userRole === 'editor' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-red-500/20 text-red-300'
+                    }`}>
+                      {userRole === 'editor' ? 'Organisateur' : 'Spectateur'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-semibold text-amber-400">CS La Verpillière &bull; Sang et Or 1939</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const next = userRole === 'editor' ? 'viewer' : 'editor';
+                    setUserRole(next);
+                    if (next === 'viewer') setActiveTab('matches');
+                  }}
+                  className="px-3 py-1.5 rounded-lg border text-xs font-semibold border-amber-600/40 bg-amber-950/40 text-amber-300 hover:bg-amber-900/50 transition"
+                >
+                  {userRole === 'editor' ? '👁 Mode Public' : '🔒 Mode Organisateur'}
+                </button>
+
+                <button
+                  onClick={() => setIsShareModalOpen(true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs transition shadow-lg"
+                >
+                  Partager
+                </button>
+              </div>
+            </div>
+
+            {/* Onglets */}
+            <div className="max-w-7xl mx-auto px-4 flex space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/20">
+              {userRole === 'editor' && (
+                <button
+                  onClick={() => setActiveTab('config')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                    activeTab === 'config' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  ⚙ Configuration & Terrains
+                </button>
+              )}
+              <button
+                onClick={() => setActiveTab('teams')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'teams' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                👥 Équipes ({teams.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('matches')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'matches' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                📅 Matchs ({matches.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('standings')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'standings' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                📊 Classement
+              </button>
+              {config.format !== 'round_robin' && (
+                <button
+                  onClick={() => setActiveTab('bracket')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                    activeTab === 'bracket' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  🏆 Phase Finale
+                </button>
+              )}
+              <button
+                onClick={() => setActiveTab('stats')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'stats' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                🔥 Buteurs & Fair-play
+              </button>
+            </div>
+          </header>
+
+          <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
+            {/* CONFIGURATION */}
+            {activeTab === 'config' && userRole === 'editor' && (
+              <div className="space-y-6">
+                <div className="bg-[#150709] border border-red-950 rounded-2xl p-6 shadow-xl">
+                  <h2 className="text-lg font-bold text-white mb-4">Paramètres du Tournoi</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Nom du Tournoi</label>
+                      <input
+                        type="text"
+                        value={config.name}
+                        onChange={(e) => setConfig({ ...config, name: e.target.value })}
+                        className="w-full bg-[#0a0304] border border-red-900/60 rounded-xl px-4 py-2.5 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Format</label>
+                      <select
+                        value={config.format}
+                        onChange={(e) => setConfig({ ...config, format: e.target.value })}
+                        className="w-full bg-[#0a0304] border border-red-900/60 rounded-xl px-4 py-2.5 text-white"
+                      >
+                        <option value="groups_knockout">Poules (A & B) + Phase Finale</option>
+                        <option value="round_robin">Championnat direct (Poule unique)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* HORAIRES & PAUSES */}
+                  <h3 className="text-base font-bold text-white mb-3 pt-4 border-t border-red-950">Horaires & Pauses</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950">
+                      <label className="block text-xs text-slate-400 mb-1">Coup d'envoi</label>
+                      <input
+                        type="time"
+                        value={config.startTime}
+                        onChange={(e) => setConfig({ ...config, startTime: e.target.value })}
+                        className="w-full bg-[#18080a] border border-red-900/60 rounded-lg p-2 text-white font-mono"
+                      />
+                    </div>
+                    <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950">
+                      <label className="block text-xs text-slate-400 mb-1">Durée du match (min)</label>
+                      <input
+                        type="number"
+                        value={config.duration}
+                        onChange={(e) => setConfig({ ...config, duration: parseInt(e.target.value) || 20 })}
+                        className="w-full bg-[#18080a] border border-red-900/60 rounded-lg p-2 text-white font-mono"
+                      />
+                    </div>
+                    <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950">
+                      <label className="block text-xs text-slate-400 mb-1">Pause entre matchs (min)</label>
+                      <input
+                        type="number"
+                        value={config.breakDuration}
+                        onChange={(e) => setConfig({ ...config, breakDuration: parseInt(e.target.value) || 10 })}
+                        className="w-full bg-[#18080a] border border-red-900/60 rounded-lg p-2 text-white font-mono"
+                      />
+                    </div>
+                    <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950">
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs text-slate-400">Pause Déjeuner</label>
+                        <input
+                          type="checkbox"
+                          checked={config.hasLunchBreak}
+                          onChange={(e) => setConfig({ ...config, hasLunchBreak: e.target.checked })}
+                          className="accent-amber-500"
+                        />
+                      </div>
+                      {config.hasLunchBreak && (
+                        <div className="flex gap-2">
+                          <input
+                            type="time"
+                            value={config.lunchStart}
+                            onChange={(e) => setConfig({ ...config, lunchStart: e.target.value })}
+                            className="w-1/2 bg-[#18080a] border border-red-900/60 rounded-lg p-1.5 text-xs text-white font-mono"
+                          />
+                          <input
+                            type="time"
+                            value={config.lunchEnd}
+                            onChange={(e) => setConfig({ ...config, lunchEnd: e.target.value })}
+                            className="w-1/2 bg-[#18080a] border border-red-900/60 rounded-lg p-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* TERRAINS */}
+                  <h3 className="text-base font-bold text-white mb-3 pt-4 border-t border-red-950">Terrains de Jeu</h3>
+                  <div className="flex gap-2 mb-4">
+                    <input
+                      type="text"
+                      placeholder="Nom du terrain (ex: Terrain Honneur...)"
+                      value={newFieldName}
+                      onChange={(e) => setNewFieldName(e.target.value)}
+                      className="flex-1 bg-[#0b0304] border border-red-900/60 rounded-xl px-4 py-2 text-white text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newFieldName.trim()) return;
+                        setFields([...fields, { id: `field-${Date.now()}`, name: newFieldName.trim() }]);
+                        setNewFieldName('');
+                      }}
+                      className="px-4 py-2 bg-red-900 hover:bg-red-800 text-amber-300 font-semibold rounded-xl text-sm border border-amber-500/30"
+                    >
+                      + Ajouter
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                    {fields.map(f => (
+                      <div key={f.id} className="bg-[#0b0304] border border-red-950 rounded-xl p-3 flex justify-between items-center">
+                        <span className="text-sm font-semibold text-white">{f.name}</span>
+                        {fields.length > 1 && (
+                          <button
+                            onClick={() => setFields(fields.filter(x => x.id !== f.id))}
+                            className="text-slate-500 hover:text-rose-400 text-xs"
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={generateSchedule}
+                    className="w-full py-3 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-slate-950 font-black rounded-xl text-base shadow-lg"
+                  >
+                    ⚡ Générer & Planifier le Tournoi
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ÉQUIPES */}
+            {activeTab === 'teams' && (
+              <div className="space-y-6">
+                {userRole === 'editor' && (
+                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-5">
+                    <h2 className="text-base font-bold text-white mb-3">Inscrire une équipe</h2>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <input
+                        type="text"
+                        placeholder="Nom du club ou équipe"
+                        value={newTeamName}
+                        onChange={(e) => setNewTeamName(e.target.value)}
+                        className="flex-1 bg-[#0b0304] border border-red-900/60 rounded-xl px-4 py-2 text-white"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!newTeamName.trim()) return;
+                          setTeams([...teams, { id: `team-${Date.now()}`, name: newTeamName.trim(), color: selectedColor, players: [] }]);
+                          setNewTeamName('');
+                        }}
+                        className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-sm"
+                      >
+                        Ajouter
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {teams.map(team => (
+                    <div key={team.id} className="bg-[#150709] border border-red-950 rounded-xl p-4 flex flex-col justify-between">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs" style={{ backgroundColor: team.color }}>
+                            {team.name.substring(0, 2).toUpperCase()}
+                          </div>
+                          <span className="font-bold text-white text-sm">{team.name}</span>
+                        </div>
+                        {userRole === 'editor' && (
+                          <button onClick={() => setTeams(teams.filter(t => t.id !== team.id))} className="text-slate-500 hover:text-rose-400 text-xs">
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {team.players?.length || 0} joueur(s) inscrit(s)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* MATCHS */}
+            {activeTab === 'matches' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-bold text-white">Calendrier & Scores</h2>
+                  <div className="bg-[#150709] border border-red-950 rounded-lg p-1 flex">
+                    <button
+                      onClick={() => setScheduleViewMode('chrono')}
+                      className={`px-3 py-1 rounded text-xs font-semibold ${scheduleViewMode === 'chrono' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400'}`}
+                    >
+                      Chrono
+                    </button>
+                    <button
+                      onClick={() => setScheduleViewMode('fields')}
+                      className={`px-3 py-1 rounded text-xs font-semibold ${scheduleViewMode === 'fields' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400'}`}
+                    >
+                      Par Terrain
+                    </button>
+                  </div>
+                </div>
+
+                {matches.length === 0 ? (
+                  <div className="text-center py-16 bg-[#150709] rounded-2xl border border-red-950 text-slate-400 text-sm">
+                    Aucun match généré. Cliquez sur l'onglet Configuration pour planifier le tournoi.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {matches.map(m => {
+                      const t1 = getTeam(m.team1Id);
+                      const t2 = getTeam(m.team2Id);
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => {
+                            if (userRole === 'editor') {
+                              setEditingMatch(JSON.parse(JSON.stringify(m)));
+                              setGoalTeamId(m.team1Id || '');
+                            }
+                          }}
+                          className={`p-4 rounded-xl border ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/40' : ''} bg-[#150709] border-red-950`}
+                        >
+                          <div className="flex justify-between text-xs text-slate-400 mb-2">
+                            <span className="font-mono text-amber-400">{m.startTime} - {m.endTime} &bull; {m.fieldName}</span>
+                            <span className={m.status === 'finished' ? 'text-amber-300 font-bold' : 'text-slate-500'}>
+                              {m.status === 'finished' ? 'Terminé' : m.status === 'live' ? 'En direct' : 'À venir'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-center py-2">
+                            <span className="font-bold text-white text-sm">{t1.name}</span>
+                            <div className="bg-[#0b0304] px-3 py-1 rounded border border-red-950 font-mono font-bold text-white text-base">
+                              {m.score1 !== null ? `${m.score1} - ${m.score2}` : 'VS'}
+                            </div>
+                            <span className="font-bold text-white text-sm text-right">{t2.name}</span>
+                          </div>
+                          {userRole === 'editor' && (
+                            <div className="text-[10px] text-amber-400/60 text-right mt-1">Cliquer pour saisir le résultat</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* CLASSEMENT */}
+            {activeTab === 'standings' && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-bold text-white mb-2">Classement Général</h2>
+                {config.format === 'groups_knockout' ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {['Poule A', 'Poule B'].map(grp => (
+                      <div key={grp} className="bg-[#150709] border border-red-950 rounded-2xl p-4">
+                        <h3 className="font-bold text-amber-300 text-sm mb-3">{grp}</h3>
+                        <table className="w-full text-xs text-left">
+                          <thead>
+                            <tr className="text-slate-400 border-b border-red-950">
+                              <th className="py-2">Club</th>
+                              <th className="py-2 text-center text-amber-300 font-bold">PTS</th>
+                              <th className="py-2 text-center">J</th>
+                              <th className="py-2 text-center">G</th>
+                              <th className="py-2 text-center">+/-</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {calculateStandings(grp).map((row, idx) => (
+                              <tr key={row.team.id} className="border-b border-red-950/40">
+                                <td className="py-2.5 font-bold text-white">{idx + 1}. {row.team.name}</td>
+                                <td className="py-2.5 text-center font-mono font-black text-amber-300">{row.points}</td>
+                                <td className="py-2.5 text-center">{row.played}</td>
+                                <td className="py-2.5 text-center">{row.won}</td>
+                                <td className="py-2.5 text-center font-mono">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-4">
+                    <table className="w-full text-xs text-left">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-red-950">
+                          <th className="py-2">Club</th>
+                          <th className="py-2 text-center text-amber-300 font-bold">PTS</th>
+                          <th className="py-2 text-center">J</th>
+                          <th className="py-2 text-center">G</th>
+                          <th className="py-2 text-center">+/-</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {calculateStandings().map((row, idx) => (
+                          <tr key={row.team.id} className="border-b border-red-950/40">
+                            <td className="py-2.5 font-bold text-white">{idx + 1}. {row.team.name}</td>
+                            <td className="py-2.5 text-center font-mono font-black text-amber-300">{row.points}</td>
+                            <td className="py-2.5 text-center">{row.played}</td>
+                            <td className="py-2.5 text-center">{row.won}</td>
+                            <td className="py-2.5 text-center font-mono">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* PHASE FINALE */}
+            {activeTab === 'bracket' && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-bold text-white">Tableau Phase Finale</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {matches.filter(m => m.group === 'Phase Finale').map(m => {
+                    const t1 = getTeam(m.team1Id);
+                    const t2 = getTeam(m.team2Id);
+                    return (
+                      <div key={m.id} className="bg-[#150709] border border-red-950 rounded-xl p-4">
+                        <div className="text-xs text-amber-400 font-bold mb-2">{m.stage}</div>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-sm font-semibold">{t1.name}</span>
+                          <span className="font-mono font-bold">{m.score1 ?? '-'}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-sm font-semibold">{t2.name}</span>
+                          <span className="font-mono font-bold">{m.score2 ?? '-'}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* STATS */}
+            {activeTab === 'stats' && (
+              <div className="space-y-6">
+                <h2 className="text-lg font-bold text-white">Performances & Fair-Play</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-[#150709] border border-red-950 p-4 rounded-xl text-center">
+                    <span className="text-xs text-slate-400">Total Buts</span>
+                    <p className="text-2xl font-black text-amber-400 mt-1">{stats.totalGoals}</p>
+                  </div>
+                  <div className="bg-[#150709] border border-red-950 p-4 rounded-xl text-center">
+                    <span className="text-xs text-slate-400">Matchs Joués</span>
+                    <p className="text-2xl font-black text-white mt-1">{stats.completedMatches} / {stats.totalMatches}</p>
+                  </div>
+                  <div className="bg-[#150709] border border-red-950 p-4 rounded-xl text-center">
+                    <span className="text-xs text-slate-400">Cartons</span>
+                    <p className="text-2xl font-black text-amber-500 mt-1">{stats.totalCards}</p>
+                  </div>
+                  <div className="bg-[#150709] border border-red-950 p-4 rounded-xl text-center">
+                    <span className="text-xs text-slate-400">Équipes</span>
+                    <p className="text-2xl font-black text-yellow-300 mt-1">{teams.length}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* MODAL SCORE */}
+          {editingMatch && userRole === 'editor' && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#150709] border border-red-900 rounded-2xl max-w-md w-full p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-white text-base">Saisie du Score</h3>
+                  <button onClick={() => setEditingMatch(null)} className="text-slate-400">✕</button>
+                </div>
+
+                <div className="flex justify-around items-center mb-6">
+                  <div className="text-center">
+                    <span className="text-xs text-slate-400 block mb-1">{getTeam(editingMatch.team1Id).name}</span>
+                    <input
+                      type="number"
+                      value={editingMatch.score1 ?? ''}
+                      onChange={(e) => setEditingMatch({ ...editingMatch, score1: parseInt(e.target.value) || 0 })}
+                      className="w-16 h-12 bg-[#0b0304] border border-red-900 text-center font-bold text-xl text-white rounded-xl"
+                    />
+                  </div>
+                  <span className="font-bold text-amber-400">VS</span>
+                  <div className="text-center">
+                    <span className="text-xs text-slate-400 block mb-1">{getTeam(editingMatch.team2Id).name}</span>
+                    <input
+                      type="number"
+                      value={editingMatch.score2 ?? ''}
+                      onChange={(e) => setEditingMatch({ ...editingMatch, score2: parseInt(e.target.value) || 0 })}
+                      className="w-16 h-12 bg-[#0b0304] border border-red-900 text-center font-bold text-xl text-white rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <label className="text-xs text-slate-400 block mb-2">Statut du Match</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['pending', 'live', 'finished'].map(st => (
+                      <button
+                        key={st}
+                        onClick={() => setEditingMatch({ ...editingMatch, status: st })}
+                        className={`py-1.5 text-xs rounded-lg border ${editingMatch.status === st ? 'bg-amber-500 text-slate-950 font-bold' : 'border-red-950 text-slate-400'}`}
+                      >
+                        {st === 'pending' ? 'À venir' : st === 'live' ? 'En direct' : 'Terminé'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setEditingMatch(null)} className="px-4 py-2 text-xs text-slate-400">Annuler</button>
+                  <button
+                    onClick={() => {
+                      let updated = matches.map(m => m.id === editingMatch.id ? editingMatch : m);
+                      updated = updateKnockoutProgression(updated);
+                      setMatches(updated);
+                      setEditingMatch(null);
+                    }}
+                    className="px-5 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl text-xs"
+                  >
+                    Enregistrer
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL PARTAGE */}
+          {isShareModalOpen && (
+            <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#150709] border border-red-900 rounded-2xl max-w-md w-full p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-white text-base">Partager & Exporter</h3>
+                  <button onClick={() => setIsShareModalOpen(false)} className="text-slate-400">✕</button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950">
+                    <span className="text-xs font-bold text-amber-400 block mb-1">Sauvegarder le tournoi</span>
+                    <p className="text-[11px] text-slate-400 mb-2">Téléchargez un fichier de secours pour conserver toutes vos équipes et scores.</p>
+                    <div className="flex gap-2">
+                      <button onClick={exportTournamentJSON} className="flex-1 py-1.5 bg-[#25090d] text-amber-200 text-xs rounded-lg border border-red-900">
+                        Exporter (.json)
+                      </button>
+                      <label className="flex-1 py-1.5 bg-[#25090d] text-amber-200 text-xs rounded-lg border border-red-900 text-center cursor-pointer">
+                        Importer (.json)
+                        <input type="file" accept=".json" onChange={importTournamentJSON} className="hidden" />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950">
+                    <span className="text-xs font-bold text-amber-400 block mb-1">Impression & Affichage</span>
+                    <button onClick={() => window.print()} className="w-full py-1.5 bg-amber-500 text-slate-950 font-bold text-xs rounded-lg">
+                      Imprimer le planning & classements
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
