@@ -252,14 +252,28 @@
         try {
           const params = new URLSearchParams(window.location.search);
 
-          // 1. Détection automatique de la configuration cloud dans le lien partagé
+          // 1. Détection automatique et robuste de la configuration cloud dans le lien / QR code scanné
           const cloudParam = params.get('cloud');
           if (cloudParam) {
             try {
-              const decoded = JSON.parse(decodeURIComponent(atob(cloudParam)));
+              let decoded = null;
+              try {
+                decoded = JSON.parse(decodeURIComponent(escape(atob(cloudParam))));
+              } catch(e1) {
+                decoded = JSON.parse(decodeURIComponent(cloudParam));
+              }
+
               if (decoded && decoded.apiKey && decoded.projectId) {
-                setFirebaseCustomConfig(decoded);
-                localStorage.setItem('cslv_fb_cfg', JSON.stringify(decoded));
+                const completeConfig = {
+                  apiKey: decoded.apiKey,
+                  projectId: decoded.projectId,
+                  authDomain: decoded.authDomain || `${decoded.projectId}.firebaseapp.com`,
+                  appId: decoded.appId || `1:web:${decoded.projectId}`,
+                  storageBucket: decoded.storageBucket || `${decoded.projectId}.firebasestorage.app`
+                };
+                setFirebaseCustomConfig(completeConfig);
+                localStorage.setItem('cslv_fb_cfg', JSON.stringify(completeConfig));
+                showToast("Connexion au direct en cours via le QR code...", "success");
               }
             } catch (err) {
               console.warn("Impossible de décoder le paramètre cloud de l'URL", err);
@@ -276,7 +290,9 @@
             if (parsed.customLogoUrl) setCustomLogoUrl(parsed.customLogoUrl);
           }
           const savedFb = localStorage.getItem('cslv_fb_cfg');
-          if (savedFb && !cloudParam) setFirebaseCustomConfig(JSON.parse(savedFb));
+          if (savedFb && !cloudParam) {
+            setFirebaseCustomConfig(JSON.parse(savedFb));
+          }
 
           if (params.get('role') === 'viewer') {
             setUserRole('viewer');
@@ -322,26 +338,25 @@
 
             const auth = app.auth();
             const db = app.firestore();
-            const tournamentId = cfg.projectId || 'main_tournament';
-            const docRef = db.collection('tournaments').doc(tournamentId);
+            const tournamentDocId = 'live_tournament_data';
+            const docRef = db.collection('tournaments').doc(tournamentDocId);
 
-            // 1. Attendre impérativement que l'authentification soit terminée
-            // avant d'appeler onSnapshot afin d'éviter le rejet initial "Missing or insufficient permissions"
+            // 1. Authentification anonyme fiable
             try {
               if (!auth.currentUser) {
                 await auth.signInAnonymously();
               }
             } catch (authErr) {
-              console.warn("Auth anonyme non active ou indisponible :", authErr);
+              console.warn("Auth anonyme non active ou rejetée :", authErr);
             }
 
             if (!isMounted) return;
 
-            // 2. Écoute temps réel avec gestion robuste des permissions
+            // 2. Écoute temps réel avec mise à jour immédiate
             unsubscribe = docRef.onSnapshot(
               (docSnap) => {
                 if (!isMounted) return;
-                if (docSnap.exists) {
+                if (docSnap && docSnap.exists) {
                   const cloudData = docSnap.data();
                   if (cloudData) {
                     if (cloudData.config) setConfig(cloudData.config);
@@ -350,6 +365,10 @@
                     if (cloudData.matches) setMatches(cloudData.matches);
                     if (cloudData.customLogoUrl) setCustomLogoUrl(cloudData.customLogoUrl);
                   }
+                } else if (userRole === 'editor') {
+                  // Premier enregistrement si le document distant n'existe pas encore
+                  const initialData = { config, fields, teams, matches, customLogoUrl, lastUpdate: Date.now() };
+                  docRef.set(JSON.parse(JSON.stringify(initialData))).catch(()=>{});
                 }
                 setCloudStatus('connected');
                 setCloudErrorMsg('');
@@ -359,7 +378,7 @@
                 console.warn("Firestore Notice :", error.message);
                 setCloudStatus('error');
                 if (error.code === 'permission-denied' || (error.message && error.message.includes('permissions'))) {
-                  setCloudErrorMsg("Règles Firestore verrouillées : activez 'allow read, write: if true;' dans votre console Firebase.");
+                  setCloudErrorMsg("Règles Firestore verrouillées : activez 'allow read, write: if true;'");
                 } else {
                   setCloudErrorMsg(error.message || "Erreur de connexion Firestore");
                 }
@@ -379,7 +398,7 @@
           isMounted = false;
           if (unsubscribe) unsubscribe();
         };
-      }, [firebaseCustomConfig]);
+      }, [firebaseCustomConfig, userRole]);
 
       const handleAddTeam = () => {
         if (!newTeamName.trim()) return;
@@ -421,22 +440,18 @@
       // Sauvegarde automatique (Locale + Cloud) à chaque modification
       useEffect(() => {
         try {
-          // Firebase rejette formellement les valeurs 'undefined' : on nettoie avec JSON.stringify / JSON.parse
           const rawSave = { config, fields, teams, matches, customLogoUrl, lastUpdate: Date.now() };
           const sanitizedSave = JSON.parse(JSON.stringify(rawSave));
           localStorage.setItem('cslv_tournament_data', JSON.stringify(sanitizedSave));
 
-          // Si connecté au Cloud et en mode organisateur, enregistrer dans Firestore
+          // Si connecté au Cloud et en mode organisateur, pousser immédiatement dans Firestore
           if (cloudStatus === 'connected' && userRole === 'editor' && window.firebase && window.firebase.apps.length > 0) {
             let cfg = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseCustomConfig;
             if (cfg) {
               const db = window.firebase.firestore();
-              const tournamentId = cfg.projectId || 'main_tournament';
-              const docRef = db.collection('tournaments').doc(tournamentId);
+              const tournamentDocId = 'live_tournament_data';
+              const docRef = db.collection('tournaments').doc(tournamentDocId);
               docRef.set(sanitizedSave, { merge: true })
-                .then(() => {
-                  // Synchronisé avec succès
-                })
                 .catch((e) => {
                   console.warn("Écriture cloud échouée:", e);
                 });
@@ -727,54 +742,57 @@
 
       // Construit un lien qui embarque la clé cloud pour que les téléphones se connectent sans rien configurer
       const getFullShareUrl = (role) => {
-        const base = `${window.location.origin}${window.location.pathname}?role=${role}`;
-        if (!firebaseCustomConfig) return base;
+        // Obtenir l'URL de base propre
+        const currentUrl = new URL(window.location.href);
+        currentUrl.search = '';
+        currentUrl.searchParams.set('role', role);
+
+        if (!firebaseCustomConfig) return currentUrl.toString();
+
         try {
-          // On garde uniquement les 2 champs vitaux pour garder l'URL très courte et le QR code ultra lisible
-          const minimalConfig = {
+          // Embarquer les clés complètes nécessaires à Firebase pour que la connexion fonctionne à 100%
+          const cloudConfig = {
             apiKey: firebaseCustomConfig.apiKey,
-            projectId: firebaseCustomConfig.projectId
+            projectId: firebaseCustomConfig.projectId,
+            authDomain: firebaseCustomConfig.authDomain || `${firebaseCustomConfig.projectId}.firebaseapp.com`,
+            appId: firebaseCustomConfig.appId || `1:web:${firebaseCustomConfig.projectId}`
           };
-          const cloudString = btoa(encodeURIComponent(JSON.stringify(minimalConfig)));
-          return `${base}&cloud=${cloudString}`;
+          const jsonStr = JSON.stringify(cloudConfig);
+          const cloudParam = btoa(unescape(encodeURIComponent(jsonStr)));
+          currentUrl.searchParams.set('cloud', cloudParam);
+          return currentUrl.toString();
         } catch {
-          return base;
+          return currentUrl.toString();
         }
       };
 
       // Générer le QR Code proprement dès l'ouverture de la modale ou le changement de type
       useEffect(() => {
-        if (!isShareModalOpen) return;
+        if (!isShareModalOpen && !showPosterModal) return;
 
-        const targetUrl = getFullShareUrl(selectedQrType);
+        const targetUrl = getFullShareUrl(userRole === 'editor' ? selectedQrType : 'viewer');
 
-        // 1. Essai direct avec QRCode.toDataURL natif
+        // Utiliser une passerelle haute résolution directe infaillible pour le scan smartphone
+        const quickChartUrl = `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=300&margin=2&ecLevel=L`;
+        setQrCodeDataUrl(quickChartUrl);
+
+        // Essayer en parallèle le canvas local si supporté
         if (window.QRCode && window.QRCode.toDataURL) {
           window.QRCode.toDataURL(
             targetUrl,
             {
-              width: 200,
+              width: 300,
               margin: 2,
-              errorCorrectionLevel: 'L',
-              color: {
-                dark: '#000000',
-                light: '#ffffff'
-              }
+              errorCorrectionLevel: 'L'
             },
             (err, url) => {
               if (!err && url) {
                 setQrCodeDataUrl(url);
-              } else {
-                // Fallback sécurisé
-                setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=4&data=${encodeURIComponent(targetUrl)}`);
               }
             }
           );
-        } else {
-          // Fallback direct
-          setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=4&data=${encodeURIComponent(targetUrl)}`);
         }
-      }, [isShareModalOpen, selectedQrType, firebaseCustomConfig]);
+      }, [isShareModalOpen, selectedQrType, firebaseCustomConfig, showPosterModal, userRole]);
 
       const stats = useMemo(() => {
         const scorers = {};
