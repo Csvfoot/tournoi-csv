@@ -212,7 +212,15 @@
         placeholder2: source2?.kind === 'rank' ? `${source2.position+1}e ${source2.group}` : 'Vainqueur du tour précédent',
         score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: []
       });
-      if (playoffs) {
+      if (playoffs && groupNames.length === 2) {
+        // Croisement officiel de deux poules : A1-B2 et B1-A2.
+        // Le tableau est basé sur les rangs, pas sur l'ordre de saisie des équipes.
+        const [a,b] = groupNames;
+        fixtures.push(fixture('ko-semi-1','Demi-Finale 1','Phase Finale Principale',rank(a,0),rank(b,1)));
+        fixtures.push(fixture('ko-semi-2','Demi-Finale 2','Phase Finale Principale',rank(b,0),rank(a,1)));
+        fixtures.push(fixture('ko-final','Grande Finale','Phase Finale Principale',winner('ko-semi-1'),winner('ko-semi-2')));
+        fixtures.push(fixture('ko-bronze','Match 3ème / 4ème place','Phase Finale Principale',loser('ko-semi-1'),loser('ko-semi-2')));
+      } else if (playoffs) {
         const firsts = groupNames.map(g => rank(g,0));
         const seconds = groupNames.map(g => rank(g,1));
         const entrants = firsts.length + seconds.length;
@@ -399,14 +407,44 @@
       // Assigner ou changer librement une équipe de poule
       const handleAssignTeamToGroup = (teamId, targetGroup) => {
         if (!activeGroupNames.includes(targetGroup) || !teams.some(t => t.id === teamId)) return;
-        const newTeams = teams.map(t => t.id === teamId ? {...t,group:targetGroup} : t);
-        setTeams(newTeams);
-        if (matches.length) showToast('Équipe déplacée : ses résultats sont conservés dans sa nouvelle poule. Les anciens matchs restent au calendrier.');
-        else showToast('Affectation mise à jour.');
-        broadcastUpdate(config,fields,newTeams,matches);
+        const oldTeam = teams.find(t => t.id === teamId);
+        if (oldTeam.group === targetGroup) return;
+        // Compléter les affectations encore absentes sans déplacer les choix existants.
+        // Les premiers calendriers peuvent ne pas enregistrer le champ group.
+        const capacities = getPoolSizes(teams.length);
+        const counts = Object.fromEntries(activeGroupNames.map(g => [g,teams.filter(t => t.group === g).length]));
+        const withGroups = teams.map(t => {
+          if (activeGroupNames.includes(t.group)) return t;
+          const selected = activeGroupNames.find((g,i) => counts[g] < (capacities?.[i] ?? Infinity)) || activeGroupNames[0];
+          counts[selected]++;
+          return {...t,group:selected};
+        });
+        const nextTeams = withGroups.map(t => t.id === teamId ? {...t,group:targetGroup} : t);
+        setTeams(nextTeams);
+        broadcastUpdate(config,fields,nextTeams,matches);
+
+        // Une répartition manuelle peut provisoirement avoir 3/5 équipes.
+        // On n'efface ni ne remplace jamais les choix de l'organisateur.
+        const sizes = getPoolSizes(nextTeams.length);
+        const balanced = config.format === 'round_robin' || (sizes &&
+          activeGroupNames.length === sizes.length &&
+          activeGroupNames.every((g,i) => nextTeams.filter(t => t.group === g).length === sizes[i]));
+        if (!balanced) {
+          showToast('Équipe déplacée. Rééquilibrez les poules (4 ou 5 équipes chacune) avant de mettre à jour le calendrier.', 'error');
+          return;
+        }
+        if (matches.length && matches.every(m => m.status !== 'finished')) {
+          // Régénère les rencontres uniquement si aucun résultat n'est saisi.
+          // Permet d'afficher immédiatement les nouvelles équipes adverses.
+          generateSchedule(nextTeams, true);
+        } else if (matches.some(m => m.status === 'finished')) {
+          showToast('Poule mise à jour. Les matchs joués sont conservés : le calendrier existant doit être vérifié avant toute régénération.');
+        } else {
+          showToast('Équipe déplacée : la répartition sera utilisée pour générer le calendrier.');
+        }
       };
 
-            // Ajouter une nouvelle poule libre
+      // Ajouter une nouvelle poule libre
       const handleAddCustomGroup = () => {
         if (!newCustomGroupName.trim()) return;
         const grp = newCustomGroupName.trim();
@@ -715,39 +753,46 @@
       };
 
       // Calendrier multi-poules et élimination directe, sans perte involontaire de résultats.
-      const generateSchedule = () => {
-        if (teams.length < 2 || fields.length === 0) { showToast('Il faut au moins 2 équipes et un terrain.','error'); return; }
-        if (matches.some(m => m.status === 'finished') && !window.confirm('ATTENTION : générer un nouveau calendrier efface les résultats enregistrés. Continuer ?')) return;
+      const generateSchedule = (overrideTeams = null, automatic = false) => {
+        const sourceTeams = Array.isArray(overrideTeams) ? overrideTeams : teams;
+        if (sourceTeams.length < 2 || fields.length === 0) { showToast('Il faut au moins 2 équipes et un terrain.','error'); return; }
+        if (!automatic && matches.some(m => m.status === 'finished') && !window.confirm('ATTENTION : générer un nouveau calendrier efface les résultats enregistrés. Continuer ?')) return;
         let rawMatches = [];
-        let nextTeams = teams;
-        if (config.format === 'knockout') rawMatches = generateKnockoutTree(teams);
+        let nextTeams = sourceTeams;
+        if (config.format === 'knockout') rawMatches = generateKnockoutTree(sourceTeams);
         else {
           const names = config.format === 'round_robin' ? ['Poule Unique'] : activeGroupNames;
           let sizes;
-          if (config.format === 'round_robin') sizes = [teams.length];
+          if (config.format === 'round_robin') sizes = [sourceTeams.length];
           else {
-            const autoSizes = getPoolSizes(teams.length);
+            const autoSizes = getPoolSizes(sourceTeams.length);
             if (!autoSizes) { showToast('Pour les poules de 4 ou 5, choisissez un nombre PAIR d’équipes entre 8 et 32.','error');return; }
             if (names.length !== autoSizes.length) {
-              showToast(`Pour ${teams.length} équipes : ${autoSizes.length} poules obligatoires. Activez la répartition automatique.`, 'error');return;
+              showToast(`Pour ${sourceTeams.length} équipes : ${autoSizes.length} poules obligatoires. Activez la répartition automatique.`, 'error');return;
             }
             sizes = autoSizes;
           }
           const targetGroups = names.map((name,i) => ({name,size:sizes[i],members:[]}));
-          const allAssignmentsValid = teams.every(t => names.includes(t.group)) &&
-            names.every((g,i) => teams.filter(t => t.group === g).length === sizes[i]);
-          if (allAssignmentsValid) {
-            targetGroups.forEach(g => {g.members = teams.filter(t=>t.group===g.name);});
-          } else {
-            // Répartition équilibrée : conserver autant que possible les affectations libres.
-            teams.forEach(t => {
-              const preferred = targetGroups.find(g=>g.name===t.group && g.members.length<g.size);
-              const target = preferred || targetGroups.find(g=>g.members.length<g.size);
+          // À la première génération seulement, répartir les équipes sans poule attribuée.
+          // Après la moindre affectation manuelle, ne modifier aucune poule en silence.
+          const pristine = sourceTeams.every(t => !t.group);
+          if (pristine) {
+            sourceTeams.forEach((t,i) => {
+              const target = targetGroups.find(g => g.members.length < g.size);
               if (target) target.members.push(t);
             });
           }
+          const allAssignmentsValid = pristine || (sourceTeams.every(t => names.includes(t.group)) &&
+            names.every((g,i) => sourceTeams.filter(t => t.group === g).length === sizes[i]));
+          if (!allAssignmentsValid) {
+            const summary = targetGroups.map(g => `${g.name}: ${sourceTeams.filter(t => t.group === g.name).length}/${g.size}`).join(' · ');
+            showToast(`Affectations non équilibrées : ${summary}. Déplacez les équipes puis recommencez.`, 'error');
+            return;
+          }
+          // Les poules explicitement choisies sont la seule source pour le calendrier.
+          if (!pristine) targetGroups.forEach(g => {g.members = sourceTeams.filter(t=>t.group===g.name);});
           const mapGroup = new Map(targetGroups.flatMap(g => g.members.map(t => [t.id,g.name])));
-          nextTeams = teams.map(t => ({...t, group:mapGroup.get(t.id)}));
+          nextTeams = sourceTeams.map(t => ({...t, group:mapGroup.get(t.id)}));
           const perPool = targetGroups.map(g => generateRoundRobin(g.members,g.name));
           const maxMatches = Math.max(...perPool.map(a=>a.length),0);
           for(let i=0;i<maxMatches;i++) perPool.forEach(a=>{if(a[i])rawMatches.push(a[i]);});
