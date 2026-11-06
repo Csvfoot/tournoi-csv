@@ -443,6 +443,47 @@
         showToast("Nom de l'équipe mis à jour !");
       };
 
+      // Changer une équipe de poule (après génération du calendrier)
+      const handleChangeTeamGroup = (teamId, targetGroup) => {
+        if (!targetGroup) return;
+
+        // Mise à jour de tous les matchs de poules où cette équipe intervient
+        const updatedMatches = matches.map(m => {
+          // Si c'est un match de poule contenant cette équipe
+          if (m.group && m.group.startsWith('Poule') && (m.team1Id === teamId || m.team2Id === teamId)) {
+            return {
+              ...m,
+              group: targetGroup
+            };
+          }
+          return m;
+        });
+
+        setMatches(updatedMatches);
+        broadcastUpdate(config, fields, teams, updatedMatches);
+        showToast(`Équipe basculée vers ${targetGroup} !`);
+      };
+
+      // Échanger deux équipes de poule
+      const handleSwapTeamsPool = (teamAId, teamBId) => {
+        if (!teamAId || !teamBId || teamAId === teamBId) return;
+
+        const updatedMatches = matches.map(m => {
+          let newM = { ...m };
+          if (newM.team1Id === teamAId) newM.team1Id = teamBId;
+          else if (newM.team1Id === teamBId) newM.team1Id = teamAId;
+
+          if (newM.team2Id === teamAId) newM.team2Id = teamBId;
+          else if (newM.team2Id === teamBId) newM.team2Id = teamAId;
+
+          return newM;
+        });
+
+        setMatches(updatedMatches);
+        broadcastUpdate(config, fields, teams, updatedMatches);
+        showToast("Équipes permutées entre les poules avec succès !");
+      };
+
       // Génération de calendrier
       const generateSchedule = () => {
         if (teams.length < 2) {
@@ -1657,10 +1698,50 @@
             {/* ONGLET 4 : CLASSEMENT */}
             {activeTab === 'standings' && (
               <div className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold text-white mb-1">Classement Général</h2>
-                  <p className="text-xs text-slate-400">Calcul automatique des points et de la différence de buts en temps réel.</p>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <div>
+                    <h2 className="text-lg font-bold text-white mb-1">Classement Général</h2>
+                    <p className="text-xs text-slate-400">Calcul automatique des points et de la différence de buts en temps réel.</p>
+                  </div>
                 </div>
+
+                {/* Sélecteur de permutation rapide entre poules pour l'administrateur */}
+                {userRole === 'editor' && matches.some(m => m.group && m.group.startsWith('Poule')) && (
+                  <div className="bg-[#150709] border border-amber-500/40 rounded-2xl p-4 shadow-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                        🔄 Transférer ou permuter une équipe de poule
+                      </span>
+                      <span className="text-[10px] text-slate-400">Après génération du calendrier</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                      {teams.map(t => {
+                        // Trouver la poule actuelle de l'équipe
+                        const currentMatch = matches.find(m => m.group && m.group.startsWith('Poule') && (m.team1Id === t.id || m.team2Id === t.id));
+                        const currentGroup = currentMatch ? currentMatch.group : 'Non assignée';
+                        const availableGroups = ['Poule A', 'Poule B', 'Poule C', 'Poule D'].slice(0, config.numberOfGroups || 2);
+
+                        return (
+                          <div key={t.id} className="bg-[#0b0304] border border-red-950 p-2.5 rounded-xl flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.color }}></span>
+                              <span className="font-bold text-white text-xs truncate">{t.name}</span>
+                            </div>
+                            <select
+                              value={currentGroup}
+                              onChange={(e) => handleChangeTeamGroup(t.id, e.target.value)}
+                              className="bg-[#160608] border border-red-900/60 text-[11px] font-bold text-amber-300 rounded px-2 py-1 focus:outline-none focus:border-amber-500"
+                            >
+                              {availableGroups.map(grp => (
+                                <option key={grp} value={grp}>{grp}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {config.format === 'groups_knockout' || config.format === 'multi_groups' ? (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2090,18 +2171,9 @@
                   <div>
                     <h3 className="font-bold text-white text-base">Feuille de Match</h3>
                     <div className="flex items-center gap-2 mt-1">
-                      <select
-                        value={editingMatch.group || 'Poule A'}
-                        onChange={(e) => setEditingMatch({ ...editingMatch, group: e.target.value })}
-                        className="bg-[#0b0304] border border-red-900/60 text-xs text-amber-300 font-bold px-2 py-1 rounded"
-                      >
-                        <option value="Poule A">Poule A</option>
-                        <option value="Poule B">Poule B</option>
-                        <option value="Poule C">Poule C</option>
-                        <option value="Poule D">Poule D</option>
-                        <option value="Poule Unique">Poule Unique</option>
-                        <option value="Phase Finale">Phase Finale</option>
-                      </select>
+                      <span className="bg-red-950 border border-red-900/60 text-xs text-amber-300 font-bold px-2.5 py-1 rounded">
+                        {editingMatch.group || 'Match'}
+                      </span>
 
                       <input
                         type="text"
