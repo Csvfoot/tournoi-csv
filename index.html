@@ -89,14 +89,18 @@
     // Référence UNIQUE pour les classements, dans les écrans ET pour les qualifications.
     const standingsFor = (teamList, fixtureList, group, rules) => {
       const groupMatches = fixtureList.filter(m => m.group === group && m.stage && m.stage.startsWith('Journée'));
-      const eligible = new Set(teamList.filter(t => t.group === group).map(t => t.id));
-      groupMatches.forEach(m => { if (m.team1Id) eligible.add(m.team1Id); if (m.team2Id) eligible.add(m.team2Id); });
+      // L'affectation actuelle est la seule source de vérité : un ancien match
+      // ne doit jamais réinscrire une équipe dans sa précédente poule.
+      const eligible = new Set(teamList.filter(t => (t.group || 'Poule A') === group).map(t => t.id));
       const rows = {};
       teamList.filter(t => eligible.has(t.id)).forEach(t => {
         rows[t.id] = { team: t, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0, form: [] };
       });
       groupMatches.forEach(m => {
         if (m.status !== 'finished' || !m.team1Id || !m.team2Id || m.score1 == null || m.score2 == null) return;
+        // Ignorer les anciens matchs dont l'affectation est devenue obsolète.
+        // Ils restent conservés dans le calendrier jusqu'à sa régénération.
+        if (!eligible.has(m.team1Id) || !eligible.has(m.team2Id)) return;
         const a = rows[m.team1Id], b = rows[m.team2Id];
         if (!a || !b) return;
         const x = Number(m.score1), y = Number(m.score2);
@@ -308,6 +312,7 @@
 
       // Assigner ou changer librement une équipe de poule
       const handleAssignTeamToGroup = (teamId, targetGroup) => {
+        if (!activeGroupNames.includes(targetGroup) || !teams.some(t => t.id === teamId)) return;
         if (matches.some(m => m.status === 'finished')) {
           showToast('Matchs déjà joués : sauvegardez les résultats avant de modifier les poules.', 'error'); return;
         }
