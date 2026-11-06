@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Affiche QR Code — Tournoi CSV</title>
+<link rel="icon" href="./apple-touch-icon.png">
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { background:#f4f4f4; color:#2b090c; margin:0; font-family:Arial,Helvetica,sans-serif; }
+  .toolbar { max-width:760px; margin:18px auto; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; padding:0 12px; }
+  button, .back { background:#800e19; color:white; border:0; border-radius:9px; padding:13px 18px; font-weight:700; cursor:pointer; text-decoration:none; font-size:15px; }
+  .back { background:#3c3c3c; }
+  .sheet { width:min(100% - 24px, 190mm); min-height:265mm; margin:0 auto 25px; padding:15mm 12mm; background:white; border:5px solid #8e1421; box-shadow:0 3px 20px #0002; display:flex; flex-direction:column; align-items:center; justify-content:space-evenly; text-align:center; }
+  .crest { width:110px; height:110px; object-fit:contain; border-radius:50%; }
+  h1 { font-size:29px; color:#800e19; margin:8px 0 2px; }
+  h2 { font-size:20px; margin:0 0 10px; }
+  .qr { width:min(85vw,290px); height:auto; aspect-ratio:1; object-fit:contain; }
+  p { line-height:1.4; }
+  .url { font-size:11px; overflow-wrap:anywhere; max-width:100%; color:#555; }
+  .error { color:#9c1010; font-weight:700; }
+  @media print { body { background:white; } .toolbar { display:none !important; } .sheet { width:100%; min-height:260mm; margin:0; padding:10mm; box-shadow:none; border-width:4px; } }
+</style>
+</head><body>
+<div class="toolbar">
+  <button type="button" onclick="window.print()">🖨 Imprimer / Enregistrer en PDF</button>
+  <a class="back" href="./">Retour au tournoi</a>
+</div>
+<main class="sheet">
+  <img class="crest" src="./apple-touch-icon.png" alt="Logo CS La Verpillière">
+  <h1 id="title">Tournoi CS La Verpillière</h1>
+  <h2>Suivez le tournoi en direct !</h2>
+  <img class="qr" id="qr" alt="QR code d'accès au tournoi">
+  <p>📱 Scannez ce QR code pour retrouver les matchs, résultats et classements.</p>
+  <p class="url" id="link"></p>
+  <p id="error" class="error" hidden>Le QR code ne s'est pas chargé. Vérifiez votre connexion Internet.</p>
+</main>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const target = params.get('target') || new URL('./?role=viewer', location.href).href;
+  const title = params.get('titre') || 'Tournoi CS La Verpillière';
+  document.getElementById('title').textContent = title;
+  document.getElementById('link').textContent = target;
+  const qr = document.getElementById('qr');
+  qr.onerror = function () { document.getElementById('error').hidden = false; };
+  qr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=20&data=' + encodeURIComponent(target);
+})();
+</script>
+</body></html>
