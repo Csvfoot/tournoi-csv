@@ -1309,24 +1309,31 @@
                                       setCardTeamId(m.team1Id || '');
                                     }
                                   }}
-                                  className={`p-3 rounded-xl border bg-[#0b0304] border-red-950 transition flex flex-col gap-2 ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
+                                  className={`p-2.5 sm:p-3 rounded-xl border bg-[#0b0304] border-red-950 transition flex flex-col gap-1.5 ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
                                 >
-                                  <div className="flex justify-between items-center text-[11px] text-slate-400">
+                                  <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-slate-400">
                                     <span className="font-mono text-amber-400 font-bold">{m.startTime || '--:--'} - {m.endTime || '--:--'}</span>
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-950 text-amber-300">
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-red-950 text-amber-300">
                                       {m.group ? `${m.group} • ` : ''}{m.stage || 'Match'}
                                     </span>
                                   </div>
 
-                                  <div className="flex justify-between items-center py-1">
-                                    <span className="font-bold text-white text-xs truncate max-w-[42%]">{t1.name}</span>
-                                    <div className="bg-[#18080a] px-2.5 py-0.5 rounded border border-red-900 font-mono font-bold text-white text-xs">
+                                  {/* Ligne unique compacte : Équipe 1 - Score - Équipe 2 */}
+                                  <div className="flex items-center justify-between gap-1 py-1">
+                                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: t1.color }}></span>
+                                      <span className="font-bold text-white text-xs sm:text-sm truncate">{t1.name}</span>
+                                    </div>
+                                    <div className="bg-[#18080a] px-2 py-0.5 rounded border border-red-900 font-mono font-black text-amber-300 text-xs sm:text-sm flex-shrink-0 whitespace-nowrap min-w-[48px] text-center shadow-inner">
                                       {m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'}
                                     </div>
-                                    <span className="font-bold text-white text-xs truncate max-w-[42%] text-right">{t2.name}</span>
+                                    <div className="flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right">
+                                      <span className="font-bold text-white text-xs sm:text-sm truncate">{t2.name}</span>
+                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: t2.color }}></span>
+                                    </div>
                                   </div>
 
-                                  <div className="flex justify-between items-center pt-1 border-t border-red-950/60 text-[10px]">
+                                  <div className="flex justify-between items-center pt-1 border-t border-red-950/60 text-[9px] sm:text-[10px]">
                                     <span className={m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold'}>
                                       {m.status === 'live' ? '● En direct' : m.status === 'finished' ? 'Terminé' : 'À venir'}
                                     </span>
@@ -1342,7 +1349,7 @@
                   </div>
                 ) : (
                   /* VUE CHRONO */
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-4">
                     {matches.slice().sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
                       const t1 = getTeam(m.team1Id);
                       const t2 = getTeam(m.team2Id);
@@ -1356,12 +1363,12 @@
                               setCardTeamId(m.team1Id || '');
                             }
                           }}
-                          className={`p-3.5 rounded-xl border bg-[#150709] border-red-950 transition flex flex-col justify-between ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
+                          className={`p-2.5 sm:p-3.5 rounded-xl border bg-[#150709] border-red-950 transition flex flex-col justify-between ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
                         >
-                          <div className="flex justify-between items-center text-xs text-slate-400 mb-2">
+                          <div className="flex justify-between items-center text-[10px] sm:text-xs text-slate-400 mb-1.5">
                             <span className="font-mono text-amber-400 font-bold">{m.startTime || '--:--'} &bull; {m.fieldName || 'Terrain'}</span>
                             <div className="flex items-center gap-1.5">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-950 text-amber-300">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-red-950 text-amber-300">
                                 {m.group ? `${m.group} • ` : ''}{m.stage || 'Match'}
                               </span>
                               <span className={m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold'}>
@@ -1370,22 +1377,23 @@
                             </div>
                           </div>
 
-                          <div className="flex justify-between items-center py-1">
-                            <div className="flex items-center gap-2 max-w-[42%] min-w-0">
-                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t1.color }}></span>
+                          {/* Ligne unique compacte : Équipe 1 - Score - Équipe 2 */}
+                          <div className="flex items-center justify-between gap-1 py-1">
+                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                              <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t1.color }}></span>
                               <span className="font-bold text-white text-xs sm:text-sm truncate">{t1.name}</span>
                             </div>
-                            <div className="bg-[#0b0304] px-3 py-1 rounded border border-red-950 font-mono font-bold text-white text-sm sm:text-base">
+                            <div className="bg-[#0b0304] px-2.5 py-1 rounded border border-red-950 font-mono font-black text-white text-xs sm:text-base flex-shrink-0 whitespace-nowrap min-w-[54px] text-center shadow-md">
                               {m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'}
                             </div>
-                            <div className="flex items-center gap-2 max-w-[42%] min-w-0 justify-end">
-                              <span className="font-bold text-white text-xs sm:text-sm truncate text-right">{t2.name}</span>
-                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t2.color }}></span>
+                            <div className="flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right">
+                              <span className="font-bold text-white text-xs sm:text-sm truncate">{t2.name}</span>
+                              <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t2.color }}></span>
                             </div>
                           </div>
 
                           {m.mvp && (
-                            <div className="mt-2 pt-1.5 border-t border-red-950/70 text-xs text-amber-300">
+                            <div className="mt-1.5 pt-1 border-t border-red-950/70 text-[11px] text-amber-300">
                               ⭐ Homme du Match : <strong className="text-white">{m.mvp}</strong>
                             </div>
                           )}
