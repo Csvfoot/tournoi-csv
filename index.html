@@ -248,8 +248,8 @@
       const [showPosterModal, setShowPosterModal] = useState(false);
       const [publicWebUrl, setPublicWebUrl] = useState(() => {
         try {
-          return localStorage.getItem('cslv_public_url') || '';
-        } catch { return ''; }
+          return localStorage.getItem('cslv_public_url') || 'https://csvfoot.github.io/tournoi-csv/';
+        } catch { return 'https://csvfoot.github.io/tournoi-csv/'; }
       });
 
       // Charger depuis stockage local au démarrage & détecter la clé cloud dans l'URL
@@ -779,17 +779,16 @@
       const getFullShareUrl = (role) => {
         let base = '';
 
-        // Si l'utilisateur a renseigné une adresse web publique (ex: netlify ou github.io)
+        // Priorité absolue à l'adresse en ligne officielle GitHub Pages
         if (publicWebUrl && publicWebUrl.trim().startsWith('http')) {
           base = publicWebUrl.trim().split('?')[0];
-        } else if (window.location.protocol.startsWith('http')) {
+        } else if (window.location.protocol.startsWith('http') && !window.location.hostname.includes('localhost')) {
           base = window.location.origin + window.location.pathname;
         } else {
-          // Si ouvert en fichier local file://
-          base = window.location.href.split('?')[0];
+          base = 'https://csvfoot.github.io/tournoi-csv/';
         }
 
-        const url = new URL(base, window.location.origin && window.location.origin !== 'null' ? window.location.origin : 'https://tournoi-cslv.app');
+        const url = new URL(base);
         url.searchParams.set('role', role);
 
         if (firebaseCustomConfig && firebaseCustomConfig.apiKey && firebaseCustomConfig.projectId) {
@@ -1961,29 +1960,17 @@
 
                 {/* Avertissement clair si l'application est ouverte en fichier local file:/// */}
                 {window.location.protocol === 'file:' && userRole === 'editor' && (
-                  <div className="p-3 bg-amber-950/60 border border-amber-600/60 rounded-xl text-xs text-amber-200 space-y-2">
+                  <div className="p-3 bg-amber-950/60 border border-amber-600/60 rounded-xl text-xs text-amber-200 space-y-1">
                     <div className="flex items-center gap-2 font-bold text-amber-300">
-                      <span>💡</span>
-                      <span>Vous utilisez l'application depuis votre disque dur local (file://)</span>
+                      <span>🌐</span>
+                      <span>Adresse en ligne officielle active :</span>
                     </div>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Un smartphone ne peut pas ouvrir un lien pointant vers <code className="text-white">file:///C:/...</code>. Pour que les liens et QR codes fonctionnent sur tous les smartphones :
+                    <p className="text-[11px] text-white font-mono bg-black/40 p-2 rounded border border-amber-500/40 truncate">
+                      https://csvfoot.github.io/tournoi-csv/
                     </p>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-white block">
-                        Indiquez l'adresse web où vous avez déposé le fichier (Netlify, Vercel ou GitHub) :
-                      </label>
-                      <input
-                        type="url"
-                        placeholder="https://mon-tournoi.netlify.app"
-                        value={publicWebUrl}
-                        onChange={(e) => {
-                          setPublicWebUrl(e.target.value);
-                          localStorage.setItem('cslv_public_url', e.target.value);
-                        }}
-                        className="w-full bg-[#0b0304] border border-amber-500/50 rounded-lg p-2 text-white font-mono text-xs focus:outline-none"
-                      />
-                    </div>
+                    <p className="text-[10px] text-slate-300">
+                      Tous vos QR Codes et liens de partage pointent déjà automatiquement vers votre site GitHub Pages.
+                    </p>
                   </div>
                 )}
 
@@ -2197,6 +2184,9 @@
                     <p className="text-xs text-slate-700 font-semibold">
                       Ouvrez votre appareil photo &bull; Calendrier, résultats et classements actualisés à la seconde.
                     </p>
+                    <p className="text-[11px] font-mono text-red-900 font-bold pt-1">
+                      https://csvfoot.github.io/tournoi-csv/
+                    </p>
                   </div>
                 </div>
 
@@ -2244,6 +2234,9 @@
                 </h2>
                 <p className="text-base text-slate-700 font-bold max-w-md mx-auto">
                   Approchez l'appareil photo de votre téléphone pour accéder immédiatement au calendrier, aux classements des poules et aux statistiques.
+                </p>
+                <p className="text-sm font-mono text-red-900 font-black">
+                  https://csvfoot.github.io/tournoi-csv/
                 </p>
               </div>
 
