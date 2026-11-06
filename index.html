@@ -86,33 +86,119 @@
     };
     const alphabetPoolName = i => `Poule ${String.fromCharCode(65 + i)}`;
 
-    // Référence UNIQUE pour les classements, dans les écrans ET pour les qualifications.
+    // Le classement utilise l'affectation ACTUELLE des équipes, mais conserve
+    // leurs résultats passés, même si les rencontres furent jouées dans une autre poule.
+    // Chaque rencontre est comptée une seule fois PAR équipe : aucun doublon.
     const standingsFor = (teamList, fixtureList, group, rules) => {
-      const groupMatches = fixtureList.filter(m => m.group === group && m.stage && m.stage.startsWith('Journée'));
-      // L'affectation actuelle est la seule source de vérité : un ancien match
-      // ne doit jamais réinscrire une équipe dans sa précédente poule.
-      const eligible = new Set(teamList.filter(t => (t.group || 'Poule A') === group).map(t => t.id));
+      const members = teamList.filter(t => (t.group || 'Poule A') === group);
       const rows = {};
-      teamList.filter(t => eligible.has(t.id)).forEach(t => {
+      members.forEach(t => {
         rows[t.id] = { team: t, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0, form: [] };
       });
-      groupMatches.forEach(m => {
-        if (m.status !== 'finished' || !m.team1Id || !m.team2Id || m.score1 == null || m.score2 == null) return;
-        // Ignorer les anciens matchs dont l'affectation est devenue obsolète.
-        // Ils restent conservés dans le calendrier jusqu'à sa régénération.
-        if (!eligible.has(m.team1Id) || !eligible.has(m.team2Id)) return;
-        const a = rows[m.team1Id], b = rows[m.team2Id];
-        if (!a || !b) return;
+      fixtureList.forEach(m => {
+        // Les phases finales et les matchs de classement ne comptent pas en poule.
+        if (!m.stage?.startsWith('Journée') || m.status !== 'finished' ||
+            m.score1 == null || m.score2 == null) return;
         const x = Number(m.score1), y = Number(m.score2);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        a.played++; b.played++;
-        a.gf += x; a.ga += y; b.gf += y; b.ga += x;
-        if (x > y) { a.won++; b.lost++; a.points += Number(rules.pointsWin ?? 3); b.points += Number(rules.pointsLoss ?? 0); a.form.push('W'); b.form.push('L'); }
-        else if (x < y) { b.won++; a.lost++; b.points += Number(rules.pointsWin ?? 3); a.points += Number(rules.pointsLoss ?? 0); a.form.push('L'); b.form.push('W'); }
-        else { a.drawn++; b.drawn++; a.points += Number(rules.pointsDraw ?? 1); b.points += Number(rules.pointsDraw ?? 1); a.form.push('D'); b.form.push('D'); }
+        const update = (teamId, scored, conceded) => {
+          const r = rows[teamId];
+          if (!r) return;
+          r.played++; r.gf += scored; r.ga += conceded;
+          if (scored > conceded) { r.won++; r.points += Number(rules.pointsWin ?? 3); r.form.push('W'); }
+          else if (scored < conceded) { r.lost++; r.points += Number(rules.pointsLoss ?? 0); r.form.push('L'); }
+          else { r.drawn++; r.points += Number(rules.pointsDraw ?? 1); r.form.push('D'); }
+        };
+        update(m.team1Id, x, y);
+        update(m.team2Id, y, x);
       });
       return Object.values(rows).map(r => ({ ...r, gd: r.gf - r.ga }))
         .sort((a,b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf || a.team.name.localeCompare(b.team.name, 'fr'));
+    };
+
+    // Résultat d'une rencontre avec prise en compte des tirs au but.
+    const resultOf = m => {
+      if (!m || m.status !== 'finished' || !m.team1Id || !m.team2Id ||
+          m.score1 == null || m.score2 == null) return null;
+      const a=Number(m.score1), b=Number(m.score2);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      if (a > b) return { winner:m.team1Id, loser:m.team2Id };
+      if (b > a) return { winner:m.team2Id, loser:m.team1Id };
+      if (m.pens1 != null && m.pens2 != null && Number(m.pens1) !== Number(m.pens2))
+        return Number(m.pens1) > Number(m.pens2)
+          ? {winner:m.team1Id,loser:m.team2Id}
+          : {winner:m.team2Id,loser:m.team1Id};
+      return null;
+    };
+
+    const buildFinalStandings = (teamList, fixtureList, groupNames, rules) => {
+      const groups = groupNames.map(g => standingsFor(teamList,fixtureList,g,rules));
+      const byId = {};
+      groups.forEach((standings,gi) => standings.forEach((s,i) => {
+        byId[s.team.id] = { ...s, group:groupNames[gi], groupPosition:i+1,
+          level:0, exact:null, description:'Classement de poule' };
+      }));
+      const knockout = fixtureList.filter(m => m.group === 'Phase Finale Principale');
+      const classification = fixtureList.filter(m => ['Tournoi Classement','Tournoi Consolante'].includes(m.group));
+      const hasPlayoffs = knockout.length > 0;
+      if (hasPlayoffs) {
+        // Niveau de progression (utile tant que le tournoi n'est pas terminé).
+        knockout.forEach(m => {
+          const rank = m.stage?.includes('Grande Finale') ? 5
+            : m.stage?.includes('Demi-Finale') ? 4
+            : m.stage?.includes('Quart') ? 3
+            : m.stage?.includes('Huitième') ? 2 : 1;
+          [m.team1Id,m.team2Id].forEach(id => {if (byId[id]) byId[id].level=Math.max(byId[id].level,rank);});
+        });
+        const final = knockout.find(m => m.id === 'ko-final' || m.stage === 'Grande Finale');
+        const fg = resultOf(final);
+        if (fg) {
+          if (byId[fg.winner]) {byId[fg.winner].exact=1;byId[fg.winner].description='Champion';}
+          if (byId[fg.loser]) {byId[fg.loser].exact=2;byId[fg.loser].description='Finaliste';}
+        }
+        const bronze = knockout.find(m => m.id === 'ko-bronze' || m.stage?.includes('3ème / 4ème'));
+        const bg = resultOf(bronze);
+        if (bg) {
+          if (byId[bg.winner]) {byId[bg.winner].exact=3;byId[bg.winner].description='3e place';}
+          if (byId[bg.loser]) {byId[bg.loser].exact=4;byId[bg.loser].description='4e place';}
+        }
+      }
+      // Classements des non-qualifiés : mêmes rangs de poule, départagés par
+      // les confrontations de classement jouées (sinon critères sportifs).
+      const compareStats = (a,b) => b.points-a.points || b.gd-a.gd || b.gf-a.gf || a.team.name.localeCompare(b.team.name,'fr');
+      const nonQualifiers = Object.values(byId).filter(r => !hasPlayoffs || r.groupPosition > Number(rules.qualifiersPerGroup ?? 2));
+      const classificationStats = {};
+      nonQualifiers.forEach(r => classificationStats[r.team.id]={points:0,gd:0,gf:0});
+      classification.forEach(m => {
+        const a=classificationStats[m.team1Id],b=classificationStats[m.team2Id];
+        if (!a || !b || m.status !== 'finished' || m.score1 == null || m.score2 == null) return;
+        const x=Number(m.score1),y=Number(m.score2);
+        if(!Number.isFinite(x)||!Number.isFinite(y)) return;
+        a.gf+=x; b.gf+=y; a.gd+=x-y; b.gd+=y-x;
+        if(x>y) a.points+=3;
+        else if(y>x) b.points+=3;
+        else {
+          const res=resultOf(m);
+          if(res) classificationStats[res.winner].points+=3;
+          else {a.points++;b.points++;}
+        }
+      });
+      const cmpNon = (a,b) => a.groupPosition-b.groupPosition ||
+        classificationStats[b.team.id].points-classificationStats[a.team.id].points ||
+        classificationStats[b.team.id].gd-classificationStats[a.team.id].gd ||
+        classificationStats[b.team.id].gf-classificationStats[a.team.id].gf || compareStats(a,b);
+      nonQualifiers.sort(cmpNon);
+      const qualified = Object.values(byId).filter(r => hasPlayoffs && r.groupPosition <= Number(rules.qualifiersPerGroup ?? 2));
+      qualified.sort((a,b) => {
+        if(a.exact!=null || b.exact!=null) return (a.exact??999)-(b.exact??999);
+        return b.level-a.level || a.groupPosition-b.groupPosition || compareStats(a,b);
+      });
+      const ordered = hasPlayoffs ? [...qualified,...nonQualifiers] : nonQualifiers;
+      // La position reste indicative jusqu'à la fin de toutes les rencontres.
+      const relevant = fixtureList.filter(m=>m.stage?.startsWith('Journée') ||
+        ['Phase Finale Principale','Tournoi Classement','Tournoi Consolante'].includes(m.group));
+      const finished = relevant.length>0 && relevant.every(m=>m.status==='finished');
+      return {rows:ordered.map((r,i)=>({...r,position:i+1})),finished};
     };
 
     const createTournamentPhases = (groupNames, poolSizes, playoffs, classification) => {
@@ -313,12 +399,9 @@
       // Assigner ou changer librement une équipe de poule
       const handleAssignTeamToGroup = (teamId, targetGroup) => {
         if (!activeGroupNames.includes(targetGroup) || !teams.some(t => t.id === teamId)) return;
-        if (matches.some(m => m.status === 'finished')) {
-          showToast('Matchs déjà joués : sauvegardez les résultats avant de modifier les poules.', 'error'); return;
-        }
         const newTeams = teams.map(t => t.id === teamId ? {...t,group:targetGroup} : t);
         setTeams(newTeams);
-        if (matches.length) showToast('Affectation modifiée. Régénérez le calendrier pour mettre à jour les rencontres.', 'error');
+        if (matches.length) showToast('Équipe déplacée : ses résultats sont conservés dans sa nouvelle poule. Les anciens matchs restent au calendrier.');
         else showToast('Affectation mise à jour.');
         broadcastUpdate(config,fields,newTeams,matches);
       };
@@ -1122,6 +1205,14 @@
                 </button>
               )}
               <button
+                onClick={() => setActiveTab('finalStandings')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'finalStandings' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                🥇 Classement final
+              </button>
+              <button
                 onClick={() => setActiveTab('stats')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
                   activeTab === 'stats' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
@@ -1893,6 +1984,43 @@
                 )}
               </div>
             )}
+
+            {/* CLASSEMENT FINAL DU TOURNOI — sans modifier les scores existants */}
+            {activeTab === 'finalStandings' && (() => {
+              const finalTable=buildFinalStandings(teams,matches,activeGroupNames,config);
+              return (
+                <div className="bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+                  <div>
+                    <h2 className="text-xl font-black text-amber-300">🏆 Classement final du tournoi</h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {finalTable.finished ? 'Tous les matchs du calendrier sont terminés.' :
+                        'Classement provisoire : les positions évolueront jusqu’à la fin des matchs.'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">Qualifications, finales et matchs de classement pris en compte. Les équipes déplacées conservent leurs points de poule.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs sm:text-sm">
+                      <thead><tr className="border-b border-red-900 text-amber-300 uppercase text-[11px]">
+                        <th className="py-3 px-2">Place</th><th className="py-3 px-2">Équipe</th>
+                        <th className="py-3 px-2">Poule</th><th className="py-3 px-2 text-center">Pts poule</th>
+                        <th className="py-3 px-2">Indication</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-red-950/60">
+                        {finalTable.rows.map(r => (
+                          <tr key={r.team.id} className={r.position <= 3 ? 'bg-amber-500/5' : ''}>
+                            <td className="py-3 px-2 font-black text-amber-300">{r.position === 1 ? '🥇' : r.position === 2 ? '🥈' : r.position === 3 ? '🥉' : `${r.position}e`}</td>
+                            <td className="py-3 px-2 font-bold text-white"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{backgroundColor:r.team.color}}></span>{r.team.name}</td>
+                            <td className="py-3 px-2 text-slate-400">{r.group}</td>
+                            <td className="py-3 px-2 text-amber-200 text-center font-bold">{r.points}</td>
+                            <td className="py-3 px-2 text-slate-400">{r.exact ? r.description : (r.level>0 ? 'Phase finale' : 'Classement de poule')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ONGLET 5 : PHASE FINALE & CONSOLANTE */}
             {activeTab === 'bracket' && (
