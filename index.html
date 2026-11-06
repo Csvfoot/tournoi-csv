@@ -618,30 +618,47 @@
             });
           }
 
-          // Ajout de la Phase Finale Principale si activée
-          if (config.hasPlayoffs) {
+          // Tableau de phase finale : chaque match possède ses sources de qualification.
+          if (config.hasPlayoffs !== false) {
+            const rank = (group, position) => ({ kind: 'rank', group, position });
+            const winner = (matchId) => ({ kind: 'winner', matchId });
+            const finalFixture = (id, stage, source1, source2) => ({
+              id, stage, group: 'Phase Finale Principale', team1Id: null, team2Id: null,
+              source1, source2, placeholder1: 'Qualification à venir', placeholder2: 'Qualification à venir',
+              score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: []
+            });
             if (numGroups === 1) {
-              // 1 poule -> 1/2 finales directes entre les 4 premiers
               rawMatches.push(
-                { id: 'ko-semi-1', stage: 'Demi-Finale 1', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '1er Poule', placeholder2: '4ème Poule', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-semi-2', stage: 'Demi-Finale 2', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '2ème Poule', placeholder2: '3ème Poule', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-final', stage: 'Grande Finale', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: 'Vainqueur Demi 1', placeholder2: 'Vainqueur Demi 2', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] }
+                finalFixture('ko-semi-1', 'Demi-Finale 1', rank(groupNames[0], 0), rank(groupNames[0], 3)),
+                finalFixture('ko-semi-2', 'Demi-Finale 2', rank(groupNames[0], 1), rank(groupNames[0], 2))
               );
             } else if (numGroups === 2) {
-              // 2 poules -> Croisement classique 1er vs 2e
               rawMatches.push(
-                { id: 'ko-semi-1', stage: 'Demi-Finale 1', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '1er Poule A', placeholder2: '2ème Poule B', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-semi-2', stage: 'Demi-Finale 2', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '1er Poule B', placeholder2: '2ème Poule A', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-final', stage: 'Grande Finale', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: 'Vainqueur Demi 1', placeholder2: 'Vainqueur Demi 2', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] }
+                finalFixture('ko-semi-1', 'Demi-Finale 1', rank(groupNames[0], 0), rank(groupNames[1], 1)),
+                finalFixture('ko-semi-2', 'Demi-Finale 2', rank(groupNames[1], 0), rank(groupNames[0], 1))
               );
+            } else if (numGroups === 3) {
+              // Six qualifiés : les deux meilleurs premiers sont exemptés des quarts.
+              rawMatches.push(
+                finalFixture('ko-qf-1', 'Quart de Finale 1', rank(groupNames[0], 1), rank(groupNames[1], 1)),
+                finalFixture('ko-qf-2', 'Quart de Finale 2', rank(groupNames[2], 0), rank(groupNames[2], 1)),
+                finalFixture('ko-semi-1', 'Demi-Finale 1', rank(groupNames[0], 0), winner('ko-qf-1')),
+                finalFixture('ko-semi-2', 'Demi-Finale 2', rank(groupNames[1], 0), winner('ko-qf-2'))
+              );
+            } else if (numGroups === 4) {
+              rawMatches.push(
+                finalFixture('ko-qf-1', 'Quart de Finale 1', rank(groupNames[0], 0), rank(groupNames[1], 1)),
+                finalFixture('ko-qf-2', 'Quart de Finale 2', rank(groupNames[2], 0), rank(groupNames[3], 1)),
+                finalFixture('ko-qf-3', 'Quart de Finale 3', rank(groupNames[1], 0), rank(groupNames[0], 1)),
+                finalFixture('ko-qf-4', 'Quart de Finale 4', rank(groupNames[3], 0), rank(groupNames[2], 1)),
+                finalFixture('ko-semi-1', 'Demi-Finale 1', winner('ko-qf-1'), winner('ko-qf-2')),
+                finalFixture('ko-semi-2', 'Demi-Finale 2', winner('ko-qf-3'), winner('ko-qf-4'))
+              );
+            }
+            if (numGroups <= 4) {
+              rawMatches.push(finalFixture('ko-final', 'Grande Finale', winner('ko-semi-1'), winner('ko-semi-2')));
             } else {
-              // 3 ou 4 poules -> Quarts de finale
-              rawMatches.push(
-                { id: 'ko-qf-1', stage: 'Quart de Finale 1', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '1er Poule A', placeholder2: '2ème Poule B', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-qf-2', stage: 'Quart de Finale 2', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: '1er Poule C', placeholder2: '2ème Poule D', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-semi-1', stage: 'Demi-Finale 1', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: 'Vainqueur Quart 1', placeholder2: 'Vainqueur Quart 2', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] },
-                { id: 'ko-final', stage: 'Grande Finale', group: 'Phase Finale Principale', team1Id: null, team2Id: null, placeholder1: 'Finaliste 1', placeholder2: 'Finaliste 2', score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: [] }
-              );
+              showToast('Phase finale automatique disponible pour 1 à 4 poules. Les matchs de poules seront générés.', 'error');
             }
           }
 
@@ -902,91 +919,92 @@
 
         let updated = matches.map(m => m.id === editingMatch.id ? editingMatch : m);
 
-        // Progression automatique vers les phases finales et consolantes
-        const numGroups = config.format === 'round_robin' ? 1 : (parseInt(config.numberOfGroups, 10) || 2);
-        if (numGroups === 2) {
-          const stA = calculateStandings('Poule A');
-          const stB = calculateStandings('Poule B');
-          const finA = updated.filter(m => m.group === 'Poule A').every(m => m.status === 'finished');
-          const finB = updated.filter(m => m.group === 'Poule B').every(m => m.status === 'finished');
-
-          // Progression Phase Finale Principale
-          if (finA && stA.length >= 2) {
-            updated = updated.map(m => {
-              if (m.id === 'ko-semi-1') return { ...m, team1Id: stA[0].team.id };
-              if (m.id === 'ko-semi-2') return { ...m, team2Id: stA[1].team.id };
-              return m;
+        // Calculer les classements avec le score que l'on vient de sauvegarder,
+        // et non avec l'ancien état React (qui est mis à jour plus tard).
+        const standingsFromMatches = (groupName) => {
+          const table = {};
+          teams.forEach(t => { table[t.id] = { team: t, points: 0, gf: 0, ga: 0, gd: 0 }; });
+          updated.filter(m => m.group === groupName && m.status === 'finished' && m.team1Id && m.team2Id)
+            .forEach(m => {
+              const a = table[m.team1Id], b = table[m.team2Id];
+              if (!a || !b) return;
+              const sa = Number(m.score1 ?? 0), sb = Number(m.score2 ?? 0);
+              a.gf += sa; a.ga += sb; b.gf += sb; b.ga += sa;
+              if (sa > sb) { a.points += Number(config.pointsWin ?? 3); b.points += Number(config.pointsLoss ?? 0); }
+              else if (sb > sa) { b.points += Number(config.pointsWin ?? 3); a.points += Number(config.pointsLoss ?? 0); }
+              else { a.points += Number(config.pointsDraw ?? 1); b.points += Number(config.pointsDraw ?? 1); }
+              a.gd = a.gf - a.ga; b.gd = b.gf - b.ga;
             });
+          return Object.values(table)
+            .filter(r => updated.some(m => m.group === groupName && (m.team1Id === r.team.id || m.team2Id === r.team.id)))
+            .sort((a,b) => b.points-a.points || b.gd-a.gd || b.gf-a.gf);
+        };
+        const isGroupComplete = (groupName) => {
+          const fixtures = updated.filter(m => m.group === groupName);
+          return fixtures.length > 0 && fixtures.every(m => m.status === 'finished');
+        };
+        const winnerOf = (matchId) => {
+          const m = updated.find(m => m.id === matchId);
+          if (!m || m.status !== 'finished' || !m.team1Id || !m.team2Id) return null;
+          if (Number(m.score1) > Number(m.score2)) return m.team1Id;
+          if (Number(m.score2) > Number(m.score1)) return m.team2Id;
+          if (m.pens1 != null && m.pens2 != null && Number(m.pens1) !== Number(m.pens2))
+            return Number(m.pens1) > Number(m.pens2) ? m.team1Id : m.team2Id;
+          return null;
+        };
+        const loserOf = (matchId) => {
+          const m = updated.find(m => m.id === matchId), winner = winnerOf(matchId);
+          if (!m || !winner) return null;
+          return winner === m.team1Id ? m.team2Id : m.team1Id;
+        };
+        const resolveSource = (source) => {
+          if (!source) return null;
+          if (source.kind === 'winner') return winnerOf(source.matchId);
+          if (source.kind === 'loser') return loserOf(source.matchId);
+          if (source.kind === 'rank' && isGroupComplete(source.group))
+            return standingsFromMatches(source.group)[source.position]?.team.id || null;
+          return null;
+        };
+        // Pour les nouveaux calendriers : résolution des quarts, demies et finales.
+        // Pour les calendriers déjà enregistrés : compatibilité avec les anciens IDs.
+        const groupNames = config.format === 'round_robin' ? ['Poule Unique'] : activeGroupNames;
+        const n = groupNames.length;
+        const legacySource = (m, side) => {
+          const a = groupNames[0], b = groupNames[1];
+          if (n === 1) {
+            if (m.id === 'ko-semi-1') return side === 1 ? {kind:'rank',group:a,position:0} : {kind:'rank',group:a,position:3};
+            if (m.id === 'ko-semi-2') return side === 1 ? {kind:'rank',group:a,position:1} : {kind:'rank',group:a,position:2};
           }
-          if (finB && stB.length >= 2) {
-            updated = updated.map(m => {
-              if (m.id === 'ko-semi-2') return { ...m, team1Id: stB[0].team.id };
-              if (m.id === 'ko-semi-1') return { ...m, team2Id: stB[1].team.id };
-              return m;
-            });
+          if (n === 2) {
+            const old = {
+              'ko-semi-1': [{kind:'rank',group:a,position:0},{kind:'rank',group:b,position:1}],
+              'ko-semi-2': [{kind:'rank',group:b,position:0},{kind:'rank',group:a,position:1}],
+              'cons-semi-1': [{kind:'rank',group:a,position:2},{kind:'rank',group:b,position:3}],
+              'cons-semi-2': [{kind:'rank',group:b,position:2},{kind:'rank',group:a,position:3}],
+              'cons-final': [{kind:'winner',matchId:'cons-semi-1'},{kind:'winner',matchId:'cons-semi-2'}],
+              'rank-7-8': [{kind:'loser',matchId:'cons-semi-1'},{kind:'loser',matchId:'cons-semi-2'}]
+            };
+            if (old[m.id]) return old[m.id][side-1];
           }
-
-          // Progression Tournoi Consolante (3e et 4e de poules)
-          if (finA && stA.length >= 4) {
-            updated = updated.map(m => {
-              if (m.id === 'cons-semi-1') return { ...m, team1Id: stA[2].team.id };
-              if (m.id === 'cons-semi-2') return { ...m, team2Id: stA[3].team.id };
-              return m;
-            });
-          }
-          if (finB && stB.length >= 4) {
-            updated = updated.map(m => {
-              if (m.id === 'cons-semi-2') return { ...m, team1Id: stB[2].team.id };
-              if (m.id === 'cons-semi-1') return { ...m, team2Id: stB[3].team.id };
-              return m;
-            });
-          }
-
-          // Détermination du vainqueur d'un match (score direct ou T.A.B.)
-          const getWinner = (m) => {
-            if (!m || m.status !== 'finished') return null;
-            if (m.score1 > m.score2) return m.team1Id;
-            if (m.score2 > m.score1) return m.team2Id;
-            if ((m.pens1 || 0) > (m.pens2 || 0)) return m.team1Id;
-            if ((m.pens2 || 0) > (m.pens1 || 0)) return m.team2Id;
-            return null;
-          };
-          const getLoser = (m) => {
-            if (!m || m.status !== 'finished') return null;
-            const w = getWinner(m);
-            if (!w) return null;
-            return w === m.team1Id ? m.team2Id : m.team1Id;
-          };
-
-          // Qualification en Finale Principale
-          const s1 = updated.find(m => m.id === 'ko-semi-1');
-          const s2 = updated.find(m => m.id === 'ko-semi-2');
-          const w1 = getWinner(s1);
-          const w2 = getWinner(s2);
+          if (m.id === 'ko-final') return {kind:'winner',matchId:side === 1 ? 'ko-semi-1' : 'ko-semi-2'};
+          return null;
+        };
+        // Par ordre de dépendance, afin que les résultats se propagent en une sauvegarde.
+        const phaseOrder = id => id.startsWith('ko-qf') ? 0 : id.startsWith('ko-semi') ? 1 : id === 'ko-final' ? 2 : id.startsWith('cons-semi') ? 3 : 4;
+        const knockout = updated.filter(m => m.group === 'Phase Finale Principale' || m.group === 'Tournoi Consolante')
+          .sort((a,b) => phaseOrder(a.id) - phaseOrder(b.id));
+        knockout.forEach(fixture => {
+          const source1 = fixture.source1 || legacySource(fixture, 1);
+          const source2 = fixture.source2 || legacySource(fixture, 2);
+          if (!source1 && !source2) return;
+          const t1 = resolveSource(source1), t2 = resolveSource(source2);
           updated = updated.map(m => {
-            if (m.id === 'ko-final') {
-              return { ...m, team1Id: w1 || m.team1Id, team2Id: w2 || m.team2Id };
-            }
-            return m;
+            if (m.id !== fixture.id) return m;
+            // Ne pas remplacer un match déjà terminé : protection des scores existants.
+            if (m.status === 'finished') return m;
+            return { ...m, team1Id: t1 || null, team2Id: t2 || null };
           });
-
-          // Qualification en Finale Consolante & Match 7e-8e
-          const cs1 = updated.find(m => m.id === 'cons-semi-1');
-          const cs2 = updated.find(m => m.id === 'cons-semi-2');
-          const cw1 = getWinner(cs1);
-          const cw2 = getWinner(cs2);
-          const cl1 = getLoser(cs1);
-          const cl2 = getLoser(cs2);
-          updated = updated.map(m => {
-            if (m.id === 'cons-final') {
-              return { ...m, team1Id: cw1 || m.team1Id, team2Id: cw2 || m.team2Id };
-            }
-            if (m.id === 'rank-7-8') {
-              return { ...m, team1Id: cl1 || m.team1Id, team2Id: cl2 || m.team2Id };
-            }
-            return m;
-          });
-        }
+        });
 
         setMatches(updated);
         broadcastUpdate(config, fields, teams, updated);
@@ -1991,12 +2009,12 @@
                     🏆 Phase Finale Principale (Titre)
                   </h3>
                   <div className="flex flex-col md:flex-row gap-6 justify-around">
-                    {/* Demi-finales */}
+                    {/* Quarts de finale et demi-finales */}
                     <div className="flex-1 space-y-3">
-                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Demi-Finales</div>
-                      {matches.filter(m => m.group === 'Phase Finale Principale' && m.stage?.includes('Demi')).map(m => {
-                        const t1 = getTeam(m.team1Id);
-                        const t2 = getTeam(m.team2Id);
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Quarts & Demi-Finales</div>
+                      {matches.filter(m => m.group === 'Phase Finale Principale' && (m.stage?.includes('Demi') || m.stage?.includes('Quart'))).map(m => {
+                        const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
+                        const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
                         return (
                           <div key={m.id} className="bg-[#0b0304] border border-red-950 p-3 rounded-xl space-y-2">
                             <div className="flex justify-between text-[11px] text-amber-400 font-bold">
@@ -2024,8 +2042,8 @@
                     <div className="flex-1 space-y-3">
                       <div className="text-xs font-bold text-amber-400 uppercase tracking-wider text-center">Grande Finale</div>
                       {matches.filter(m => m.group === 'Phase Finale Principale' && m.stage === 'Grande Finale').map(m => {
-                        const t1 = getTeam(m.team1Id);
-                        const t2 = getTeam(m.team2Id);
+                        const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
+                        const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
                         return (
                           <div key={m.id} className="bg-[#0b0304] border border-amber-500/70 p-4 rounded-xl space-y-2.5 shadow-lg">
                             <div className="flex justify-between text-xs text-amber-400 font-black">
@@ -2059,8 +2077,8 @@
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {matches.filter(m => m.group === 'Tournoi Consolante').map(m => {
-                        const t1 = getTeam(m.team1Id);
-                        const t2 = getTeam(m.team2Id);
+                        const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
+                        const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
                         return (
                           <div key={m.id} className="bg-[#0b0304] border border-red-950 p-3.5 rounded-xl space-y-2">
                             <div className="flex justify-between text-xs text-cyan-400 font-bold">
