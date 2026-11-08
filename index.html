@@ -917,18 +917,30 @@
         showToast('Équipe retirée');
       };
 
-      const handleAddPlayerToTeam = (teamId, pName) => {
-        if (!pName || !pName.trim()) return;
-        const updated = teams.map(t => {
-          if (t.id === teamId) {
-            return { ...t, players: [...(t.players || []), pName.trim()] };
-          }
-          return t;
+      const handleAddPlayerToTeam = (teamId, namesText) => {
+        // Coller plusieurs noms, séparés par retours à la ligne, virgules ou points-virgules.
+        const entered = String(namesText || '').split(/[\n,;]+/).map(name => name.trim()).filter(Boolean);
+        if (!entered.length) return;
+        const currentTeam = teams.find(t => t.id === teamId);
+        if (!currentTeam) return;
+        const existing = new Set((currentTeam.players || []).map(name => name.trim().toLocaleLowerCase('fr')));
+        const additions = entered.filter(name => {
+          const key = name.toLocaleLowerCase('fr');
+          if (existing.has(key)) return false;
+          existing.add(key);
+          return true;
         });
+        if (!additions.length) {
+          showToast('Ces joueurs sont déjà inscrits dans cette équipe.', 'error');
+          return;
+        }
+        const updated = teams.map(t => t.id === teamId
+          ? { ...t, players: [...(t.players || []), ...additions] }
+          : t);
         setTeams(updated);
-        setNewPlayerInputs({ ...newPlayerInputs, [teamId]: '' });
+        setNewPlayerInputs(previous => ({ ...previous, [teamId]: '' }));
         broadcastUpdate(config, fields, updated, matches);
-        showToast('Joueur ajouté à l\'effectif');
+        showToast(`${additions.length} joueur(s) ajouté(s) à l'effectif`);
       };
 
       const handleRemovePlayerFromTeam = (teamId, idx) => {
@@ -1037,42 +1049,56 @@
         showToast('Score et match enregistrés !');
       };
 
-      // Statistiques globales
+      // Statistiques globales : compter les buts depuis les SCORES, même sans buteur saisi.
       const stats = useMemo(() => {
         const scorers = {};
         const mvps = {};
         let totalGoals = 0;
         let totalCards = 0;
+        let completedMatches = 0;
 
         matches.forEach(m => {
+          const score1 = Number(m.score1);
+          const score2 = Number(m.score2);
+          if (m.status === 'finished' && m.score1 !== null && m.score1 !== undefined
+              && m.score2 !== null && m.score2 !== undefined
+              && Number.isFinite(score1) && Number.isFinite(score2)) {
+            completedMatches++;
+            totalGoals += Math.max(0, score1) + Math.max(0, score2);
+          }
+
           if (m.mvp) {
-            mvps[m.mvp] = (mvps[m.mvp] || 0) + 1;
+            // Conserver le nom de joueur existant, avec l'ID du club quand il est connu.
+            let clubId = m.mvpTeamId && teams.some(t => t.id === m.mvpTeamId) ? m.mvpTeamId : null;
+            if (!clubId) {
+              const participants = [m.team1Id, m.team2Id]
+                .map(id => teams.find(t => t.id === id))
+                .filter(Boolean);
+              const candidates = participants.filter(t => (t.players || []).some(p => p === m.mvp));
+              if (candidates.length === 1) clubId = candidates[0].id;
+            }
+            const key = JSON.stringify([m.mvp, clubId]);
+            if (!mvps[key]) mvps[key] = { player: m.mvp, teamId: clubId, count: 0 };
+            mvps[key].count++;
           }
-          if (m.events) {
-            m.events.forEach(e => {
-              if (e.type === 'goal') {
-                totalGoals++;
-                const key = `${e.player}__${e.teamId}`;
-                scorers[key] = scorers[key] || { player: e.player, teamId: e.teamId, count: 0 };
-                scorers[key].count++;
-              }
-              if (e.type === 'yellow' || e.type === 'red') totalCards++;
-            });
-          }
+          (m.events || []).forEach(e => {
+            if (e.type === 'goal') {
+              const key = JSON.stringify([e.player, e.teamId]);
+              scorers[key] = scorers[key] || { player: e.player, teamId: e.teamId, count: 0 };
+              scorers[key].count++;
+            }
+            if (e.type === 'yellow' || e.type === 'red') totalCards++;
+          });
         });
-
-        const topScorers = Object.values(scorers).sort((a, b) => b.count - a.count).slice(0, 5);
-        const topMvps = Object.entries(mvps).map(([player, count]) => ({ player, count })).sort((a, b) => b.count - a.count);
-
         return {
-          topScorers,
-          topMvps,
+          topScorers: Object.values(scorers).sort((a, b) => b.count - a.count).slice(0, 5),
+          topMvps: Object.values(mvps).sort((a, b) => b.count - a.count || a.player.localeCompare(b.player)),
           totalGoals,
           totalCards,
-          completedMatches: matches.filter(m => m.status === 'finished').length,
+          completedMatches,
           totalMatches: matches.length
         };
-      }, [matches]);
+      }, [matches, teams]);
 
       // Liens de partage complets
       const buildShareUrl = (role) => {
@@ -1624,15 +1650,13 @@
 
                       {userRole === 'editor' && (
                         <div className="pt-2 border-t border-red-950 flex gap-1.5">
-                          <input
-                            type="text"
-                            placeholder="Nom du joueur..."
+                          <textarea
+                            rows={3}
+                            placeholder="Un joueur par ligne (ou noms séparés par virgules / points-virgules)..."
+                            aria-label={`Ajouter plusieurs joueurs à ${t.name}`}
                             value={newPlayerInputs[t.id] || ''}
-                            onChange={(e) => setNewPlayerInputs({ ...newPlayerInputs, [t.id]: e.target.value })}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleAddPlayerToTeam(t.id, newPlayerInputs[t.id]);
-                            }}
-                            className="flex-1 bg-[#0b0304] border border-red-900/60 text-xs text-white px-2 py-1 rounded-lg focus:outline-none focus:border-amber-500"
+                            onChange={(e) => setNewPlayerInputs(previous => ({ ...previous, [t.id]: e.target.value }))}
+                            className="flex-1 min-w-0 bg-[#0b0304] border border-red-900/60 text-xs text-white px-2 py-1 rounded-lg focus:outline-none focus:border-amber-500 resize-y"
                           />
                           <button
                             onClick={() => handleAddPlayerToTeam(t.id, newPlayerInputs[t.id])}
@@ -1891,7 +1915,7 @@
                             </div>
                           </div>
 
-                          {m.mvp && (
+                          {userRole === 'editor' && m.mvp && (
                             <div className="mt-1.5 pt-1 border-t border-red-950/70 text-[11px] text-amber-300">
                               ⭐ Homme du Match : <strong className="text-white">{m.mvp}</strong>
                             </div>
@@ -2233,8 +2257,8 @@
                     )}
                   </div>
 
-                  {/* Hommes du Match */}
-                  <div className="bg-[#150709] border border-red-950 rounded-2xl p-4 shadow-xl">
+                  {/* Les MVP sont réservés aux organisateurs : rien en vue spectateur. */}
+                  {userRole === 'editor' && <div className="bg-[#150709] border border-red-950 rounded-2xl p-4 shadow-xl">
                     <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider mb-3">⭐ Hommes du Match (MVP)</h3>
                     {stats.topMvps.length === 0 ? (
                       <p className="text-xs text-slate-500 italic py-4 text-center">Aucun MVP désigné pour le moment.</p>
@@ -2244,7 +2268,10 @@
                           <div key={idx} className="flex items-center justify-between p-2.5 bg-[#0b0304] rounded-xl border border-red-950 text-xs">
                             <div className="flex items-center gap-2">
                               <span className="text-amber-400">⭐</span>
-                              <span className="font-bold text-white">{mvp.player}</span>
+                              <div>
+                                <span className="font-bold text-white block">{mvp.player}</span>
+                                <span className="text-[10px] text-slate-400">{mvp.teamId ? getTeam(mvp.teamId).name : 'Club non renseigné'}</span>
+                              </div>
                             </div>
                             <span className="font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded text-[11px]">
                               {mvp.count} fois
@@ -2253,7 +2280,7 @@
                         ))}
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </div>
               </div>
             )}
@@ -2636,20 +2663,26 @@
                     const t1 = getTeam(editingMatch.team1Id);
                     const t2 = getTeam(editingMatch.team2Id);
                     const allPlayers = [
-                      ...(t1.players || []).map(p => ({ player: p, teamName: t1.name })),
-                      ...(t2.players || []).map(p => ({ player: p, teamName: t2.name }))
+                      ...(t1.players || []).map(p => ({ player: p, teamName: t1.name, teamId: t1.id })),
+                      ...(t2.players || []).map(p => ({ player: p, teamName: t2.name, teamId: t2.id }))
                     ];
                     return (
                       <div className="space-y-1.5">
                         <select
-                          value={editingMatch.mvp || ''}
-                          onChange={(e) => setEditingMatch({ ...editingMatch, mvp: e.target.value })}
+                          value={allPlayers.findIndex(item => item.player === editingMatch.mvp && item.teamId === editingMatch.mvpTeamId) >= 0
+                            ? String(allPlayers.findIndex(item => item.player === editingMatch.mvp && item.teamId === editingMatch.mvpTeamId))
+                            : ''}
+                          onChange={(e) => {
+                            const index = e.target.value === '' ? -1 : Number(e.target.value);
+                            const player = allPlayers[index];
+                            setEditingMatch({ ...editingMatch, mvp: player ? player.player : '', mvpTeamId: player ? player.teamId : null });
+                          }}
                           className="w-full bg-[#18080a] border border-red-900/60 rounded-lg p-2 text-xs text-white"
                         >
                           <option value="">-- Choisir le meilleur joueur du match --</option>
                           {allPlayers.length > 0 ? (
                             allPlayers.map((item, idx) => (
-                              <option key={idx} value={item.player}>
+                              <option key={idx} value={String(idx)}>
                                 {item.player} ({item.teamName})
                               </option>
                             ))
@@ -2661,7 +2694,7 @@
                           type="text"
                           placeholder="Ou saisir un nom manuellement..."
                           value={editingMatch.mvp || ''}
-                          onChange={(e) => setEditingMatch({ ...editingMatch, mvp: e.target.value })}
+                          onChange={(e) => setEditingMatch({ ...editingMatch, mvp: e.target.value, mvpTeamId: null })}
                           className="w-full bg-[#18080a] border border-red-900/60 rounded-lg px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600"
                         />
                       </div>
