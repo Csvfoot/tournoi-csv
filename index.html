@@ -337,6 +337,11 @@
       });
 
       const [editingMatch, setEditingMatch] = useState(null);
+      const [movingMatchId, setMovingMatchId] = useState(null);
+      const [moveTargetId, setMoveTargetId] = useState('');
+      const [moveFieldId, setMoveFieldId] = useState('');
+      const [moveStartTime, setMoveStartTime] = useState('');
+      const [moveMode, setMoveMode] = useState('swap');
       const [goalScorerName, setGoalScorerName] = useState('');
       const [goalTeamId, setGoalTeamId] = useState('');
       const [cardPlayerName, setCardPlayerName] = useState('');
@@ -658,42 +663,111 @@
         showToast("Le tournoi a été entièrement remis à zéro !");
       };
 
-      // Déplacer l'ordre d'un match (Monter / Descendre)
-      const handleMoveMatchOrder = (matchId, direction) => {
-        const sorted = [...matches].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-        const index = sorted.findIndex(m => m.id === matchId);
-        if (index < 0) return;
-        const targetIndex = direction === 'up' ? index - 1 : index + 1;
-        if (targetIndex < 0 || targetIndex >= sorted.length) return;
+      // Planification des matchs : les rencontres et leurs résultats ne sont jamais recréés.
+      // L'ordre stable gère aussi plusieurs matchs à la même heure sur différents terrains.
+      const sortedSchedule = () => [...matches].sort((a, b) =>
+        timeToMinutes(a.startTime) - timeToMinutes(b.startTime) ||
+        String(a.fieldName || '').localeCompare(String(b.fieldName || '')) ||
+        String(a.id).localeCompare(String(b.id))
+      );
 
-        // Échange des horaires et terrains entre les deux matchs
-        const currentMatch = sorted[index];
-        const targetMatch = sorted[targetIndex];
+      const openMoveMatch = (matchId) => {
+        const match = matches.find(m => m.id === matchId);
+        if (!match) return;
+        setMovingMatchId(matchId);
+        setMoveMode('swap');
+        setMoveTargetId('');
+        setMoveFieldId(match.fieldId || fields[0]?.id || '');
+        setMoveStartTime(match.startTime || config.startTime || '09:00');
+      };
 
-        const tempStart = currentMatch.startTime;
-        const tempEnd = currentMatch.endTime;
-        const tempFieldId = currentMatch.fieldId;
-        const tempFieldName = currentMatch.fieldName;
-
-        currentMatch.startTime = targetMatch.startTime;
-        currentMatch.endTime = targetMatch.endTime;
-        currentMatch.fieldId = targetMatch.fieldId;
-        currentMatch.fieldName = targetMatch.fieldName;
-
-        targetMatch.startTime = tempStart;
-        targetMatch.endTime = tempEnd;
-        targetMatch.fieldId = tempFieldId;
-        targetMatch.fieldName = tempFieldName;
-
+      const swapMatchSlots = (sourceId, targetId) => {
+        const source = matches.find(m => m.id === sourceId);
+        const target = matches.find(m => m.id === targetId);
+        if (!source || !target || sourceId === targetId) return;
+        if ((source.status !== 'pending' || target.status !== 'pending') &&
+            !window.confirm('Un des matchs est commencé ou terminé. Modifier quand même son créneau sans changer son score ?')) return;
+        const scheduleAttrs = ['startTime', 'endTime', 'fieldId', 'fieldName'];
         const updated = matches.map(m => {
-          if (m.id === currentMatch.id) return { ...currentMatch };
-          if (m.id === targetMatch.id) return { ...targetMatch };
-          return m;
+          if (m.id !== sourceId && m.id !== targetId) return m;
+          const other = m.id === sourceId ? target : source;
+          const copy = { ...m };
+          scheduleAttrs.forEach(k => { copy[k] = other[k]; });
+          return copy;
         });
-
+        // Bloque les rencontres simultanées d'une même équipe.
+        if (hasTeamTimeConflict(updated, [sourceId, targetId])) {
+          showToast('Déplacement impossible : une équipe jouerait deux matchs en même temps.', 'error');
+          return;
+        }
         setMatches(updated);
         broadcastUpdate(config, fields, teams, updated);
-        showToast("Ordre du match modifié !");
+        setMovingMatchId(null);
+        showToast('Créneaux échangés sans modifier les résultats !');
+      };
+
+      const hasTeamTimeConflict = (scheduled, changedIds) => {
+        for (let i = 0; i < scheduled.length; i++) {
+          const a = scheduled[i];
+          if (!a.startTime || !a.endTime) continue;
+          for (let j = i + 1; j < scheduled.length; j++) {
+            const b = scheduled[j];
+            if (!changedIds.includes(a.id) && !changedIds.includes(b.id)) continue;
+            if (!b.startTime || !b.endTime) continue;
+            const sameTeam = [a.team1Id, a.team2Id].some(id => id && [b.team1Id, b.team2Id].includes(id));
+            if (sameTeam && timeToMinutes(a.startTime) < timeToMinutes(b.endTime) &&
+                timeToMinutes(b.startTime) < timeToMinutes(a.endTime)) return true;
+          }
+        }
+        return false;
+      };
+
+      // Boutons ↑ ↓ conservés pour les changements rapides.
+      const handleMoveMatchOrder = (matchId, direction) => {
+        const ordered = sortedSchedule();
+        const index = ordered.findIndex(m => m.id === matchId);
+        if (index < 0) return;
+        const other = ordered[index + (direction === 'up' ? -1 : 1)];
+        if (!other) return;
+        swapMatchSlots(matchId, other.id);
+      };
+
+      const applyManualMatchSlot = () => {
+        const match = matches.find(m => m.id === movingMatchId);
+        const field = fields.find(f => f.id === moveFieldId);
+        if (!match || !field || !/^\d{2}:\d{2}$/.test(moveStartTime)) {
+          showToast('Sélectionne un terrain et une heure valides.', 'error');
+          return;
+        }
+        const start = timeToMinutes(moveStartTime);
+        const originalDuration = match.startTime && match.endTime
+          ? timeToMinutes(match.endTime) - timeToMinutes(match.startTime) : 0;
+        const duration = originalDuration > 0 ? originalDuration : (parseInt(config.duration, 10) || 15);
+        if (start + duration >= 24 * 60) {
+          showToast('Ce créneau dépasse la fin de la journée.', 'error');
+          return;
+        }
+        const end = start + duration;
+        const conflict = matches.find(m => m.id !== match.id && m.fieldId === field.id &&
+          m.startTime && m.endTime && start < timeToMinutes(m.endTime) &&
+          timeToMinutes(m.startTime) < end);
+        if (conflict) {
+          showToast('Ce terrain est occupé à cet horaire. Utilise Échanger pour prendre son créneau.', 'error');
+          return;
+        }
+        if (match.status !== 'pending' && !window.confirm('Ce match a déjà commencé ou s’est terminé. Modifier son horaire ?')) return;
+        const updated = matches.map(m => m.id === match.id ? {
+          ...m, startTime: moveStartTime, endTime: minutesToTime(end),
+          fieldId: field.id, fieldName: field.name
+        } : m);
+        if (hasTeamTimeConflict(updated, [match.id])) {
+          showToast('Une des deux équipes joue déjà pendant ce créneau.', 'error');
+          return;
+        }
+        setMatches(updated);
+        broadcastUpdate(config, fields, teams, updated);
+        setMovingMatchId(null);
+        showToast('Horaire et terrain enregistrés !');
       };
 
       // Renommer une équipe
@@ -1826,6 +1900,9 @@
                                     </span>
                                     {userRole === 'editor' && (
                                       <div className="flex items-center gap-1">
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
+                                          className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-600/40 text-amber-300 font-bold"
+                                          title="Choisir un autre créneau ou terrain">📅 Déplacer</button>
                                         <button
                                           onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
                                           className="text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold"
@@ -1875,6 +1952,9 @@
                             <div className="flex items-center gap-1.5">
                               {userRole === 'editor' && (
                                 <div className="flex items-center gap-1 mr-1">
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
+                                    className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-600/40 text-amber-300 font-bold text-xs"
+                                    title="Choisir un autre créneau ou terrain">📅 Déplacer</button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
                                     className="text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs"
@@ -2539,6 +2619,49 @@
                     Enregistrer
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODALE DE DÉPLACEMENT LIBRE D'UN MATCH */}
+          {movingMatchId && userRole === 'editor' && (
+            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-3 sm:p-4">
+              <div className="bg-[#150709] border border-amber-500/60 rounded-2xl w-full max-w-lg p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center gap-2">
+                  <h3 className="font-black text-white text-lg">📅 Déplacer un match</h3>
+                  <button type="button" className="text-slate-300 px-2 py-1" onClick={() => setMovingMatchId(null)}>✕</button>
+                </div>
+                <div className="text-sm text-amber-200 font-bold">
+                  {(() => { const m = matches.find(x => x.id === movingMatchId); return m ? `${getTeam(m.team1Id).name} - ${getTeam(m.team2Id).name}` : ''; })()}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${moveMode === 'swap' ? 'bg-amber-500 text-black' : 'bg-[#2a1014] text-white'}`} onClick={() => setMoveMode('swap')}>Échanger 2 créneaux</button>
+                  <button type="button" className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${moveMode === 'manual' ? 'bg-amber-500 text-black' : 'bg-[#2a1014] text-white'}`} onClick={() => setMoveMode('manual')}>Choisir horaire et terrain</button>
+                </div>
+                {moveMode === 'swap' ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-300">Choisis n'importe quel match du calendrier : les horaires et les terrains des deux rencontres seront échangés, sans modifier leurs scores.</p>
+                    <select value={moveTargetId} onChange={e => setMoveTargetId(e.target.value)} className="w-full bg-[#0b0304] border border-red-900 rounded-lg px-3 py-2 text-sm text-white">
+                      <option value="">Sélectionner le créneau à échanger…</option>
+                      {sortedSchedule().filter(m => m.id !== movingMatchId).map(m => (
+                        <option key={m.id} value={m.id}>{m.startTime} • {m.fieldName || 'Terrain'} • {getTeam(m.team1Id).name} - {getTeam(m.team2Id).name}</option>
+                      ))}
+                    </select>
+                    <button type="button" disabled={!moveTargetId} onClick={() => swapMatchSlots(movingMatchId, moveTargetId)} className="w-full bg-amber-500 disabled:opacity-40 text-black font-bold rounded-lg px-4 py-2">Échanger les deux matchs</button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-300">Déplace le match sur un créneau libre. Les conflits de terrain ou d'équipe seront refusés.</p>
+                    <label className="block text-xs font-bold text-slate-300">Heure de début</label>
+                    <input type="time" value={moveStartTime} onChange={e => setMoveStartTime(e.target.value)} className="w-full bg-[#0b0304] border border-red-900 rounded-lg px-3 py-2 text-white" />
+                    <label className="block text-xs font-bold text-slate-300">Terrain</label>
+                    <select value={moveFieldId} onChange={e => setMoveFieldId(e.target.value)} className="w-full bg-[#0b0304] border border-red-900 rounded-lg px-3 py-2 text-white">
+                      {fields.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                    <button type="button" onClick={applyManualMatchSlot} className="w-full bg-amber-500 text-black font-bold rounded-lg px-4 py-2">Enregistrer le créneau</button>
+                  </div>
+                )}
+                <button type="button" className="w-full text-slate-400 text-xs py-2" onClick={() => setMovingMatchId(null)}>Annuler</button>
               </div>
             </div>
           )}
