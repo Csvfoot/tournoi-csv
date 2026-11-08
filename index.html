@@ -2041,8 +2041,8 @@
                                     </span>
                                     {userRole === 'editor' && (
                                       <div className="flex items-center gap-1">
-                                        <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
-                                          className="px-1.5 py-0.5 rounded text-slate-500 hover:text-amber-300 hover:bg-amber-900/20 text-xs"
+                                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openMoveMatch(m.id); }}
+                                          className="inline-flex items-center justify-center w-8 h-8 sm:w-7 sm:h-7 rounded-md border border-amber-700/30 bg-black/30 text-amber-300 hover:text-amber-100 hover:bg-amber-900/30 text-base cursor-pointer touch-manipulation relative z-10"
                                           title="Déplacer le match (heure ou terrain)" aria-label="Déplacer le match">↔</button>
                                         <button
                                           onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
@@ -2093,8 +2093,8 @@
                             <div className="flex items-center gap-1.5">
                               {userRole === 'editor' && (
                                 <div className="flex items-center gap-1 mr-1">
-                                  <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
-                                    className="px-1.5 py-0.5 rounded text-slate-500 hover:text-amber-300 hover:bg-amber-900/20 text-xs"
+                                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openMoveMatch(m.id); }}
+                                    className="inline-flex items-center justify-center w-8 h-8 sm:w-7 sm:h-7 rounded-md border border-amber-700/30 bg-black/30 text-amber-300 hover:text-amber-100 hover:bg-amber-900/30 text-base cursor-pointer touch-manipulation relative z-10"
                                           title="Déplacer le match (heure ou terrain)" aria-label="Déplacer le match">↔</button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
@@ -2765,8 +2765,8 @@
           )}
 
           {/* MODALE DE DÉPLACEMENT LIBRE D'UN MATCH */}
-          {movingMatchId && userRole === 'editor' && (
-            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-3 sm:p-4">
+          {movingMatchId && userRole === 'editor' && ReactDOM.createPortal((
+            <div className="fixed inset-0 bg-black/85 z-[9999] flex items-center justify-center p-3 sm:p-4">
               <div className="bg-[#150709] border border-amber-500/60 rounded-2xl w-full max-w-lg p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center gap-2">
                   <h3 className="font-black text-white text-lg">📅 Déplacer un match</h3>
@@ -2810,7 +2810,7 @@
                 <button type="button" className="w-full text-slate-400 text-xs py-2" onClick={() => setMovingMatchId(null)}>Annuler</button>
               </div>
             </div>
-          )}
+          ), document.body)}
 
           {/* MODALE FEUILLE DE MATCH */}
           {editingMatch && userRole === 'editor' && (
