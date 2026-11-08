@@ -342,6 +342,12 @@
       const [moveFieldId, setMoveFieldId] = useState('');
       const [moveStartTime, setMoveStartTime] = useState('');
       const [moveMode, setMoveMode] = useState('swap');
+      const [showReservedSlotEditor, setShowReservedSlotEditor] = useState(false);
+      const [reservedTitle, setReservedTitle] = useState('Finale');
+      const [reservedStart, setReservedStart] = useState('16:00');
+      const [reservedDuration, setReservedDuration] = useState(20);
+      const [reservedFieldId, setReservedFieldId] = useState('');
+      const [reservedAssignChoices, setReservedAssignChoices] = useState({});
       const [goalScorerName, setGoalScorerName] = useState('');
       const [goalTeamId, setGoalTeamId] = useState('');
       const [cardPlayerName, setCardPlayerName] = useState('');
@@ -663,6 +669,80 @@
         showToast("Le tournoi a été entièrement remis à zéro !");
       };
 
+      // Créneaux exclusifs : blocs vides et matchs seuls sur tous les terrains.
+      // Stockés dans config pour bénéficier des sauvegardes locales et de Firebase existants.
+      const reservedSlots = Array.isArray(config.reservedSlots) ? config.reservedSlots : [];
+      const timesOverlap = (aStart, aEnd, bStart, bEnd) =>
+        timeToMinutes(aStart) < timeToMinutes(bEnd) && timeToMinutes(bStart) < timeToMinutes(aEnd);
+      const isInsideReservedSlot = (m, slots = reservedSlots) =>
+        slots.some(slot => m.startTime && m.endTime &&
+          timesOverlap(m.startTime, m.endTime, slot.startTime, slot.endTime));
+      const hasExclusiveConflict = (scheduled, slots = reservedSlots) => {
+        if (scheduled.some(m => isInsideReservedSlot(m, slots))) return true;
+        return scheduled.some(m => m.exclusive && m.startTime && m.endTime &&
+          scheduled.some(other => other.id !== m.id && other.startTime && other.endTime &&
+            timesOverlap(m.startTime, m.endTime, other.startTime, other.endTime)));
+      };
+      const saveEmptyReservedSlot = () => {
+        const start = /^\d{2}:\d{2}$/.test(reservedStart) ? timeToMinutes(reservedStart) : -1;
+        const duration = Number(reservedDuration);
+        const field = fields.find(f => f.id === reservedFieldId) || fields[0];
+        if (!field || start < 0 || start >= 1440 || !Number.isInteger(duration) || duration < 5 || start + duration > 1440) {
+          showToast('Choisis un horaire, un terrain et une durée valides.', 'error'); return;
+        }
+        const endTime = minutesToTime(start + duration);
+        const startTime = minutesToTime(start);
+        if (matches.some(m => m.startTime && m.endTime && timesOverlap(startTime, endTime, m.startTime, m.endTime)) ||
+            reservedSlots.some(b => timesOverlap(startTime, endTime, b.startTime, b.endTime))) {
+          showToast('Un match ou un autre créneau occupe déjà cet horaire. Déplace-le avant de réserver.', 'error'); return;
+        }
+        const newSlot = { id: 'reserve-' + Date.now(), title: reservedTitle.trim() || 'Créneau réservé',
+          startTime, endTime, fieldId: field.id, fieldName: field.name };
+        const newCfg = { ...config, reservedSlots: [...reservedSlots, newSlot] };
+        setConfig(newCfg);
+        broadcastUpdate(newCfg, fields, teams, matches);
+        setShowReservedSlotEditor(false);
+        showToast('Créneau exclusif créé : tous les terrains sont bloqués.');
+      };
+      const deleteReservedSlot = (id) => {
+        if (!window.confirm('Libérer ce créneau sur tous les terrains ?')) return;
+        const newCfg = { ...config, reservedSlots: reservedSlots.filter(s => s.id !== id) };
+        setConfig(newCfg);
+        broadcastUpdate(newCfg, fields, teams, matches);
+      };
+      const assignMatchToReservedSlot = (slotId) => {
+        const slot = reservedSlots.find(s => s.id === slotId);
+        const matchId = reservedAssignChoices[slotId];
+        const match = matches.find(m => m.id === matchId);
+        if (!slot || !match) { showToast('Choisis le match à programmer.', 'error'); return; }
+        if (match.status !== 'pending' && !window.confirm('Ce match a déjà commencé ou est terminé. Modifier son horaire ?')) return;
+        const others = matches.filter(m => m.id !== match.id);
+        if (others.some(m => m.startTime && m.endTime && timesOverlap(slot.startTime, slot.endTime, m.startTime, m.endTime))) {
+          showToast('Des matchs occupent maintenant ce créneau. Libère cet horaire avant de continuer.', 'error'); return;
+        }
+        const updated = matches.map(m => m.id === match.id ? { ...m,
+          startTime: slot.startTime, endTime: slot.endTime,
+          fieldId: slot.fieldId, fieldName: slot.fieldName, exclusive: true } : m);
+        const newCfg = { ...config, reservedSlots: reservedSlots.filter(s => s.id !== slotId) };
+        if (hasExclusiveConflict(updated, newCfg.reservedSlots) || hasTeamTimeConflict(updated, [match.id])) {
+          showToast('Conflit avec un autre match ou créneau réservé.', 'error'); return;
+        }
+        setMatches(updated); setConfig(newCfg);
+        broadcastUpdate(newCfg, fields, teams, updated);
+        showToast('Match placé seul sur tous les terrains !');
+      };
+      const toggleMatchExclusive = (id) => {
+        const match = matches.find(m => m.id === id);
+        if (!match) return;
+        const updated = matches.map(m => m.id === id ? {...m, exclusive: !m.exclusive} : m);
+        if (hasExclusiveConflict(updated)) {
+          showToast('Impossible : un autre match est prévu au même moment.', 'error'); return;
+        }
+        setMatches(updated);
+        broadcastUpdate(config, fields, teams, updated);
+        showToast(match.exclusive ? 'Créneau partagé à nouveau.' : 'Match réservé : aucun match en parallèle.');
+      };
+
       // Planification des matchs : les rencontres et leurs résultats ne sont jamais recréés.
       // L'ordre stable gère aussi plusieurs matchs à la même heure sur différents terrains.
       const sortedSchedule = () => [...matches].sort((a, b) =>
@@ -695,6 +775,9 @@
           scheduleAttrs.forEach(k => { copy[k] = other[k]; });
           return copy;
         });
+        if (hasExclusiveConflict(updated)) {
+          showToast('Déplacement impossible : créneau exclusif ou réservé.', 'error'); return;
+        }
         // Bloque les rencontres simultanées d'une même équipe.
         if (hasTeamTimeConflict(updated, [sourceId, targetId])) {
           showToast('Déplacement impossible : une équipe jouerait deux matchs en même temps.', 'error');
@@ -760,6 +843,9 @@
           ...m, startTime: moveStartTime, endTime: minutesToTime(end),
           fieldId: field.id, fieldName: field.name
         } : m);
+        if (hasExclusiveConflict(updated)) {
+          showToast('Ce créneau est bloqué pour une finale ou un autre match exclusif.', 'error'); return;
+        }
         if (hasTeamTimeConflict(updated, [match.id])) {
           showToast('Une des deux équipes joue déjà pendant ce créneau.', 'error');
           return;
@@ -881,7 +967,14 @@
           availability.sort((a,b)=>a.next-b.next);
           const f=availability[0];
           let start=f.next;
-          if(config.hasLunchBreak && start<lunchEnd && start+duration>lunchStart)start=Math.max(start,lunchEnd);
+          // Ne jamais placer automatiquement un match pendant un créneau réservé.
+          for (let attempts = 0; attempts < 60; attempts++) {
+            if(config.hasLunchBreak && start<lunchEnd && start+duration>lunchStart)start=Math.max(start,lunchEnd);
+            const block = (Array.isArray(config.reservedSlots) ? config.reservedSlots : []).find(b =>
+              start < timeToMinutes(b.endTime) && timeToMinutes(b.startTime) < start + duration);
+            if (!block) break;
+            start = timeToMinutes(block.endTime);
+          }
           f.next=start+duration+pause;
           return {...m,fieldId:f.fieldId,fieldName:f.fieldName,startTime:minutesToTime(start),endTime:minutesToTime(start+duration)};
         });
@@ -1838,6 +1931,49 @@
                   </div>
                 </div>
 
+                {/* CRÉNEAUX RÉSERVÉS : affichés à tous, modifiables uniquement par l'organisateur */}
+                <div className="bg-[#150709] border border-red-950 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-slate-300 font-semibold">⏱ Créneaux réservés <span className="text-slate-500 font-normal">(aucun match en parallèle)</span></div>
+                    {userRole === 'editor' && <button type="button" onClick={() => {setReservedFieldId(fields[0]?.id || '');setShowReservedSlotEditor(v => !v);}}
+                      className="text-[11px] text-slate-400 hover:text-amber-300 border border-red-950 rounded-md px-2 py-1">{showReservedSlotEditor ? 'Fermer' : '+ Réserver'}</button>}
+                  </div>
+                  {userRole === 'editor' && showReservedSlotEditor && (
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t border-red-950">
+                      <label className="text-[11px] text-slate-400">Intitulé<input type="text" value={reservedTitle} onChange={e=>setReservedTitle(e.target.value)}
+                        className="mt-1 w-full bg-[#0b0304] border border-red-950 text-white rounded-md px-2 py-1.5" placeholder="Finale" /></label>
+                      <label className="text-[11px] text-slate-400">Début<input type="time" value={reservedStart} onChange={e=>setReservedStart(e.target.value)}
+                        className="mt-1 w-full bg-[#0b0304] border border-red-950 text-white rounded-md px-2 py-1.5" /></label>
+                      <label className="text-[11px] text-slate-400">Durée (min)<input type="number" min="5" max="180" step="5" value={reservedDuration} onChange={e=>setReservedDuration(e.target.value)}
+                        className="mt-1 w-full bg-[#0b0304] border border-red-950 text-white rounded-md px-2 py-1.5" /></label>
+                      <label className="text-[11px] text-slate-400">Terrain<select value={reservedFieldId} onChange={e=>setReservedFieldId(e.target.value)}
+                        className="mt-1 w-full bg-[#0b0304] border border-red-950 text-white rounded-md px-2 py-1.5">
+                        {fields.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select></label>
+                      <button type="button" onClick={saveEmptyReservedSlot} className="self-end bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold rounded-md px-3 py-2">Réserver</button>
+                    </div>
+                  )}
+                  {reservedSlots.map(slot => (
+                    <div key={slot.id} className="rounded-md bg-[#0b0304] border border-amber-800/30 px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-amber-300 font-semibold">🔒 {slot.startTime}–{slot.endTime} · {slot.title}</span>
+                      <span className="text-slate-400">{slot.fieldName} · tous terrains indisponibles</span>
+                      {userRole === 'editor' && <div className="flex flex-wrap items-center gap-2 ml-auto">
+                        <select className="bg-[#150709] text-slate-200 border border-red-950 rounded px-2 py-1 max-w-[210px]"
+                          value={reservedAssignChoices[slot.id] || ''} onChange={e=>setReservedAssignChoices(p=>({...p,[slot.id]:e.target.value}))}>
+                          <option value="">Laisser vide</option>
+                          {matches.map(m=><option key={m.id} value={m.id}>{m.stage || 'Match'} : {getTeam(m.team1Id).name} – {getTeam(m.team2Id).name}</option>)}
+                        </select>
+                        {reservedAssignChoices[slot.id] && <button type="button" onClick={()=>assignMatchToReservedSlot(slot.id)}
+                          className="text-amber-300 underline">Affecter</button>}
+                        <button type="button" onClick={()=>deleteReservedSlot(slot.id)} className="text-slate-500 hover:text-rose-300" title="Libérer le créneau">✕</button>
+                      </div>}
+                    </div>
+                  ))}
+                  {matches.filter(m=>m.exclusive).map(m=>(
+                    <div key={m.id} className="text-xs text-slate-400 px-2">🏆 {m.startTime}–{m.endTime} · {m.stage} — <span className="text-amber-300">Match seul sur tous les terrains</span></div>
+                  ))}
+                </div>
+
                 {matches.length === 0 ? (
                   <div className="text-center py-16 bg-[#150709] rounded-2xl border border-red-950 text-slate-400 text-sm">
                     Aucun match généré. Rendez-vous dans Configuration pour planifier le tournoi.
@@ -1857,6 +1993,11 @@
                           </div>
 
                           <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[700px]">
+                            {reservedSlots.filter(b => b.fieldId === f.id).map(b => (
+                              <div key={b.id} className="rounded-lg p-2 border border-dashed border-amber-800/40 text-xs text-amber-300 bg-amber-950/10">
+                                🔒 {b.startTime}–{b.endTime} · {b.title} <span className="text-slate-400">(tous terrains réservés)</span>
+                              </div>
+                            ))}
                             {fMatches.map(m => {
                               const t1 = getTeam(m.team1Id);
                               const t2 = getTeam(m.team2Id);
@@ -1901,8 +2042,8 @@
                                     {userRole === 'editor' && (
                                       <div className="flex items-center gap-1">
                                         <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
-                                          className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-600/40 text-amber-300 font-bold"
-                                          title="Choisir un autre créneau ou terrain">📅 Déplacer</button>
+                                          className="px-1.5 py-0.5 rounded text-slate-500 hover:text-amber-300 hover:bg-amber-900/20 text-xs"
+                                          title="Déplacer le match (heure ou terrain)" aria-label="Déplacer le match">↔</button>
                                         <button
                                           onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
                                           className="text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold"
@@ -1953,8 +2094,8 @@
                               {userRole === 'editor' && (
                                 <div className="flex items-center gap-1 mr-1">
                                   <button type="button" onClick={(e) => { e.stopPropagation(); openMoveMatch(m.id); }}
-                                    className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-600/40 text-amber-300 font-bold text-xs"
-                                    title="Choisir un autre créneau ou terrain">📅 Déplacer</button>
+                                    className="px-1.5 py-0.5 rounded text-slate-500 hover:text-amber-300 hover:bg-amber-900/20 text-xs"
+                                          title="Déplacer le match (heure ou terrain)" aria-label="Déplacer le match">↔</button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }}
                                     className="text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs"
@@ -2633,6 +2774,11 @@
                 </div>
                 <div className="text-sm text-amber-200 font-bold">
                   {(() => { const m = matches.find(x => x.id === movingMatchId); return m ? `${getTeam(m.team1Id).name} - ${getTeam(m.team2Id).name}` : ''; })()}
+                </div>
+                <div className="flex items-center justify-between gap-2 bg-[#0b0304] rounded-lg px-3 py-2">
+                  <span className="text-xs text-slate-300">Match seul sur tous les terrains</span>
+                  <input type="checkbox" className="accent-amber-500" checked={!!matches.find(m => m.id === movingMatchId)?.exclusive}
+                    onChange={() => toggleMatchExclusive(movingMatchId)} />
                 </div>
                 <div className="flex gap-2">
                   <button type="button" className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${moveMode === 'swap' ? 'bg-amber-500 text-black' : 'bg-[#2a1014] text-white'}`} onClick={() => setMoveMode('swap')}>Échanger 2 créneaux</button>
