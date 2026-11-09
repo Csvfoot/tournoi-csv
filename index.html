@@ -588,6 +588,7 @@
       const [selectedQrType, setSelectedQrType] = useState('viewer');
       const [showPosterModal, setShowPosterModal] = useState(false);
       const [scheduleViewMode, setScheduleViewMode] = useState('chrono'); // 'chrono' | 'fields'
+      const [mobileMatchFilter, setMobileMatchFilter] = useState('all'); // Filtre rapide spectateur
       const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
@@ -987,6 +988,25 @@
       const isInsideReservedSlot = (m, slots = reservedSlots) =>
         slots.some(slot => m.startTime && m.endTime &&
           timesOverlap(m.startTime, m.endTime, slot.startTime, slot.endTime));
+      // Vérification CIBLÉE : ne pas bloquer un déplacement à cause d'un autre
+      // conflit historique sans lien avec le match modifié.
+      const matchSlotConflict = (candidate, scheduled = matches, slots = reservedSlots) => {
+        if (!candidate || !candidate.startTime || !candidate.endTime) return true;
+        if (slots.some(slot => timesOverlap(candidate.startTime, candidate.endTime, slot.startTime, slot.endTime)) ||
+            externalReservations.some(slot => timesOverlap(candidate.startTime, candidate.endTime, slot.startTime, slot.endTime))) return true;
+        const sameTeam = other => [candidate.team1Id, candidate.team2Id].some(id =>
+          id && (other.team1Id === id || other.team2Id === id));
+        const localConflict = scheduled.some(other => other.id !== candidate.id && other.startTime && other.endTime &&
+          timesOverlap(candidate.startTime, candidate.endTime, other.startTime, other.endTime) &&
+          (candidate.exclusive || other.exclusive || candidate.fieldId === other.fieldId || sameTeam(other)));
+        const foreignConflict = externalMatches.some(other => other.startTime && other.endTime &&
+          timesOverlap(candidate.startTime, candidate.endTime, other.startTime, other.endTime) &&
+          (candidate.exclusive || other.exclusive || candidate.fieldId === other.fieldId));
+        return localConflict || foreignConflict;
+      };
+      const changedMatchConflict = (scheduled, ids, slots = reservedSlots) =>
+        ids.some(id => matchSlotConflict(scheduled.find(m => m.id === id), scheduled, slots));
+
       const hasExclusiveConflict = (scheduled, slots = reservedSlots) => {
         if (scheduled.some(m => isInsideReservedSlot(m, slots))) return true;
         if (foreignScheduleConflict(scheduled)) return true;
@@ -1039,7 +1059,7 @@
           startTime: slot.startTime, endTime: slot.endTime,
           fieldId: slot.fieldId, fieldName: slot.fieldName, exclusive: true } : m);
         const newCfg = { ...config, reservedSlots: reservedSlots.filter(s => s.id !== slotId) };
-        if (hasExclusiveConflict(updated, newCfg.reservedSlots) || hasTeamTimeConflict(updated, [match.id])) {
+        if (changedMatchConflict(updated, [match.id], newCfg.reservedSlots)) {
           showToast('Conflit avec un autre match ou créneau réservé.', 'error'); return;
         }
         setMatches(updated); setConfig(newCfg);
@@ -1104,25 +1124,39 @@
       const applySuggestedExclusiveSlot = () => {
         if (!requireHub()) return;
         const match = matches.find(m => m.id === movingMatchId);
-        const slot = exclusiveSuggestion;
-        if (!match || !slot) return;
+        if (!match || !exclusiveSuggestion) return;
         if (match.status !== 'pending' &&
-            !window.confirm('Le match a déjà débuté ou est terminé. Déplacer son horaire sans modifier le score ?')) return;
-        const updated = matches.map(m => m.id === match.id ? {
-          ...m, startTime: slot.startTime, endTime: slot.endTime, exclusive: true
-        } : m);
-        // Vérifier à nouveau après une éventuelle synchronisation Firebase.
-        if (hasExclusiveConflict(updated) || hasTeamTimeConflict(updated, [match.id])) {
+            !window.confirm('Le match est déjà commencé ou terminé. Déplacer son horaire sans modifier le score ?')) return;
+        // Réévaluer le planning courant : les autres catégories peuvent avoir été modifiées.
+        const latest = findFreeExclusiveSlot(match);
+        if (!latest) {
           setExclusiveSuggestion(null);
-          setExclusiveWarning('Le créneau proposé vient d’être occupé. Décoche et recoche pour recalculer.');
+          setExclusiveWarning('Aucun créneau entièrement libre pour ce match. Vérifie les horaires des autres catégories.');
+          return;
+        }
+        if (latest.startTime !== exclusiveSuggestion.startTime || latest.endTime !== exclusiveSuggestion.endTime) {
+          setExclusiveSuggestion(latest);
+          setExclusiveWarning(`Le planning a changé. Nouveau créneau libre : ${latest.startTime}–${latest.endTime}. Confirme avec le bouton ci-dessous.`);
+          return;
+        }
+        const updated = matches.map(m => m.id === match.id ? {
+          ...m, startTime: latest.startTime, endTime: latest.endTime, exclusive: true
+        } : m);
+        // Contrôler ce match UNIQUEMENT (pas les anciens conflits du calendrier).
+        if (changedMatchConflict(updated, [match.id])) {
+          const newSuggestion = findFreeExclusiveSlot(match);
+          setExclusiveSuggestion(newSuggestion);
+          setExclusiveWarning(newSuggestion
+            ? `Le créneau précédent est indisponible. Essaie ${newSuggestion.startTime}–${newSuggestion.endTime}.`
+            : 'Aucun créneau entièrement libre pour le moment.');
           return;
         }
         setMatches(updated);
         broadcastUpdate(config, fields, teams, updated);
-        setMoveStartTime(slot.startTime);
+        setMoveStartTime(latest.startTime);
         setExclusiveSuggestion(null);
         setExclusiveWarning('');
-        showToast(`Match déplacé à ${slot.startTime} et réservé seul sur tous les terrains.`);
+        showToast(`Match déplacé à ${latest.startTime}, seul sur tous les terrains.`);
       };
 
       // Planification des matchs : les rencontres et leurs résultats ne sont jamais recréés.
@@ -1160,8 +1194,8 @@
           scheduleAttrs.forEach(k => { copy[k] = other[k]; });
           return copy;
         });
-        if (hasExclusiveConflict(updated)) {
-          showToast('Déplacement impossible : créneau exclusif ou réservé.', 'error'); return;
+        if (changedMatchConflict(updated, [sourceId, targetId])) {
+          showToast('Déplacement impossible : conflit de terrain, d’équipe ou de créneau réservé.', 'error'); return;
         }
         // Bloque les rencontres simultanées d'une même équipe.
         if (hasTeamTimeConflict(updated, [sourceId, targetId])) {
@@ -1230,8 +1264,8 @@
           ...m, startTime: moveStartTime, endTime: minutesToTime(end),
           fieldId: field.id, fieldName: field.name
         } : m);
-        if (hasExclusiveConflict(updated)) {
-          showToast('Ce créneau est bloqué pour une finale ou un autre match exclusif.', 'error'); return;
+        if (changedMatchConflict(updated, [match.id])) {
+          showToast('Ce créneau est occupé par un match, une équipe ou une réservation.', 'error'); return;
         }
         if (hasTeamTimeConflict(updated, [match.id])) {
           showToast('Une des deux équipes joue déjà pendant ce créneau.', 'error');
@@ -1299,6 +1333,147 @@
         }
       };
 
+      // Réorganisation sportive : poules, tours de qualification, matchs de
+      // classement sur plusieurs terrains, petite finale seule puis finale seule.
+      // Les créneaux exclusifs bloquent aussi les AUTRES catégories le même jour.
+      const organizeFinalDay = (groupFixtures, phaseFixtures, preserveGroups = false) => {
+        const duration = Math.max(5, Number(config.duration) || 15);
+        const pause = Math.max(0, Number(config.breakDuration) || 0);
+        const firstMinute = timeToMinutes(config.startTime || '09:00');
+        const reservations = [...reservedSlots, ...externalReservations];
+        const occupied = [...externalMatches, ...(preserveGroups ? groupFixtures : [])];
+        const planned = [];
+        const fieldNext = new Map(fields.map(f => [f.id, firstMinute]));
+        const stageEnd = arr => Math.max(firstMinute, ...arr.filter(m => m.endTime).map(m => timeToMinutes(m.endTime)));
+        const participantKeys = m => {
+          const keys = [m.team1Id, m.team2Id].filter(Boolean).map(id => 'team:'+id);
+          [m.source1, m.source2].forEach(source => {
+            if (source?.kind === 'rank') keys.push('rank:'+source.group+':'+source.position);
+          });
+          return keys;
+        };
+        const conflicts = (fixture, start, end, fieldId, exclusive) => {
+          const a = minutesToTime(start), b = minutesToTime(end);
+          const reserved = reservations.find(slot => slot.startTime && slot.endTime &&
+            timesOverlap(a,b,slot.startTime,slot.endTime));
+          if (reserved) return timeToMinutes(reserved.endTime);
+          const keys = participantKeys(fixture);
+          const hit = occupied.find(other => other.startTime && other.endTime &&
+            timesOverlap(a,b,other.startTime,other.endTime) &&
+            (exclusive || other.exclusive || other.fieldId === fieldId ||
+              (!other._eventId && keys.some(key => participantKeys(other).includes(key)))));
+          return hit ? timeToMinutes(hit.endTime) : null;
+        };
+        const put = (fixture, earliest = firstMinute, exclusive = false) => {
+          // Préserver une réservation manuelle déjà existante lors de la réorganisation.
+          const mustBeExclusive = exclusive || !!fixture.exclusive;
+          const compatibleFields = mustBeExclusive
+            ? [fields.find(f => f.id === fixture.fieldId) || fields[0]].filter(Boolean)
+            : fields;
+          let best = null;
+          for (const f of compatibleFields) {
+            let start = Math.max(earliest, fieldNext.get(f.id) || firstMinute, firstMinute);
+            for (let tries = 0; tries < 1800 && start + duration <= 1440; tries++) {
+              if (config.hasLunchBreak && config.lunchStart && config.lunchEnd &&
+                  timesOverlap(minutesToTime(start), minutesToTime(start + duration), config.lunchStart, config.lunchEnd)) {
+                start = Math.max(start + 5, timeToMinutes(config.lunchEnd));
+                continue;
+              }
+              const until = conflicts(fixture,start,start + duration,f.id,mustBeExclusive);
+              if (until === null) break;
+              start = Math.max(start + 5, until);
+            }
+            if (start + duration > 1440 || conflicts(fixture,start,start + duration,f.id,mustBeExclusive) !== null) continue;
+            if (!best || start < best.start) best = {field:f,start};
+          }
+          if (!best) return null;
+          const item = {...fixture, fieldId:best.field.id,fieldName:best.field.name,
+            startTime:minutesToTime(best.start),endTime:minutesToTime(best.start + duration),
+            exclusive: mustBeExclusive};
+          fieldNext.set(best.field.id,best.start + duration + pause);
+          occupied.push(item);
+          planned.push(item);
+          return item;
+        };
+        if (!preserveGroups) for (const match of groupFixtures) {
+          if (!put(match)) return {error:'Pas assez de créneaux disponibles pour les matchs de poules.'};
+        }
+        let frontier = stageEnd(preserveGroups ? groupFixtures : planned) + (groupFixtures.length ? pause : 0);
+        const final = phaseFixtures.find(m => m.id === 'ko-final' || m.stage === 'Grande Finale');
+        const bronze = phaseFixtures.find(m => m.id === 'ko-bronze' || /3(?:ème|e)\s*\/\s*4/.test(m.stage || ''));
+        const rankings = phaseFixtures.filter(m => ['Tournoi Classement','Tournoi Consolante'].includes(m.group));
+        const preliminary = phaseFixtures.filter(m => m !== final && m !== bronze && !rankings.includes(m));
+        const phaseById = new Map(phaseFixtures.map(m => [m.id,m]));
+        const depthCache = new Map();
+        const depth = (match, visited = new Set()) => {
+          if (depthCache.has(match.id)) return depthCache.get(match.id);
+          if (visited.has(match.id)) return 0;
+          const nextVisited = new Set([...visited,match.id]);
+          const sources=[match.source1,match.source2].filter(Boolean);
+          const deps=sources.filter(x=>['winner','loser'].includes(x.kind)).map(x=>phaseById.get(x.matchId)).filter(Boolean);
+          let result=deps.length?1+Math.max(...deps.map(m=>depth(m,nextVisited))):0;
+          // Prise en charge des anciens calendriers sans liens de qualification.
+          if (!sources.length) result = /Demi-Finale/.test(match.stage||'')?2:/Quart/.test(match.stage||'')?1:0;
+          depthCache.set(match.id,result);
+          return result;
+        };
+        const levels=[...new Set(preliminary.map(m => depth(m)))].sort((a,b)=>a-b);
+        for(const level of levels) {
+          const wave=preliminary.filter(m=>depth(m)===level);
+          const batch=[];
+          for(const m of wave) {
+            const placed=put(m,frontier,false);
+            if (!placed) return {error:'Pas assez de place pour les tours de qualification avant les finales.'};
+            batch.push(placed);
+          }
+          frontier=stageEnd(batch)+pause;
+        }
+        // Matchs de classement : parallèles sur les différents terrains disponibles,
+        // sauf quand une équipe doit jouer plusieurs rencontres de classement.
+        if (rankings.length) {
+          const wave=[];
+          for(const m of rankings) {
+            const placed=put(m,frontier,false);
+            if (!placed) return {error:'Pas assez de créneaux pour les matchs de classement.'};
+            wave.push(placed);
+          }
+          frontier=stageEnd(wave)+pause;
+        }
+        if (bronze) {
+          const placed=put(bronze,frontier,true);
+          if (!placed) return {error:'Impossible de réserver la petite finale seule sur tous les terrains.'};
+          frontier=timeToMinutes(placed.endTime)+pause;
+        }
+        if (final) {
+          const placed=put(final,frontier,true);
+          if (!placed) return {error:'Impossible de réserver la grande finale seule en dernier match.'};
+        }
+        return {matches:preserveGroups?[...groupFixtures,...planned]:planned};
+      };
+
+      // Corrige un calendrier déjà enregistré sans supprimer les matchs de poules,
+      // ni leurs scores. Les matchs de phases finales doivent être encore non joués.
+      const reorderFinalMatches = () => {
+        if (!requireHub()) return;
+        const isFinalPhase = m => ['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante'].includes(m.group);
+        const groupMatches = matches.filter(m => !isFinalPhase(m));
+        const phaseMatches = matches.filter(isFinalPhase);
+        if (!phaseMatches.some(m => m.id === 'ko-final' || m.stage === 'Grande Finale')) {
+          showToast('Pas de finale dans ce calendrier. Génère d’abord les phases finales.', 'error');return;
+        }
+        if (phaseMatches.some(m => m.status !== 'pending')) {
+          showToast('Des matchs de phase finale ont déjà commencé : leurs horaires sont conservés. Réorganisation automatique désactivée.', 'error');return;
+        }
+        if (groupMatches.some(m => !m.startTime || !m.endTime)) {
+          showToast('Il manque des horaires de poules : impossible de réorganiser sans les modifier.', 'error');return;
+        }
+        const next=organizeFinalDay(groupMatches,phaseMatches,true);
+        if (next.error) {showToast(next.error,'error');return;}
+        setMatches(next.matches);
+        broadcastUpdate(config,fields,teams,next.matches);
+        showToast('Classements en premier, petite finale seule, grande finale seule et en dernier. Aucun score effacé.');
+      };
+
       // Calendrier multi-poules et élimination directe, sans perte involontaire de résultats.
       const generateSchedule = (overrideTeams = null, automatic = false) => {
         const sourceTeams = Array.isArray(overrideTeams) ? overrideTeams : teams;
@@ -1348,41 +1523,13 @@
             rawMatches.push(...createTournamentPhases(names,sizes,config.hasPlayoffs !== false,config.hasConsolation !== false));
           }
         }
-        const duration = Number(config.duration)||15, pause=Number(config.breakDuration)||5;
-        const lunchStart = timeToMinutes(config.lunchStart||'12:30'), lunchEnd=timeToMinutes(config.lunchEnd||'13:30');
-        const availability = fields.map(f=>({fieldId:f.id, fieldName:f.name,next:timeToMinutes(config.startTime||'09:00')}));
-        const occupied = [...externalMatches];
-        const blocks = [...reservedSlots, ...externalReservations];
-        const scheduled = [];
-        for (const m of rawMatches) {
-          let best = null;
-          for (const f of availability) {
-            let start = f.next;
-            for (let attempts=0;attempts<200;attempts++) {
-              if (config.hasLunchBreak && start<lunchEnd && start+duration>lunchStart) {
-                start=Math.max(start,lunchEnd); continue;
-              }
-              const collidingBlock = blocks.find(b=>start<timeToMinutes(b.endTime) && timeToMinutes(b.startTime)<start+duration);
-              const collidingMatch = occupied.find(o=>o.startTime && o.endTime &&
-                start<timeToMinutes(o.endTime) && timeToMinutes(o.startTime)<start+duration &&
-                (o.exclusive || m.exclusive || o.fieldId===f.fieldId));
-              if (!collidingBlock && !collidingMatch) break;
-              const until = Math.max(collidingBlock?timeToMinutes(collidingBlock.endTime):0,
-                collidingMatch?timeToMinutes(collidingMatch.endTime):0);
-              start = Math.max(start+1,until);
-            }
-            if (start+duration<=1440 && (!best || start<best.start)) best={f,start};
-          }
-          if (!best) {
-            showToast('Pas assez de créneaux libres sur les terrains communs. Modifie les horaires.', 'error');
-            return;
-          }
-          const match={...m,fieldId:best.f.fieldId,fieldName:best.f.fieldName,
-            startTime:minutesToTime(best.start),endTime:minutesToTime(best.start+duration)};
-          scheduled.push(match);
-          occupied.push(match);
-          best.f.next=best.start+duration+pause;
-        }
+        const groupFixtures = rawMatches.filter(m =>
+          !['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante'].includes(m.group));
+        const phaseFixtures = rawMatches.filter(m =>
+          ['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante'].includes(m.group));
+        const prepared = organizeFinalDay(groupFixtures,phaseFixtures);
+        if (prepared.error) {showToast(prepared.error,'error');return;}
+        const scheduled = prepared.matches;
         setTeams(nextTeams);setMatches(scheduled);
         broadcastUpdate(config,fields,nextTeams,scheduled);
         showToast(`Calendrier : ${scheduled.length} matchs, ${config.format==='knockout'?0:config.format==='round_robin'?1:activeGroupNames.length} poules.`);
@@ -1724,26 +1871,27 @@
 
           {/* En-tête officiel Sang et Or */}
           <header className="border-b border-red-950 bg-gradient-to-r from-[#200507] via-[#160507] to-[#1c0608] sticky top-0 z-40 shadow-xl">
-            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
-                <ClubLogo className="w-11 h-11 sm:w-12 sm:h-12" />
+                <ClubLogo className={userRole === 'viewer' ? 'w-9 h-9 sm:w-12 sm:h-12' : 'w-11 h-11 sm:w-12 sm:h-12'} />
                 <div>
                   <div className="flex items-center gap-2">
-                    <h1 className="font-black text-base sm:text-lg text-white leading-tight">{config.name}</h1>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                    <h1 className="font-black text-sm sm:text-lg text-white leading-tight line-clamp-2 sm:line-clamp-none">{config.name}</h1>
+                    <span className={`hidden sm:inline text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
                       userRole === 'editor' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'
                     }`}>
                       {userRole === 'editor' ? 'Organisateur' : 'Spectateur'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-amber-400 font-semibold">
-                    <span>CS La Verpillière 1939</span>
-                    <span className="text-slate-400">•</span>
+                    <span className={userRole === 'viewer' ? 'hidden sm:inline' : ''}>CS La Verpillière 1939</span>
+                    <span className={userRole === 'viewer' ? 'hidden sm:inline text-slate-400' : 'text-slate-400'}>•</span>
                     <span className={cloudStatus === 'online' ? 'text-emerald-400 font-bold flex items-center gap-1' : 'text-slate-400'}>
                       {cloudStatus === 'online' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
                       {cloudStatus === 'online' ? 'En direct (Cloud)' : (
-                        <button 
-                          onClick={() => setFirebaseModalOpen(true)} 
+                        userRole === 'viewer' ? <span>Hors ligne</span> :
+                        <button
+                          onClick={() => setFirebaseModalOpen(true)}
                           className="hover:text-amber-400 underline decoration-dotted text-slate-400 font-medium"
                           title="Cliquer pour configurer ou reconnecter le Cloud"
                         >
@@ -1794,7 +1942,7 @@
 
                 <button
                   onClick={() => setIsShareModalOpen(true)}
-                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs shadow-md transition"
+                  className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs shadow-md transition flex-shrink-0"
                 >
                   Partager
                 </button>
@@ -1802,7 +1950,7 @@
             </div>
 
             {/* Barre de navigation des onglets */}
-            <div className="max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25">
+            <div className={`max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25 ${userRole === 'viewer' ? 'hidden sm:flex' : ''}`}>
               {userRole === 'editor' && (
                 <button
                   onClick={() => setActiveTab('config')}
@@ -1866,8 +2014,32 @@
             </div>
           </header>
 
+          {/* Navigation tactile spectateur : accès immédiat sans défilement horizontal. */}
+          {userRole === 'viewer' && (
+            <nav aria-label="Navigation spectateur" className="sm:hidden fixed bottom-0 inset-x-0 z-[80] border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]"
+              style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
+              <div className="flex items-stretch justify-around gap-1 px-2 pt-2">
+                {[
+                  {id:'matches',icon:'📅',text:'Matchs'},
+                  {id:'standings',icon:'📊',text:'Poules'},
+                  ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Finales'}] : []),
+                  {id:'finalStandings',icon:'🥇',text:'Palmarès'},
+                  {id:'stats',icon:'⚽',text:'Stats'}
+                ].map(tab => (
+                  <button type="button" key={tab.id} aria-current={activeTab === tab.id ? 'page' : undefined}
+                    onClick={() => {setActiveTab(tab.id);window.scrollTo({top:0,behavior:'smooth'});}}
+                    className={`min-w-0 flex-1 flex flex-col items-center justify-center gap-1 px-1 py-1.5 rounded-xl text-[10px] font-bold touch-manipulation ${activeTab === tab.id ? 'bg-amber-500 text-[#180606]' : 'text-amber-100/80'}`}>
+                    <span className="text-xl leading-none" aria-hidden="true">{tab.icon}</span>
+                    <span className="truncate w-full text-center">{tab.text}</span>
+                  </button>
+                ))}
+              </div>
+            </nav>
+          )}
+
           {/* Corps de l'application */}
-          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6">
+          <main className={`flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 ${userRole === 'viewer' ? 'pb-28 sm:pb-6' : ''}`}>
+
             
             {/* ONGLET 1 : CONFIGURATION */}
             {activeTab === 'config' && userRole === 'editor' && (
@@ -2309,7 +2481,7 @@
               <div className="space-y-4 sm:space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div>
-                    <h2 className="text-base sm:text-lg font-bold text-white">Calendrier & Scores</h2>
+                    <h2 className="text-base sm:text-lg font-bold text-white">{userRole === 'viewer' ? '⚽ Matchs et résultats' : 'Calendrier & Scores'}</h2>
                     <span className="text-xs text-slate-400">Suivez les résultats en direct ou ventilés par terrain.</span>
                   </div>
 
@@ -2336,10 +2508,29 @@
                   </div>
                 </div>
 
+                {userRole === 'viewer' && (
+                  <div className="sm:hidden grid grid-cols-3 gap-2" aria-label="Filtrer les matchs">
+                    {[
+                      ['all','Tous'],['upcoming','À venir'],['finished','Terminés']
+                    ].map(([id,label])=>(
+                      <button type="button" key={id} onClick={()=>setMobileMatchFilter(id)}
+                        aria-pressed={mobileMatchFilter === id}
+                        className={`rounded-lg border px-2 py-2 text-xs font-bold touch-manipulation ${mobileMatchFilter === id ? 'bg-amber-500 text-black border-amber-500' : 'bg-[#17070b] text-slate-300 border-red-900/50'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* CRÉNEAUX RÉSERVÉS : affichés à tous, modifiables uniquement par l'organisateur */}
+                {(userRole === 'editor' || reservedSlots.length > 0 || matches.some(m=>m.exclusive)) &&
                 <div className="bg-[#150709] border border-red-950 rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs text-slate-300 font-semibold">⏱ Créneaux réservés <span className="text-slate-500 font-normal">(aucun match en parallèle)</span></div>
+                    {userRole === 'editor' && matches.some(m=>m.id==='ko-final' || m.stage==='Grande Finale') &&
+                      <button type="button" onClick={reorderFinalMatches}
+                        className="text-[11px] text-amber-300 border border-amber-900/50 rounded-md px-2 py-1"
+                        title="Réorganiser sans effacer les scores de poule">🏆 Finales en dernier</button>}
                     {userRole === 'editor' && <button type="button" onClick={() => {setReservedFieldId(fields[0]?.id || '');setShowReservedSlotEditor(v => !v);}}
                       className="text-[11px] text-slate-400 hover:text-amber-300 border border-red-950 rounded-md px-2 py-1">{showReservedSlotEditor ? 'Fermer' : '+ Réserver'}</button>}
                   </div>
@@ -2377,7 +2568,7 @@
                   {matches.filter(m=>m.exclusive).map(m=>(
                     <div key={m.id} className="text-xs text-slate-400 px-2">🏆 {m.startTime}–{m.endTime} · {m.stage} — <span className="text-amber-300">Match seul sur tous les terrains</span></div>
                   ))}
-                </div>
+                </div>}
 
                 {matches.length === 0 ? (
                   <div className="text-center py-16 bg-[#150709] rounded-2xl border border-red-950 text-slate-400 text-sm">
@@ -2387,7 +2578,10 @@
                   /* VUE PAR TERRAIN */
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                     {fields.map(f => {
-                      const fMatches = matches.filter(m => m.fieldId === f.id).sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+                      const fMatches = matches.filter(m => m.fieldId === f.id &&
+                        (userRole !== 'viewer' || mobileMatchFilter === 'all' ||
+                         (mobileMatchFilter === 'finished' ? m.status === 'finished' : m.status !== 'finished')))
+                        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
                       return (
                         <div key={f.id} className="bg-[#150709] border border-red-950 rounded-2xl p-4 shadow-xl flex flex-col">
                           <div className="flex items-center justify-between pb-3 mb-3 border-b border-red-950">
@@ -2478,7 +2672,9 @@
                 ) : (
                   /* VUE CHRONO */
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-4">
-                    {matches.slice().sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
+                    {matches.filter(m => userRole !== 'viewer' || mobileMatchFilter === 'all' ||
+                      (mobileMatchFilter === 'finished' ? m.status === 'finished' : m.status !== 'finished'))
+                      .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
                       const t1 = getTeam(m.team1Id);
                       const t2 = getTeam(m.team2Id);
                       return (
@@ -2491,7 +2687,7 @@
                               setCardTeamId(m.team1Id || '');
                             }
                           }}
-                          className={`p-2.5 sm:p-3.5 rounded-xl border bg-[#150709] border-red-950 transition flex flex-col justify-between ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
+                          className={`p-3 sm:p-3.5 rounded-xl border transition flex flex-col justify-between ${m.id === 'ko-final' ? 'bg-amber-950/20 border-amber-500/70' : m.id === 'ko-bronze' ? 'bg-[#211016] border-amber-700/50' : 'bg-[#150709] border-red-950'} ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
                         >
                           <div className="flex justify-between items-center text-[10px] sm:text-xs text-slate-400 mb-1.5">
                             <span className="font-mono text-amber-400 font-bold">{m.startTime || '--:--'} &bull; {m.fieldName || 'Terrain'}</span>
@@ -3485,11 +3681,11 @@
                 <th className="py-2 px-2">Club</th>
                 <th className="py-2 px-1 text-center font-bold text-amber-300">PTS</th>
                 <th className="py-2 px-1 text-center">J</th>
-                <th className="py-2 px-1 text-center">G</th>
-                <th className="py-2 px-1 text-center">N</th>
-                <th className="py-2 px-1 text-center">P</th>
-                <th className="py-2 px-1 text-center">BP</th>
-                <th className="py-2 px-1 text-center">BC</th>
+                <th className="hidden sm:table-cell py-2 px-1 text-center">G</th>
+                <th className="hidden sm:table-cell py-2 px-1 text-center">N</th>
+                <th className="hidden sm:table-cell py-2 px-1 text-center">P</th>
+                <th className="hidden sm:table-cell py-2 px-1 text-center">BP</th>
+                <th className="hidden sm:table-cell py-2 px-1 text-center">BC</th>
                 <th className="py-2 px-1 text-center">+/-</th>
               </tr>
             </thead>
@@ -3509,11 +3705,11 @@
                   </td>
                   <td className="py-2.5 px-1 text-center font-black text-amber-300 bg-amber-500/10">{r.points}</td>
                   <td className="py-2.5 px-1 text-center text-slate-300">{r.played}</td>
-                  <td className="py-2.5 px-1 text-center text-slate-300">{r.won}</td>
-                  <td className="py-2.5 px-1 text-center text-slate-300">{r.drawn}</td>
-                  <td className="py-2.5 px-1 text-center text-slate-300">{r.lost}</td>
-                  <td className="py-2.5 px-1 text-center text-slate-400">{r.gf}</td>
-                  <td className="py-2.5 px-1 text-center text-slate-400">{r.ga}</td>
+                  <td className="hidden sm:table-cell py-2.5 px-1 text-center text-slate-300">{r.won}</td>
+                  <td className="hidden sm:table-cell py-2.5 px-1 text-center text-slate-300">{r.drawn}</td>
+                  <td className="hidden sm:table-cell py-2.5 px-1 text-center text-slate-300">{r.lost}</td>
+                  <td className="hidden sm:table-cell py-2.5 px-1 text-center text-slate-400">{r.gf}</td>
+                  <td className="hidden sm:table-cell py-2.5 px-1 text-center text-slate-400">{r.ga}</td>
                   <td className={`py-2.5 px-1 text-center font-bold ${r.gd > 0 ? 'text-amber-400' : r.gd < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                     {r.gd > 0 ? `+${r.gd}` : r.gd}
                   </td>
