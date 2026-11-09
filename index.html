@@ -320,6 +320,14 @@
       if(!unique.has('principal')) unique.set('principal',initialTournaments()[0]);
       return [...unique.values()];
     };
+    // Configuration publique Firebase déjà utilisée dans le lien de partage CSV.
+    // Cette clé de projet client n'est pas un secret ; les règles Firestore
+    // doivent toujours protéger l'écriture des données.
+    const DEFAULT_CLOUD_CONFIG = {
+      apiKey:'AIzaSyBYFQkkpiDs-7dkiTHZOIgKgh8cqonuYTk',
+      projectId:'tournoi-cs-la-verpilliere',
+      authDomain:'tournoi-cs-la-verpilliere.firebaseapp.com'
+    };
     const loadCloudConfig = () => {
       try {
         const params=new URLSearchParams(window.location.search);
@@ -333,15 +341,116 @@
           }
         }
       } catch(e) {}
-      return readLocalJson('cslv_firebase_config',null);
+      return readLocalJson('cslv_firebase_config',DEFAULT_CLOUD_CONFIG);
+    };
+
+
+    // Outil de résolution du planning général : propose des créneaux sans
+    // toucher aux scores, aux rencontres jouées, aux réservations ou aux finales.
+    const planningMinutes = value => {
+      const parts=String(value||'').split(':').map(Number);
+      return parts.length===2 && parts.every(Number.isFinite) ? parts[0]*60+parts[1] : -1;
+    };
+    const planningTime = value => `${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;
+    const planningKey = entry => `${entry.eventId}::${entry.kind}::${entry.id}`;
+    const planningOverlap = (a,b) => planningMinutes(a.startTime)<planningMinutes(b.endTime) && planningMinutes(b.startTime)<planningMinutes(a.endTime);
+    const planningConflict = (a,b) => {
+      if(!a.startTime || !a.endTime || !b.startTime || !b.endTime || !planningOverlap(a,b)) return false;
+      const sameTeam=a.kind==='match' && b.kind==='match' && a.eventId===b.eventId &&
+        [a.team1Id,a.team2Id].some(id=>id && (id===b.team1Id || id===b.team2Id));
+      return !!(a.kind==='réservation' || b.kind==='réservation' || a.exclusive || b.exclusive ||
+        (a.fieldId && a.fieldId===b.fieldId) || sameTeam);
+    };
+    const planningImmutable = item => item.kind==='réservation' || item.exclusive ||
+      ['finished','playing','live','started','in_progress'].includes(item.status) ||
+      item.id==='ko-final' || item.id==='ko-bronze' || item.stage==='Grande Finale' ||
+      /3(?:ème|e)\s*\/\s*4/.test(String(item.stage||''));
+    const planningSignature = items => JSON.stringify(items.map(x=>[
+      planningKey(x),x.startTime,x.endTime,x.fieldId,x.exclusive||false,x.status||''
+    ]));
+    const planningConflictPairs = items => {
+      const pairs=[];
+      for(let i=0;i<items.length;i++)for(let j=i+1;j<items.length;j++)
+        if(planningConflict(items[i],items[j]))pairs.push([items[i],items[j]]);
+      return pairs;
+    };
+    const buildPlanningRepair = (entries, fields) => {
+      const scheduled=entries.map(e=>({...e}));
+      const fieldsToTry=fields.filter(f=>f&&f.id);
+      const blocked=new Set();
+      const moved=new Map();
+      const candidateOptions=(item,others) => {
+        const original=planningMinutes(item.startTime);
+        const duration=planningMinutes(item.endTime)-original;
+        if(original<0 || duration<=0 || duration>180 || !fieldsToTry.length) return null;
+        const preferred=[...fieldsToTry].sort((a,b)=>(a.id===item.fieldId?-1:0)-(b.id===item.fieldId?-1:0));
+        // Ne pas repousser un match de poule/de classement après sa finale.
+        const categoryFinal=others.find(x=>x.eventId===item.eventId &&
+          (x.id==='ko-final'||x.stage==='Grande Finale'));
+        const latest=Math.min(23*60+55-duration,
+          categoryFinal ? planningMinutes(categoryFinal.startTime)-duration : 23*60+55-duration);
+        const earliest=Math.max(7*60,Math.min(original,8*60));
+        const minStart=Math.ceil(earliest/5)*5;
+        const origStart=Math.ceil(original/5)*5;
+        const trialTimes=[];
+        for(let minute=origStart;minute<=latest;minute+=5)trialTimes.push(minute);
+        for(let minute=origStart-5;minute>=minStart;minute-=5)trialTimes.push(minute);
+        for(const minute of trialTimes)for(const field of preferred) {
+          const proposal={...item,startTime:planningTime(minute),endTime:planningTime(minute+duration),
+            fieldId:field.id,fieldName:field.name};
+          if(!others.some(other=>planningConflict(proposal,other)))return proposal;
+        }
+        return null;
+      };
+      for(let iteration=0;iteration<250;iteration++) {
+        const conflicts=planningConflictPairs(scheduled);
+        const pair=conflicts.find(([a,b])=>!blocked.has([planningKey(a),planningKey(b)].sort().join('|')));
+        if(!pair)break;
+        const [a,b]=pair;
+        const lockA=planningImmutable(a),lockB=planningImmutable(b);
+        const pairKey=[planningKey(a),planningKey(b)].sort().join('|');
+        if(lockA&&lockB) {blocked.add(pairKey);continue;}
+        let candidate;
+        if(lockA)candidate=b;
+        else if(lockB)candidate=a;
+        else candidate=planningMinutes(a.startTime)<=planningMinutes(b.startTime)?b:a;
+        const key=planningKey(candidate);
+        const others=scheduled.filter(x=>planningKey(x)!==key);
+        const proposal=candidateOptions(candidate,others);
+        if(!proposal){blocked.add(pairKey);continue;}
+        const index=scheduled.findIndex(x=>planningKey(x)===key);
+        scheduled[index]=proposal;
+        if(!moved.has(key))moved.set(key,{original:entries.find(x=>planningKey(x)===key)});
+        moved.get(key).next=proposal;
+      }
+      return {
+        moves:[...moved.values()].map(({original,next})=>({
+          eventId:original.eventId,id:original.id,category:original.category,
+          title:original.stage||'Match',from:`${original.startTime} · ${original.fieldName||'Terrain'}`,
+          to:`${next.startTime} · ${next.fieldName||'Terrain'}`,
+          startTime:next.startTime,endTime:next.endTime,fieldId:next.fieldId,fieldName:next.fieldName
+        })),
+        unresolved:planningConflictPairs(scheduled),
+        signature:planningSignature(entries)
+      };
     };
 
     function MultiTournamentShell() {
       const params = new URLSearchParams(window.location.search);
       const urlTournament = params.get('tournament');
-      const [hubIsEditor,setHubIsEditor] = useState(()=>params.get('role')==='editor');
+      const [hubIsEditor,setHubIsEditor] = useState(()=>{
+        // Une URL spectateur reste toujours spectateur, même sur un poste organisateur.
+        if(params.get('role')==='viewer') return false;
+        if(params.get('role')==='editor') return true;
+        try {return sessionStorage.getItem('cslv_editor_session_v1')==='1';}
+        catch(e) {return false;}
+      });
       const isViewer = !hubIsEditor;
-      const onRoleChange = useCallback(role=>setHubIsEditor(role==='editor'),[]);
+      const onRoleChange = useCallback(role=>{
+        const isEditor=role==='editor';
+        setHubIsEditor(isEditor);
+        try {sessionStorage.setItem('cslv_editor_session_v1',isEditor?'1':'0');}catch(e){}
+      },[]);
       const [catalog,setCatalog] = useState(()=>cleanCategories(readLocalJson('cslv_multi_catalog_v1',initialTournaments())));
       const [selectedId,setSelectedId] = useState(()=>urlTournament || readLocalJson('cslv_last_tournament_v1','principal'));
       const [page,setPage] = useState('tournoi');
@@ -360,6 +469,8 @@
       const [titleInput,setTitleInput] = useState('Tournoi U11');
       const [dateInput,setDateInput] = useState(()=>TODAY_LOCAL());
       const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
+      const [repairPreview,setRepairPreview] = useState(null);
+      const [repairNotice,setRepairNotice] = useState('');
       const dbRef=useRef(null);
       const catalogRef=useRef(catalog);
       const hubCloudRef=useRef('local');
@@ -497,16 +608,87 @@
         }));
         return [...matches,...reservations];
       }).sort((a,b)=>String(a.startTime).localeCompare(String(b.startTime))||String(a.fieldName||'').localeCompare(String(b.fieldName||'')));
-      const fieldConflicts=busyEvents.filter((m,i)=>busyEvents.some((other,j)=>j!==i && other.startTime<m.endTime && m.startTime<other.endTime &&
-        (m.kind==='réservation'||other.kind==='réservation'||m.exclusive||other.exclusive||(m.fieldId&&m.fieldId===other.fieldId))));
+      const fieldConflicts=busyEvents.filter((m,i)=>busyEvents.some((other,j)=>j!==i && planningConflict(m,other)));
+      const conflictPairs=planningConflictPairs(busyEvents);
       const cloudReady=hubStatus!=='loading' && hubStatus!=='error' &&
         (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
+
+      const previewPlanningRepair=()=>{
+        setRepairNotice('');
+        if(hubStatus==='loading' || (hubStatus==='online' &&
+          catalog.filter(e=>e.date===dateFilter).some(e=>!loadedDocs[e.id]))) {
+          setRepairNotice('Le planning synchronisé est encore en cours de chargement.');return;
+        }
+        if(hubStatus==='error'){
+          setRepairNotice('Connexion Firebase en erreur : réparation suspendue pour éviter de désynchroniser les catégories.');return;
+        }
+        const plan=buildPlanningRepair(busyEvents,sharedFields);
+        setRepairPreview(plan);
+        if(!plan.moves.length)setRepairNotice('Aucun match non commencé ne peut être déplacé automatiquement : modifie manuellement les rencontres bloquées.');
+      };
+      const applyPlanningRepair=async()=>{
+        if(!repairPreview || !repairPreview.moves.length || isViewer)return;
+        if(planningSignature(busyEvents)!==repairPreview.signature){
+          setRepairPreview(null);setRepairNotice('Le planning a changé. Recalcule la proposition avant de confirmer.');return;
+        }
+        if(hubStatus==='loading'||hubStatus==='error'){
+          setRepairNotice('La synchronisation des catégories n’est pas prête. Aucun horaire n’a été changé.');return;
+        }
+        const ids=[...new Set(repairPreview.moves.map(m=>m.eventId))];
+        const modified=ids.map(id=>{
+          const event=catalog.find(e=>e.id===id);
+          const data=eventData(event);
+          const changes=repairPreview.moves.filter(m=>m.eventId===id);
+          const byId=new Map(changes.map(m=>[m.id,m]));
+          return {id,original:data.matches||[],updated:(data.matches||[]).map(m=>{
+            const change=byId.get(m.id);
+            return change?{...m,startTime:change.startTime,endTime:change.endTime,
+              fieldId:change.fieldId,fieldName:change.fieldName}:m;
+          })};
+        });
+        try {
+          if(hubStatus==='online'){
+            if(!dbRef.current || catalog.filter(e=>e.date===dateFilter).some(e=>!loadedDocs[e.id]))
+              throw new Error('La synchronisation du planning général n’est pas terminée.');
+            const db=dbRef.current;
+            await db.runTransaction(async tx=>{
+              const docs=[];
+              // Toutes les lectures précèdent les écritures (exigence Firestore).
+              for(const change of modified){
+                const ref=db.collection('tournaments').doc(tournamentDocId(change.id));
+                docs.push({change,ref,snap:await tx.get(ref)});
+              }
+              for(const item of docs){
+                if(!item.snap.exists || JSON.stringify(item.snap.data().matches||[])!==JSON.stringify(item.change.original))
+                  throw new Error('Un autre appareil a modifié des matchs. Actualise le planning et refais une proposition.');
+              }
+              for(const item of docs)tx.update(item.ref,{matches:item.change.updated,updatedAt:new Date().toISOString()});
+            });
+          }
+          for(const change of modified)localStorage.setItem(tournamentStorageKey(change.id,'matches'),JSON.stringify(change.updated));
+          setRecords(old=>{
+            const next={...old};
+            for(const change of modified){
+              const event=catalog.find(e=>e.id===change.id);
+              next[change.id]={...eventData(event),matches:change.updated};
+            }
+            return next;
+          });
+          setRepairNotice(repairPreview.moves.length+' match(s) repositionné(s). '+
+            (hubStatus==='online'?'Modifications enregistrées dans Firebase.':'Modifications locales uniquement : vérifie la synchronisation avant utilisation sur plusieurs appareils.'));
+          setRepairPreview(null);
+        }catch(err){setRepairNotice('Aucune modification appliquée : '+(err.message||String(err)));}
+      };
+      useEffect(()=>{setRepairPreview(null);setRepairNotice('');},[dateFilter]);
 
       return <div className="min-h-screen bg-[#0e0708] text-slate-100">
         <section className="bg-[#22070c] border-b border-amber-900/30 px-3 sm:px-6 py-3 space-y-3">
           <div className="max-w-7xl mx-auto space-y-2">
             <div className="flex flex-wrap items-center gap-2 justify-between">
-              <div className="text-sm font-black text-amber-300">⚽ Tournois CSV · catégories</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-black text-amber-300">⚽ Tournois CSV · catégories</div>
+                <span className="text-[10px] border border-amber-700/40 rounded-full px-2 py-1 text-slate-300">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
+              </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={()=>{if(page!=='planning')setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
                   className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
@@ -542,8 +724,27 @@
             <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
               className="ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white"/></label>
           </div>
-          {fieldConflicts.length>0 && <div role="alert" className="text-sm text-amber-200 bg-red-950/60 border border-amber-500/40 rounded-xl p-3">
-            ⚠ {fieldConflicts.length} rencontre(s) ou réservation(s) en conflit sur les terrains communs. Vérifie leurs horaires.</div>}
+          {conflictPairs.length>0 && <div role="alert" className="text-sm text-amber-200 bg-red-950/60 border border-amber-500/40 rounded-xl p-3 space-y-3">
+            <p>⚠ {conflictPairs.length} conflit(s) de planning identifiés ({fieldConflicts.length} lignes concernées).</p>
+            {!isViewer && <button type="button" onClick={previewPlanningRepair}
+              className="bg-amber-500 text-[#210706] font-black text-xs px-3 py-2 rounded-lg">🛠 Proposer des corrections</button>}
+            <div className="space-y-1 text-xs">{conflictPairs.slice(0,6).map(([a,b],i)=><p key={i}>
+              {a.category} {a.startTime} ({a.fieldName||'Terrain'}) / {b.category} {b.startTime} ({b.fieldName||'Terrain'})
+              {(planningImmutable(a)&&planningImmutable(b))?' — modification manuelle nécessaire':''}
+            </p>)}</div>
+          </div>}
+          {repairNotice && <p role="status" className="text-xs text-amber-300 border border-amber-900 rounded-lg p-3">{repairNotice}</p>}
+          {!isViewer && repairPreview && <div className="bg-[#1d0a0f] border border-amber-700/50 rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-black text-amber-300">Proposition de correction — aucun score modifié</h3>
+            <div className="space-y-2 text-xs">{repairPreview.moves.length?repairPreview.moves.map((m,i)=><div key={i} className="border-b border-red-950 pb-2">
+              <strong>{m.category} · {m.title}</strong> : {m.from} → <span className="text-emerald-300">{m.to}</span>
+            </div>):<p>Aucun déplacement automatique possible.</p>}</div>
+            {repairPreview.unresolved.length>0 && <p className="text-amber-200 text-xs">⚠ {repairPreview.unresolved.length} conflit(s) restent à corriger manuellement : rencontre déjà jouée, créneau exclusif ou absence de place compatible. Ouvre la catégorie correspondante pour ajuster le créneau.</p>}
+            <div className="flex flex-wrap gap-2">
+              {repairPreview.moves.length>0 && <button type="button" onClick={applyPlanningRepair} className="bg-emerald-700 text-white font-bold text-xs rounded-lg px-4 py-2">Confirmer {repairPreview.moves.length} déplacement(s)</button>}
+              <button type="button" onClick={()=>setRepairPreview(null)} className="bg-[#38151a] text-slate-200 text-xs rounded-lg px-4 py-2">Annuler</button>
+            </div>
+          </div>}
           {busyEvents.length===0?<div className="rounded-xl border border-red-950 p-5 text-slate-400 text-sm">Aucun match prévu ce jour.</div>:
           <div className="overflow-x-auto rounded-xl border border-red-950">
             <table className="w-full text-left text-xs sm:text-sm"><thead className="bg-[#2c0b12] text-amber-300"><tr>
@@ -578,7 +779,9 @@
 
     function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange }) {
       const [activeTab, setActiveTab] = useState('matches');
-      const [userRole, setUserRole] = useState('editor');
+      // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
+      const userRole = hubIsEditor ? 'editor' : 'viewer';
+      const setUserRole = onRoleChange;
       const [isShareModalOpen, setIsShareModalOpen] = useState(false);
       const [copiedLinkType, setCopiedLinkType] = useState(null);
       const [cloudStatus, setCloudStatus] = useState('offline');
@@ -819,24 +1022,6 @@
         } catch (e) { console.warn('Sauvegarde locale', e); }
       }, [config, teams, matches, tournament.id, onTournamentUpdate]);
 
-      // Détection du rôle dans l'URL
-      useEffect(() => {
-        try {
-          const params = new URLSearchParams(window.location.search);
-          const role = params.get('role');
-          if (role === 'viewer') {
-            setUserRole('viewer');
-            setActiveTab('matches');
-          } else if (role === 'editor') {
-            // Si le lien contient le rôle éditeur explicitement
-            setUserRole('editor');
-          } else {
-            // Par défaut si aucun paramètre : mode spectateur sécurisé
-            setUserRole('viewer');
-            setActiveTab('matches');
-          }
-        } catch (e) {}
-      }, []);
 
       // Synchronisation Firebase en temps réel
       useEffect(() => {
@@ -860,6 +1045,9 @@
             }
           } catch (e) {}
 
+          // Visit site ouvre l'URL simple, sans paramètre cloud : appliquer
+          // la même configuration publique que les liens spectateurs partagés.
+          if (!fbConfig) fbConfig = loadCloudConfig();
           if (!fbConfig || !fbConfig.apiKey || !fbConfig.projectId) {
             setCloudStatus('offline');
             return;
