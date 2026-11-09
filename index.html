@@ -447,9 +447,14 @@
         catch(e) {return false;}
       });
       const isViewer = !hubIsEditor;
+      // Un lien organisateur ouvre la demande de code PIN, y compris sur iPhone.
+      // L'URL seule ne confère jamais les droits d'édition.
+      const [organizerLinkPending,setOrganizerLinkPending] = useState(()=>params.get('role')==='editor');
+      const acknowledgeOrganizerLink = useCallback(()=>setOrganizerLinkPending(false),[]);
       const onRoleChange = useCallback(role=>{
         const isEditor=role==='editor';
         setHubIsEditor(isEditor);
+        if (isEditor) setOrganizerLinkPending(false);
         try {sessionStorage.setItem('cslv_editor_session_v1',isEditor?'1':'0');}catch(e){}
         // Important : un ancien ?role=viewer ne doit pas annuler le code PIN
         // quand on change de catégorie, passe au planning ou recharge la page.
@@ -792,10 +797,10 @@
                 <span className="text-[10px] border border-amber-700/40 rounded-full px-2 py-1 text-slate-300">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <button type="button" onClick={()=>{if(page!=='planning')setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
+                {!isViewer && <button type="button" onClick={()=>{if(page!=='planning')setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
                   className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
                   {page==='planning'?'← Tournoi':'📅 Planning général'}
-                </button>
+                </button>}
                 {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
               </div>
@@ -820,7 +825,7 @@
             </div>}
           </div>
         </section>
-        {page==='planning' ? <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-4">
+        {page==='planning' && !isViewer ? <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-3">
             <h2 className="text-lg font-black text-amber-300">📅 Planning général — tous les terrains</h2>
             <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
@@ -902,12 +907,13 @@
           </div>}
           {current && <TournamentApp key={current.id} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
             otherEvents={otherEvents} onTournamentUpdate={updateRecord} hubReady={cloudReady}
-            hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}/>}
+            hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}
+            organizerLinkPending={organizerLinkPending && !hubIsEditor} onOrganizerLinkHandled={acknowledgeOrganizerLink}/>}
         </>}
       </div>;
     }
 
-    function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange }) {
+    function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled }) {
       const [activeTab, setActiveTab] = useState('matches');
       // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
       const userRole = hubIsEditor ? 'editor' : 'viewer';
@@ -925,6 +931,16 @@
       const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
+      // Lien partagé « Organisateur » : demander le PIN au premier affichage.
+      // Un lien « Spectateur » ne déclenche jamais cette fenêtre.
+      useEffect(() => {
+        if (organizerLinkPending && userRole !== 'editor') {
+          setPinInput('');
+          setPinError('');
+          setAdminPinModalOpen(true);
+          onOrganizerLinkHandled();
+        }
+      }, [organizerLinkPending, userRole, onOrganizerLinkHandled]);
 
       // Terrains communs à toutes les catégories, sans renumérotation des IDs.
       const fields = sharedFields;
@@ -2840,8 +2856,8 @@
                   </div>
                 )}
 
-                {/* CRÉNEAUX RÉSERVÉS : affichés à tous, modifiables uniquement par l'organisateur */}
-                {(userRole === 'editor' || reservedSlots.length > 0 || matches.some(m=>m.exclusive)) &&
+                {/* Créneaux réservés : panneau réservé uniquement à l'organisateur. */}
+                {userRole === 'editor' &&
                 <div className="bg-[#150709] border border-red-950 rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs text-slate-300 font-semibold">⏱ Créneaux réservés <span className="text-slate-500 font-normal">(aucun match en parallèle)</span></div>
