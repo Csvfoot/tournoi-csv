@@ -441,7 +441,8 @@
       const [hubIsEditor,setHubIsEditor] = useState(()=>{
         // Une URL spectateur reste toujours spectateur, même sur un poste organisateur.
         if(params.get('role')==='viewer') return false;
-        if(params.get('role')==='editor') return true;
+        // Le lien ?role=editor ne déverrouille PAS l'édition :
+        // seule une session ayant validé le code organisateur y donne accès.
         try {return sessionStorage.getItem('cslv_editor_session_v1')==='1';}
         catch(e) {return false;}
       });
@@ -450,6 +451,13 @@
         const isEditor=role==='editor';
         setHubIsEditor(isEditor);
         try {sessionStorage.setItem('cslv_editor_session_v1',isEditor?'1':'0');}catch(e){}
+        // Important : un ancien ?role=viewer ne doit pas annuler le code PIN
+        // quand on change de catégorie, passe au planning ou recharge la page.
+        const nextParams=new URLSearchParams(window.location.search);
+        if(isEditor) nextParams.delete('role');
+        else nextParams.set('role','viewer');
+        const search=nextParams.toString();
+        window.history.replaceState({},'',window.location.pathname+(search?'?'+search:'')+window.location.hash);
       },[]);
       const [catalog,setCatalog] = useState(()=>cleanCategories(readLocalJson('cslv_multi_catalog_v1',initialTournaments())));
       const [selectedId,setSelectedId] = useState(()=>urlTournament || readLocalJson('cslv_last_tournament_v1','principal'));
@@ -471,6 +479,7 @@
       const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
       const [repairPreview,setRepairPreview] = useState(null);
       const [repairNotice,setRepairNotice] = useState('');
+      const [manualPlanningEdit,setManualPlanningEdit] = useState(null);
       const dbRef=useRef(null);
       const catalogRef=useRef(catalog);
       const hubCloudRef=useRef('local');
@@ -563,7 +572,8 @@
         localStorage.setItem('cslv_last_tournament_v1',JSON.stringify(id));
         const params=new URLSearchParams(window.location.search);
         params.set('tournament',id);
-        window.history.replaceState({},'',window.location.pathname+'?'+params.toString());
+        const search=params.toString();
+        window.history.replaceState({},'',window.location.pathname+(search?'?'+search:'')+window.location.hash);
       };
       const addTournament=async()=>{
         if(isViewer) return;
@@ -612,6 +622,98 @@
       const conflictPairs=planningConflictPairs(busyEvents);
       const cloudReady=hubStatus!=='loading' && hubStatus!=='error' &&
         (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
+
+      // Ajustement ciblé des rencontres et réservations en conflit.
+      const canAdjustEntry=entry => entry.kind==='réservation' ||
+        !['finished','playing','live','started','in_progress'].includes(entry.status);
+      const editPlanningEntry=entry=>{
+        if(isViewer || !canAdjustEntry(entry)) return;
+        const duration=planningMinutes(entry.endTime)-planningMinutes(entry.startTime);
+        if(duration<=0 || duration>180) {setRepairNotice('Durée de ce créneau invalide.');return;}
+        setRepairPreview(null);
+        setRepairNotice('');
+        setManualPlanningEdit({key:planningKey(entry),eventId:entry.eventId,id:entry.id,
+          kind:entry.kind,category:entry.category,startTime:entry.startTime,
+          duration,fieldId:entry.fieldId||sharedFields[0]?.id||''});
+      };
+      const editingSource=manualPlanningEdit && busyEvents.find(e=>planningKey(e)===manualPlanningEdit.key);
+      const editingStart=manualPlanningEdit ? planningMinutes(manualPlanningEdit.startTime) : -1;
+      const editingEnd=manualPlanningEdit ? editingStart + manualPlanningEdit.duration : -1;
+      const editingTimeValid=!!(editingSource && editingStart>=0 && editingEnd<=24*60 &&
+        editingEnd>editingStart && sharedFields.some(f=>f.id===manualPlanningEdit.fieldId));
+      const editingCandidate=editingTimeValid ? {...editingSource,
+        startTime:manualPlanningEdit.startTime,endTime:planningTime(editingEnd),
+        fieldId:manualPlanningEdit.fieldId,
+        fieldName:sharedFields.find(f=>f.id===manualPlanningEdit.fieldId)?.name||'Terrain'} : null;
+      const editingCollisions=editingCandidate ? busyEvents.filter(e=>planningKey(e)!==manualPlanningEdit.key &&
+        planningConflict(editingCandidate,e)) : [];
+      const saveManualPlanningEdit=async()=>{
+        if(isViewer || !manualPlanningEdit || !editingCandidate || editingCollisions.length)return;
+        if(hubStatus==='loading'||hubStatus==='error'||
+          (hubStatus==='online' && catalog.filter(e=>e.date===dateFilter).some(e=>!loadedDocs[e.id]))) {
+          setRepairNotice('Planning non synchronisé : impossible de valider ce déplacement en sécurité.');return;
+        }
+        const origin=catalog.find(e=>e.id===manualPlanningEdit.eventId);
+        if(!origin || origin.date!==dateFilter)return;
+        const originalData=eventData(origin);
+        if(!canAdjustEntry(editingSource)) {
+          setRepairNotice('Un match commencé ou terminé ne peut pas être déplacé.');return;
+        }
+        const isReservation=manualPlanningEdit.kind==='réservation';
+        const list=isReservation?(originalData.config?.reservedSlots||[]):(originalData.matches||[]);
+        if(!list.some(x=>x.id===manualPlanningEdit.id)){
+          setRepairNotice('Ce créneau a changé. Actualise le planning.');return;
+        }
+        const nextList=list.map(x=>x.id===manualPlanningEdit.id?{...x,
+          startTime:editingCandidate.startTime,endTime:editingCandidate.endTime,
+          fieldId:editingCandidate.fieldId,fieldName:editingCandidate.fieldName}:x);
+        const nextData=isReservation?{...originalData,config:{...originalData.config,reservedSlots:nextList}}:
+          {...originalData,matches:nextList};
+        if(!window.confirm(`Déplacer ${editingSource.category} : ${editingSource.startTime} vers ${editingCandidate.startTime} sur ${editingCandidate.fieldName} ? Les scores seront conservés.`))return;
+        try {
+          if(hubStatus==='online'){
+            if(!dbRef.current)throw new Error('Firebase non disponible.');
+            const db=dbRef.current;
+            const dayEvents=catalog.filter(e=>e.date===dateFilter);
+            await db.runTransaction(async tx=>{
+              // On lit TOUS les documents de la journée avant la moindre écriture :
+              // le conflit est recontrôlé même si un autre appareil vient de bouger un match.
+              const versions=[];
+              for(const event of dayEvents){
+                const ref=db.collection('tournaments').doc(tournamentDocId(event.id));
+                versions.push({event,ref,snap:await tx.get(ref)});
+              }
+              const target=versions.find(v=>v.event.id===origin.id);
+              if(!target?.snap.exists)throw new Error('Catégorie absente du Cloud.');
+              const currentList=isReservation?(target.snap.data().config?.reservedSlots||[]):(target.snap.data().matches||[]);
+              if(JSON.stringify(currentList)!==JSON.stringify(list))throw new Error('Ce calendrier a été modifié depuis un autre appareil. Réessaie.');
+              const freshEvents=versions.flatMap(v=>{
+                const source=v.snap.exists?v.snap.data():{};
+                const currentMatches=v.event.id===origin.id && !isReservation?nextList:(source.matches||[]);
+                const currentSlots=v.event.id===origin.id && isReservation?nextList:(source.config?.reservedSlots||[]);
+                return [
+                  ...currentMatches.filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:v.event.id,category:v.event.category,kind:'match'})),
+                  ...currentSlots.filter(r=>r.startTime&&r.endTime).map(r=>({...r,eventId:v.event.id,category:v.event.category,kind:'réservation'}))
+                ];
+              });
+              const changed=freshEvents.find(x=>planningKey(x)===manualPlanningEdit.key);
+              if(!changed || freshEvents.some(x=>planningKey(x)!==manualPlanningEdit.key && planningConflict(changed,x)))
+                throw new Error('Ce créneau entre encore en conflit avec une autre rencontre ou réservation.');
+              if(isReservation){
+                tx.update(target.ref,{'config.reservedSlots':nextList,updatedAt:new Date().toISOString()});
+              }else{
+                tx.update(target.ref,{matches:nextList,updatedAt:new Date().toISOString()});
+              }
+            });
+          }
+          localStorage.setItem(tournamentStorageKey(origin.id,isReservation?'config':'matches'),
+            JSON.stringify(isReservation?nextData.config:nextList));
+          setRecords(old=>({...old,[origin.id]:nextData}));
+          setManualPlanningEdit(null);
+          setRepairNotice('Créneau corrigé : '+editingSource.category+' · '+editingCandidate.startTime+'–'+editingCandidate.endTime+
+            ' sur '+editingCandidate.fieldName+(hubStatus==='online'?' (synchronisé).':' (local uniquement).'));
+        }catch(err){setRepairNotice('Correction non appliquée : '+(err.message||String(err)));}
+      };
 
       const previewPlanningRepair=()=>{
         setRepairNotice('');
@@ -679,7 +781,7 @@
           setRepairPreview(null);
         }catch(err){setRepairNotice('Aucune modification appliquée : '+(err.message||String(err)));}
       };
-      useEffect(()=>{setRepairPreview(null);setRepairNotice('');},[dateFilter]);
+      useEffect(()=>{setRepairPreview(null);setManualPlanningEdit(null);setRepairNotice('');},[dateFilter]);
 
       return <div className="min-h-screen bg-[#0e0708] text-slate-100">
         <section className="bg-[#22070c] border-b border-amber-900/30 px-3 sm:px-6 py-3 space-y-3">
@@ -694,7 +796,7 @@
                   className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
                   {page==='planning'?'← Tournoi':'📅 Planning général'}
                 </button>
-                {!isViewer && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);}}
+                {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
               </div>
             </div>
@@ -707,7 +809,7 @@
             </div>
             {hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
             <div className="text-[11px] text-slate-400">{hubStatus==='online'?'☁ Catégories synchronisées avec Firebase':hubStatus==='loading'?'⏳ Chargement du planning commun…':'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>
-            {!isViewer && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
+            {hubIsEditor && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
               <label className="text-xs text-amber-300">Catégorie<input value={categoryInput} onChange={e=>{setCategoryInput(e.target.value);setTitleInput('Tournoi '+e.target.value);}}
                 placeholder="U13" className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white"/></label>
               <label className="text-xs text-amber-300">Nom du tournoi<input value={titleInput} onChange={e=>setTitleInput(e.target.value)}
@@ -728,18 +830,46 @@
             <p>⚠ {conflictPairs.length} conflit(s) de planning identifiés ({fieldConflicts.length} lignes concernées).</p>
             {!isViewer && <button type="button" onClick={previewPlanningRepair}
               className="bg-amber-500 text-[#210706] font-black text-xs px-3 py-2 rounded-lg">🛠 Proposer des corrections</button>}
-            <div className="space-y-1 text-xs">{conflictPairs.slice(0,6).map(([a,b],i)=><p key={i}>
-              {a.category} {a.startTime} ({a.fieldName||'Terrain'}) / {b.category} {b.startTime} ({b.fieldName||'Terrain'})
-              {(planningImmutable(a)&&planningImmutable(b))?' — modification manuelle nécessaire':''}
-            </p>)}</div>
+            <div className="space-y-2 text-xs">{conflictPairs.slice(0,8).map(([a,b],i)=><div key={i} className="rounded-lg border border-rose-700/30 bg-black/20 p-2">
+              <p><strong>{a.category}</strong> · {a.kind==='réservation'?'Réservation':a.stage||'Match'} {a.startTime}–{a.endTime} ({a.fieldName||'Terrain'})</p>
+              <p className="mt-1">↔ <strong>{b.category}</strong> · {b.kind==='réservation'?'Réservation':b.stage||'Match'} {b.startTime}–{b.endTime} ({b.fieldName||'Terrain'})</p>
+              {!isViewer && <div className="mt-2 flex gap-2 flex-wrap">
+                {canAdjustEntry(a)&&<button type="button" onClick={()=>editPlanningEntry(a)} className="border border-amber-600/50 rounded px-2 py-1 text-amber-300">Ajuster {a.category}</button>}
+                {canAdjustEntry(b)&&<button type="button" onClick={()=>editPlanningEntry(b)} className="border border-amber-600/50 rounded px-2 py-1 text-amber-300">Ajuster {b.category}</button>}
+                {!canAdjustEntry(a)&&!canAdjustEntry(b)&&<span>Deux matchs déjà joués ou commencés : correction automatique interdite</span>}
+              </div>}
+            </div>)}</div>
           </div>}
           {repairNotice && <p role="status" className="text-xs text-amber-300 border border-amber-900 rounded-lg p-3">{repairNotice}</p>}
+          {!isViewer && manualPlanningEdit && <div className="bg-[#1d0a0f] border border-amber-700/60 rounded-xl p-4 space-y-3">
+            <div className="flex justify-between items-center gap-2">
+              <h3 className="text-sm font-black text-amber-300">🛠 Corriger un conflit — {manualPlanningEdit.category}</h3>
+              <button type="button" onClick={()=>setManualPlanningEdit(null)} className="text-xs text-slate-300 border border-red-950 rounded px-2 py-1">Fermer</button>
+            </div>
+            <p className="text-xs text-slate-300">{manualPlanningEdit.kind==='réservation'?'Réservation exclusive (tous les terrains)':'Rencontre'} · {manualPlanningEdit.duration} min. Le changement n'effacera aucun résultat.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-xs text-slate-200">Nouvelle heure
+                <input type="time" value={manualPlanningEdit.startTime} onChange={e=>setManualPlanningEdit(old=>({...old,startTime:e.target.value}))}
+                  className="mt-1 block w-full bg-black/40 text-white border border-red-900 rounded-lg p-2"/>
+              </label>
+              <label className="text-xs text-slate-200">Terrain {manualPlanningEdit.kind==='réservation'?'(libellé du créneau)':''}
+                <select value={manualPlanningEdit.fieldId} onChange={e=>setManualPlanningEdit(old=>({...old,fieldId:e.target.value}))}
+                  className="mt-1 block w-full bg-black/40 text-white border border-red-900 rounded-lg p-2">
+                  {sharedFields.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </label>
+            </div>
+            {!editingTimeValid && <p role="alert" className="text-xs text-rose-300">Horaire invalide ou créneau dépassant minuit.</p>}
+            {editingCollisions.length>0 && <div role="alert" className="text-xs text-rose-300">⛔ {editingCollisions.length} conflit(s) sur ce créneau : {editingCollisions.slice(0,4).map(x=>x.category+' '+x.startTime+' ('+(x.fieldName||'Terrain')+')').join(' ; ')}. Choisis une autre heure ou un autre terrain.</div>}
+            <button type="button" disabled={!editingTimeValid||editingCollisions.length>0} onClick={saveManualPlanningEdit}
+              className="bg-amber-500 text-black font-black text-xs px-4 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">Enregistrer ce créneau</button>
+          </div>}
           {!isViewer && repairPreview && <div className="bg-[#1d0a0f] border border-amber-700/50 rounded-xl p-4 space-y-3">
             <h3 className="text-sm font-black text-amber-300">Proposition de correction — aucun score modifié</h3>
             <div className="space-y-2 text-xs">{repairPreview.moves.length?repairPreview.moves.map((m,i)=><div key={i} className="border-b border-red-950 pb-2">
               <strong>{m.category} · {m.title}</strong> : {m.from} → <span className="text-emerald-300">{m.to}</span>
             </div>):<p>Aucun déplacement automatique possible.</p>}</div>
-            {repairPreview.unresolved.length>0 && <p className="text-amber-200 text-xs">⚠ {repairPreview.unresolved.length} conflit(s) restent à corriger manuellement : rencontre déjà jouée, créneau exclusif ou absence de place compatible. Ouvre la catégorie correspondante pour ajuster le créneau.</p>}
+            {repairPreview.unresolved.length>0 && <p className="text-amber-200 text-xs">⚠ {repairPreview.unresolved.length} conflit(s) restent à corriger manuellement : rencontre déjà jouée, créneau exclusif ou absence de place compatible. Utilise « Ajuster » dans la liste des conflits ci-dessus pour modifier directement une rencontre ou une réservation.</p>}
             <div className="flex flex-wrap gap-2">
               {repairPreview.moves.length>0 && <button type="button" onClick={applyPlanningRepair} className="bg-emerald-700 text-white font-bold text-xs rounded-lg px-4 py-2">Confirmer {repairPreview.moves.length} déplacement(s)</button>}
               <button type="button" onClick={()=>setRepairPreview(null)} className="bg-[#38151a] text-slate-200 text-xs rounded-lg px-4 py-2">Annuler</button>
