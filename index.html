@@ -32,6 +32,20 @@
     }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    html { -webkit-text-size-adjust: 100%; }
+    * { box-sizing: border-box; }
+    button, select { touch-action: manipulation; }
+    input, select, textarea { min-width: 0; }
+    /* Sur les écrans larges, profiter de l'espace pour les tableaux du tournoi. */
+    @media (min-width: 1440px) {
+      .max-w-7xl { max-width: 90rem !important; }
+    }
+    /* Évite le zoom involontaire de Safari à l'ouverture des champs. */
+    @media (max-width: 639px) {
+      input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px !important; }
+      .csv-mobile-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .csv-mobile-scroll table { min-width: 580px; }
+    }
   </style>
 </head>
 <body>
@@ -478,6 +492,7 @@
       const [hubStatus,setHubStatus] = useState('local');
       const [hubMessage,setHubMessage] = useState('');
       const [showCreate,setShowCreate] = useState(false);
+      const [editingEvent,setEditingEvent] = useState(null);
       const [categoryInput,setCategoryInput] = useState('U11');
       const [titleInput,setTitleInput] = useState('Tournoi U11');
       const [dateInput,setDateInput] = useState(()=>TODAY_LOCAL());
@@ -602,6 +617,22 @@
           } catch(err){setHubMessage('Nouvelle catégorie créée seulement en local : '+err.message);}
         }
         setCatalog(next);setShowCreate(false);selectTournament(id);
+      };
+      const saveEventMetadata=async()=>{
+        if(isViewer || !editingEvent) return;
+        const category=String(editingEvent.category||'').trim();
+        const title=String(editingEvent.title||'').trim();
+        const date=editingEvent.date;
+        if(!category || !title || !/^\d{4}-\d{2}-\d{2}$/.test(date||'')) {
+          setHubMessage('Renseigne le nom de la catégorie, le nom du tournoi et une date valide.');
+          return;
+        }
+        const next=catalog.map(event=>event.id===editingEvent.id ?
+          {...event,category:category.slice(0,60),title:title.slice(0,120),date} : event);
+        // Le même ID est conservé : aucune équipe, rencontre ni donnée Firebase n'est recréée.
+        await persistCatalog(next);
+        setDateFilter(date);
+        setEditingEvent(null);
       };
       const updateEventDate=(eventId,date)=>{
         if(isViewer||!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
@@ -801,8 +832,11 @@
                   className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
                   {page==='planning'?'← Tournoi':'📅 Planning général'}
                 </button>}
-                {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);}}
+                {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);setEditingEvent(null);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
+                {hubIsEditor && current && <button type="button" onClick={()=>{setEditingEvent({...current});setShowCreate(false);}}
+                  className="px-3 py-2 rounded-lg text-xs font-bold border border-red-900/70 bg-[#18090d] text-amber-200"
+                  title="Renommer cet onglet et modifier sa date">✎ Modifier</button>}
               </div>
             </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -814,6 +848,28 @@
             </div>
             {hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
             <div className="text-[11px] text-slate-400">{hubStatus==='online'?'☁ Catégories synchronisées avec Firebase':hubStatus==='loading'?'⏳ Chargement du planning commun…':'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>
+            {hubIsEditor && editingEvent && <div className="bg-[#130508] p-3 sm:p-4 border border-amber-900/40 rounded-xl space-y-3" role="form" aria-label="Modifier l'onglet du tournoi">
+              <h3 className="text-sm text-amber-300 font-bold">✏️ Modifier l'onglet {editingEvent.category}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="text-xs text-amber-300">Catégorie / nom de l'onglet
+                  <input type="text" maxLength="60" value={editingEvent.category} onChange={e=>setEditingEvent(old=>({...old,category:e.target.value}))}
+                    className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white" placeholder="U11, U13, Principal" />
+                </label>
+                <label className="text-xs text-amber-300">Nom dans la liste des tournois
+                  <input type="text" maxLength="120" value={editingEvent.title} onChange={e=>setEditingEvent(old=>({...old,title:e.target.value}))}
+                    className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white" />
+                </label>
+                <label className="text-xs text-amber-300">Date
+                  <input type="date" value={editingEvent.date} onChange={e=>setEditingEvent(old=>({...old,date:e.target.value}))}
+                    className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white" />
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-400">La catégorie et sa date changent, mais ses équipes, ses scores et son identifiant Firebase restent inchangés. Le titre dans l'en-tête du match se règle dans Configuration.</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={saveEventMetadata} className="bg-amber-500 text-black font-black rounded-lg px-4 py-2 text-xs">Enregistrer</button>
+                <button type="button" onClick={()=>setEditingEvent(null)} className="bg-[#37151b] text-slate-200 rounded-lg px-4 py-2 text-xs">Annuler</button>
+              </div>
+            </div>}
             {hubIsEditor && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
               <label className="text-xs text-amber-300">Catégorie<input value={categoryInput} onChange={e=>{setCategoryInput(e.target.value);setTitleInput('Tournoi '+e.target.value);}}
                 placeholder="U13" className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white"/></label>
@@ -881,7 +937,7 @@
             </div>
           </div>}
           {busyEvents.length===0?<div className="rounded-xl border border-red-950 p-5 text-slate-400 text-sm">Aucun match prévu ce jour.</div>:
-          <div className="overflow-x-auto rounded-xl border border-red-950">
+          <div className="csv-mobile-scroll overflow-x-auto rounded-xl border border-red-950" role="region" aria-label="Tableau du planning partagé" tabIndex="0">
             <table className="w-full text-left text-xs sm:text-sm"><thead className="bg-[#2c0b12] text-amber-300"><tr>
               <th className="p-3">Heure</th><th className="p-3">Terrain</th><th className="p-3">Catégorie</th><th className="p-3">Match / Créneau</th><th className="p-3">État</th>
             </tr></thead><tbody className="divide-y divide-red-950">
@@ -1678,6 +1734,7 @@
         const occupied = [...externalMatches, ...(preserveGroups ? groupFixtures : [])];
         const planned = [];
         const fieldNext = new Map(fields.map(f => [f.id, firstMinute]));
+        const fieldLoads = new Map(fields.map(f => [f.id, (preserveGroups ? groupFixtures : []).filter(m=>m.fieldId===f.id).length]));
         const stageEnd = arr => Math.max(firstMinute, ...arr.filter(m => m.endTime).map(m => timeToMinutes(m.endTime)));
         const participantKeys = m => {
           const keys = [m.team1Id, m.team2Id].filter(Boolean).map(id => 'team:'+id);
@@ -1718,13 +1775,16 @@
               start = Math.max(start + 5, until);
             }
             if (start + duration > 1440 || conflicts(fixture,start,start + duration,f.id,mustBeExclusive) !== null) continue;
-            if (!best || start < best.start) best = {field:f,start};
+            if (!best || start < best.start ||
+                (start === best.start && (fieldLoads.get(f.id)||0) < (fieldLoads.get(best.field.id)||0)))
+              best = {field:f,start};
           }
           if (!best) return null;
           const item = {...fixture, fieldId:best.field.id,fieldName:best.field.name,
             startTime:minutesToTime(best.start),endTime:minutesToTime(best.start + duration),
             exclusive: mustBeExclusive};
           fieldNext.set(best.field.id,best.start + duration + pause);
+          fieldLoads.set(best.field.id,(fieldLoads.get(best.field.id)||0)+1);
           occupied.push(item);
           planned.push(item);
           return item;
@@ -1927,19 +1987,106 @@
         return matches;
       };
 
+      // Répartit les rencontres non commencées sur les terrains disponibles.
+      // Les résultats, les finales, les réservations et les rencontres en cours sont fixes.
+      const buildBalancedFieldPlan = availableFields => {
+        if(!availableFields.length) return {error:'Aucun terrain disponible.'};
+        const phaseGroups=new Set(['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante']);
+        const movable=matches.filter(m=>m.status==='pending' && !m.exclusive && !phaseGroups.has(m.group));
+        if(!movable.length) return {error:'Aucun match de poule non commencé à rééquilibrer.'};
+        const movableIds=new Set(movable.map(m=>m.id));
+        const fixed=matches.filter(m=>!movableIds.has(m.id));
+        const occupied=[...fixed,...externalMatches];
+        const busySlots=[...reservedSlots,...externalReservations];
+        const startMinute=timeToMinutes(config.startTime||'09:00');
+        const phaseStart=Math.min(1440,...fixed.filter(m=>phaseGroups.has(m.group)&&m.startTime)
+          .map(m=>timeToMinutes(m.startTime)));
+        const pause=Math.max(0,Number(config.breakDuration)||0);
+        const phaseLimit=phaseStart<1440 ? phaseStart-pause : 1440;
+        const counts=new Map(availableFields.map(f=>[f.id,fixed.filter(m=>m.fieldId===f.id).length]));
+        const nextByField=new Map(availableFields.map(f=>[f.id,startMinute]));
+        const staged=[];
+        const sorted=[...movable].sort((a,b)=>timeToMinutes(a.startTime)-timeToMinutes(b.startTime)||String(a.id).localeCompare(String(b.id)));
+        for(const match of sorted) {
+          const duration=timeToMinutes(match.endTime)-timeToMinutes(match.startTime);
+          if(!Number.isFinite(duration)||duration<=0||duration>180) return {error:'Un match possède une durée invalide : '+(match.stage||match.id)};
+          let chosen=null;
+          for(const field of availableFields) {
+            let t=Math.max(startMinute,nextByField.get(field.id)||startMinute);
+            let attempts=0;
+            while(t+duration<=phaseLimit && t+duration<1440 && attempts++<600) {
+              const startTime=minutesToTime(t),endTime=minutesToTime(t+duration);
+              if(config.hasLunchBreak && config.lunchStart && config.lunchEnd &&
+                  timesOverlap(startTime,endTime,config.lunchStart,config.lunchEnd)) {
+                t=Math.max(t+5,timeToMinutes(config.lunchEnd));continue;
+              }
+              const reservation=busySlots.find(slot=>timesOverlap(startTime,endTime,slot.startTime,slot.endTime));
+              if(reservation){t=Math.max(t+5,timeToMinutes(reservation.endTime));continue;}
+              const conflict=occupied.find(other=>other.startTime&&other.endTime&&
+                timesOverlap(startTime,endTime,other.startTime,other.endTime)&&
+                (other.exclusive || other.fieldId===field.id ||
+                 (!other._eventId && [match.team1Id,match.team2Id].some(id=>id&&(id===other.team1Id||id===other.team2Id)))));
+              if(conflict){t=Math.max(t+5,timeToMinutes(conflict.endTime));continue;}
+              // Favoriser la répartition, sans décaler exagérément les horaires.
+              const score=t+(counts.get(field.id)||0)*Math.min(8,Math.max(3,duration/3));
+              if(!chosen || score<chosen.score || (score===chosen.score&&t<chosen.t))
+                chosen={field,t,score};
+              break;
+            }
+          }
+          if(!chosen) return {error:'Impossible de répartir les matchs avant les phases finales sans conflit.'};
+          const placed={...match,fieldId:chosen.field.id,fieldName:chosen.field.name,
+            startTime:minutesToTime(chosen.t),endTime:minutesToTime(chosen.t+duration)};
+          staged.push(placed);
+          occupied.push(placed);
+          counts.set(chosen.field.id,(counts.get(chosen.field.id)||0)+1);
+          nextByField.set(chosen.field.id,chosen.t+duration+pause);
+        }
+        const byId=new Map(staged.map(m=>[m.id,m]));
+        return {matches:matches.map(m=>byId.get(m.id)||m),count:staged.length};
+      };
+      const rebalanceFieldSchedule = () => {
+        if(!requireHub()) return;
+        const result=buildBalancedFieldPlan(fields);
+        if(result.error){showToast(result.error,'error');return;}
+        if(!window.confirm(`Rééquilibrer ${result.count} matchs non commencés sur ${fields.length} terrains ? Les finales, réservations et résultats seront conservés.`))return;
+        setMatches(result.matches);
+        broadcastUpdate(config,fields,teams,result.matches);
+        showToast(`${result.count} rencontres réparties entre ${fields.length} terrains.`);
+      };
       // Gestion des Terrains
       const handleAddField = () => {
-        if (!newFieldName.trim()) return;
-        const newFields = [...fields, { id: `f-${Date.now()}`, name: newFieldName.trim() }];
+        const name=newFieldName.trim();
+        if (!name) return;
+        if (fields.some(f=>f.name.toLocaleLowerCase('fr')===name.toLocaleLowerCase('fr'))) {
+          showToast('Ce terrain existe déjà.','error');return;
+        }
+        const newFields = [...fields, { id: `f-${Date.now()}`, name }];
+        // Tant qu'aucun match n'a commencé, rééquilibrer automatiquement.
+        // En cours de tournoi, ne jamais modifier des horaires sans confirmation.
+        const canAuto=hubReady && matches.length>0 && matches.every(m=>m.status==='pending');
+        const result=canAuto ? buildBalancedFieldPlan(newFields) : null;
         setFields(newFields);
         setNewFieldName('');
-        broadcastUpdate(config, newFields, teams, matches);
-        showToast('Terrain ajouté');
+        if(result && !result.error) {
+          setMatches(result.matches);
+          broadcastUpdate(config,newFields,teams,result.matches);
+          showToast(`Terrain ajouté : ${result.count} matchs de poule répartis sur ${newFields.length} terrains.`);
+        } else {
+          broadcastUpdate(config,newFields,teams,matches);
+          showToast(result?.error ? `Terrain ajouté. ${result.error}` :
+            'Terrain ajouté. Utilise « Équilibrer » pour réorganiser les matchs non commencés.');
+        }
       };
 
       const handleRemoveField = (id) => {
         if (fields.length <= 1) {
           showToast('Conservez au moins un terrain !', 'error');
+          return;
+        }
+        if ([...matches,...externalMatches].some(m=>m.fieldId===id) ||
+            [...reservedSlots,...externalReservations].some(s=>s.fieldId===id)) {
+          showToast('Ce terrain est utilisé. Déplace les matchs et les réservations avant de le supprimer.', 'error');
           return;
         }
         const updated = fields.filter(f => f.id !== id);
@@ -2029,7 +2176,19 @@
           }
         }
 
-        let updated = matches.map(m => m.id === editingMatch.id ? editingMatch : m);
+        const originalMatch=matches.find(m=>m.id===editingMatch.id);
+        const selectedField=fields.find(f=>f.id===editingMatch.fieldId);
+        const savedMatch=selectedField?{...editingMatch,fieldName:selectedField.name}:editingMatch;
+        if(originalMatch && savedMatch.fieldId !== originalMatch.fieldId) {
+          if(!requireHub()) return;
+          if(matchSlotConflict(savedMatch,matches)) {
+            showToast('Terrain occupé à cet horaire. Utilise ↔ pour choisir aussi une autre heure.','error');
+            return;
+          }
+          if(originalMatch.status!=='pending' &&
+              !window.confirm('Ce match a déjà commencé ou s’est terminé. Changer son terrain sans modifier le résultat ?')) return;
+        }
+        let updated = matches.map(m => m.id === savedMatch.id ? savedMatch : m);
 
         const standingsFromMatches = groupName => standingsFor(teams,updated,groupName,config);
         const isGroupComplete = (groupName) => {
@@ -2350,7 +2509,7 @@
 
           {/* Navigation tactile spectateur : accès immédiat sans défilement horizontal. */}
           {userRole === 'viewer' && (
-            <nav aria-label="Navigation spectateur" className="sm:hidden fixed bottom-0 inset-x-0 z-[80] border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]"
+            <nav aria-label="Navigation spectateur" className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]"
               style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
               <div className="flex items-stretch justify-around gap-1 px-2 pt-2">
                 {[
@@ -2371,8 +2530,29 @@
             </nav>
           )}
 
+          {/* Accès rapides organisateur sur iPhone, sans masquer les onglets PC/tablette. */}
+          {userRole === 'editor' && (
+            <nav aria-label="Navigation organisateur" className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg"
+              style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
+              <div className="grid grid-cols-5 gap-1 px-2 pt-2">
+                {[
+                  {id:'config',icon:'⚙️',text:'Réglages'},
+                  {id:'teams',icon:'👥',text:'Équipes'},
+                  {id:'matches',icon:'📅',text:'Matchs'},
+                  {id:'standings',icon:'📊',text:'Poules'},
+                  config.format!=='round_robin' ? {id:'bracket',icon:'🏆',text:'Finales'} : {id:'stats',icon:'⚽',text:'Stats'}
+                ].map(tab=><button type="button" key={tab.id} aria-current={activeTab===tab.id?'page':undefined}
+                  onClick={()=>{setActiveTab(tab.id);window.scrollTo({top:0,behavior:'smooth'});}}
+                  className={`min-w-0 rounded-xl px-1 py-1.5 flex flex-col items-center gap-1 text-[10px] font-bold ${activeTab===tab.id?'bg-amber-500 text-black':'text-slate-300'}`}>
+                  <span className="text-xl leading-none" aria-hidden="true">{tab.icon}</span>
+                  <span className="truncate w-full text-center">{tab.text}</span>
+                </button>)}
+              </div>
+            </nav>
+          )}
+
           {/* Corps de l'application */}
-          <main className={`flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 ${userRole === 'viewer' ? 'pb-28 sm:pb-6' : ''}`}>
+          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 sm:pb-6">
 
             
             {/* ONGLET 1 : CONFIGURATION */}
@@ -2588,8 +2768,8 @@
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                       {fields.map((f, i) => (
-                        <div key={f.id} className="bg-[#0b0304] border border-red-950 p-2.5 rounded-xl flex items-center justify-between">
-                          <span className="text-xs font-bold text-white">🏟 {f.name}</span>
+                        <div key={f.id} className="bg-[#0b0304] border border-red-950 p-2.5 rounded-xl flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white">🏟 {f.name} <span className="font-normal text-amber-300">· {matches.filter(m=>m.fieldId===f.id).length} matchs</span></span>
                           <button
                             onClick={() => handleRemoveField(f.id)}
                             className="text-slate-500 hover:text-rose-400 text-xs px-2 py-1"
@@ -2598,6 +2778,11 @@
                           </button>
                         </div>
                       ))}
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-900/30 p-3 bg-[#1b090d]">
+                      <span className="text-xs text-slate-300">⚖ Répartir au mieux les matchs non commencés sur les terrains disponibles, sans toucher aux finales ni aux résultats.</span>
+                      <button type="button" onClick={rebalanceFieldSchedule}
+                        className="shrink-0 rounded-lg border border-amber-700/50 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-[#321218]">⚖ Équilibrer les terrains</button>
                     </div>
                   </div>
 
@@ -2910,7 +3095,7 @@
                   </div>
                 ) : scheduleViewMode === 'fields' ? (
                   /* VUE PAR TERRAIN */
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                     {fields.map(f => {
                       const fMatches = matches.filter(m => m.fieldId === f.id &&
                         (userRole !== 'viewer' || mobileMatchFilter === 'all' ||
@@ -3005,7 +3190,7 @@
                   </div>
                 ) : (
                   /* VUE CHRONO */
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4">
                     {matches.filter(m => userRole !== 'viewer' || mobileMatchFilter === 'all' ||
                       (mobileMatchFilter === 'finished' ? m.status === 'finished' : m.status !== 'finished'))
                       .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
@@ -3787,6 +3972,18 @@
                   </div>
                   <button onClick={() => setEditingMatch(null)} className="text-slate-400 hover:text-white p-1">✕</button>
                 </div>
+
+                {/* Terrain modifiable directement, sans changer le score ni l'horaire. */}
+                <label className="block rounded-xl border border-amber-900/30 bg-[#1d0a0f] p-3 text-xs text-slate-300">
+                  🏟 Terrain du match · {editingMatch.startTime||'--:--'}–{editingMatch.endTime||'--:--'}
+                  <select value={editingMatch.fieldId||''}
+                    onChange={e=>{const f=fields.find(x=>x.id===e.target.value);setEditingMatch(old=>({...old,fieldId:e.target.value,fieldName:f?.name||old.fieldName}));}}
+                    className="mt-2 w-full bg-[#0b0304] text-white border border-red-900 rounded-lg px-3 py-2">
+                    <option value="" disabled>Choisir le terrain</option>
+                    {fields.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                  <span className="mt-2 block text-[11px] text-slate-400">Le changement est contrôlé à l'enregistrement. Si le terrain est occupé, utilise ↔ dans le calendrier pour modifier aussi l'heure.</span>
+                </label>
 
                 {/* Score */}
                 <div className="grid grid-cols-5 items-center bg-[#0b0304] p-3 rounded-xl border border-red-950 text-center">
