@@ -38,7 +38,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     const OFFICIAL_PUBLIC_URL = 'https://csvfoot.github.io/tournoi-csv/';
 
@@ -291,7 +291,292 @@
       return fixtures;
     };
 
-    function App() {
+    // ------------------------------------------------------------------------
+    // MULTI-TOURNOIS : catalogue et terrains communs, sans déplacer les données
+    // du tournoi historique (cslv_main_data et les clés cslv_*).
+    // ------------------------------------------------------------------------
+    const TODAY_LOCAL = () => {
+      const d = new Date();
+      return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+    };
+    const initialTournaments = () => [{id:'principal',category:'Principal',title:'Tournoi actuel',date:TODAY_LOCAL()}];
+    const tournamentDocId = id => id==='principal' ? 'cslv_main_data' : 'cslv_mt_'+id;
+    const tournamentStorageKey = (id,kind) => id==='principal' ? 'cslv_'+kind : 'cslv_mt_'+id+'_'+kind;
+    const readLocalJson = (key, fallback) => {
+      try { const value=localStorage.getItem(key); return value?JSON.parse(value):fallback; }
+      catch(e) { return fallback; }
+    };
+    const cleanCategories = events => {
+      const unique=new Map();
+      for(const event of events || []) {
+        if (!event || !/^[a-z0-9_-]{1,70}$/.test(event.id)) continue;
+        unique.set(event.id,{
+          id:event.id,
+          category:String(event.category||'Catégorie').slice(0,60),
+          title:String(event.title||'Tournoi').slice(0,120),
+          date:/^\d{4}-\d{2}-\d{2}$/.test(event.date||'')?event.date:TODAY_LOCAL()
+        });
+      }
+      if(!unique.has('principal')) unique.set('principal',initialTournaments()[0]);
+      return [...unique.values()];
+    };
+    const loadCloudConfig = () => {
+      try {
+        const params=new URLSearchParams(window.location.search);
+        const encoded=params.get('cloud');
+        if(encoded){
+          const obj=JSON.parse(atob(encoded));
+          const value={apiKey:obj.k,projectId:obj.p,authDomain:obj.p+'.firebaseapp.com'};
+          if(value.apiKey && value.projectId) {
+            localStorage.setItem('cslv_firebase_config',JSON.stringify(value));
+            return value;
+          }
+        }
+      } catch(e) {}
+      return readLocalJson('cslv_firebase_config',null);
+    };
+
+    function MultiTournamentShell() {
+      const params = new URLSearchParams(window.location.search);
+      const urlTournament = params.get('tournament');
+      const [hubIsEditor,setHubIsEditor] = useState(()=>params.get('role')==='editor');
+      const isViewer = !hubIsEditor;
+      const onRoleChange = useCallback(role=>setHubIsEditor(role==='editor'),[]);
+      const [catalog,setCatalog] = useState(()=>cleanCategories(readLocalJson('cslv_multi_catalog_v1',initialTournaments())));
+      const [selectedId,setSelectedId] = useState(()=>urlTournament || readLocalJson('cslv_last_tournament_v1','principal'));
+      const [page,setPage] = useState('tournoi');
+      const [sharedFields,setSharedFields] = useState(()=>readLocalJson('cslv_shared_fields_v1',readLocalJson('cslv_fields',DEFAULT_FIELDS)));
+      const [loadedDocs,setLoadedDocs] = useState({});
+      const catalogHasFields=useRef(false);
+      const [records,setRecords] = useState(()=>({principal:{
+        config:readLocalJson('cslv_config',{}),
+        matches:readLocalJson('cslv_matches',[]),
+        teams:readLocalJson('cslv_teams',[])
+      }}));
+      const [hubStatus,setHubStatus] = useState('local');
+      const [hubMessage,setHubMessage] = useState('');
+      const [showCreate,setShowCreate] = useState(false);
+      const [categoryInput,setCategoryInput] = useState('U11');
+      const [titleInput,setTitleInput] = useState('Tournoi U11');
+      const [dateInput,setDateInput] = useState(()=>TODAY_LOCAL());
+      const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
+      const dbRef=useRef(null);
+      const catalogRef=useRef(catalog);
+      const hubCloudRef=useRef('local');
+      useEffect(()=>{catalogRef.current=catalog;},[catalog]);
+      useEffect(()=>{hubCloudRef.current=hubStatus;},[hubStatus]);
+      useEffect(()=>{localStorage.setItem('cslv_multi_catalog_v1',JSON.stringify(catalog));},[catalog]);
+      useEffect(()=>{localStorage.setItem('cslv_shared_fields_v1',JSON.stringify(sharedFields));},[sharedFields]);
+
+      // Synchronise le catalogue, mais ne touche jamais au document historique.
+      useEffect(()=>{
+        const conf=loadCloudConfig();
+        if (!conf || !conf.apiKey || !conf.projectId) {setHubStatus('local');return;}
+        let unsubscribe=null; let cancelled=false;
+        setHubStatus('loading');
+        (async()=>{
+          try {
+            if(!firebase.apps.length) firebase.initializeApp(conf);
+            const db=firebase.firestore();
+            dbRef.current=db;
+            try {await firebase.auth().signInAnonymously();} catch(e) {}
+            if(cancelled) return;
+            unsubscribe=db.collection('tournaments').doc('cslv_multi_catalog_v1').onSnapshot(doc=>{
+              if(cancelled)return;
+              if(doc.exists){
+                const data=doc.data();
+                if(Array.isArray(data.events))setCatalog(cleanCategories(data.events));
+                if(Array.isArray(data.fields)&&data.fields.length){catalogHasFields.current=true;setSharedFields(data.fields);}
+              }
+              setHubStatus('online');setHubMessage('');
+            },err=>{setHubStatus('error');setHubMessage('Catalogue non synchronisé : '+err.message);});
+          } catch(err){setHubStatus('error');setHubMessage('Cloud indisponible : '+err.message);}
+        })();
+        return ()=>{cancelled=true;if(unsubscribe)unsubscribe();};
+      },[]);
+
+      // Écoute les calendriers de toutes les catégories pour le planning commun.
+      useEffect(()=>{
+        if(hubStatus!=='online'||!dbRef.current)return;
+        let cancelled=false;
+        const unsubs=catalog.map(event=>dbRef.current.collection('tournaments').doc(tournamentDocId(event.id))
+          .onSnapshot(snap=>{
+            if(cancelled)return;
+            setLoadedDocs(old=>({...old,[event.id]:true}));
+            if(snap.exists){
+              const data=snap.data();
+              if(event.id==='principal' && !catalogHasFields.current && Array.isArray(data.fields) && data.fields.length) {
+                setSharedFields(data.fields);
+              }
+              setRecords(old=>({...old,[event.id]:{config:data.config||{},teams:data.teams||[],matches:data.matches||[]}}));
+            } else {
+              setRecords(old=>({...old,[event.id]:old[event.id]||{
+                config:readLocalJson(tournamentStorageKey(event.id,'config'),{}),
+                matches:readLocalJson(tournamentStorageKey(event.id,'matches'),[]),
+                teams:readLocalJson(tournamentStorageKey(event.id,'teams'),[])
+              }}));
+            }
+          },err=>{setHubMessage('Planning partiellement indisponible : '+err.message);setHubStatus('error');}));
+        return()=>{cancelled=true;unsubs.forEach(u=>u());};
+      },[hubStatus,catalog.map(e=>e.id).join('|')]);
+
+      const localRecord=id=>({
+        config:readLocalJson(tournamentStorageKey(id,'config'),{}),
+        teams:readLocalJson(tournamentStorageKey(id,'teams'),[]),
+        matches:readLocalJson(tournamentStorageKey(id,'matches'),[])
+      });
+      const updateRecord=useCallback((id,data)=>{
+        setRecords(old=>({...old,[id]:data}));
+      },[]);
+      const persistCatalog=async(next,fieldsOverride=null)=>{
+        setCatalog(next);
+        localStorage.setItem('cslv_multi_catalog_v1',JSON.stringify(next));
+        if(dbRef.current && hubCloudRef.current==='online') {
+          try {await dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1')
+            .set({events:next,fields:fieldsOverride||sharedFields,updatedAt:new Date().toISOString()},{merge:true});}
+          catch(err) {setHubMessage('Liste modifiée sur cet appareil, mais non synchronisée : '+err.message);}
+        }
+      };
+      const updateSharedFields=useCallback(next=>{
+        setSharedFields(next);
+        localStorage.setItem('cslv_shared_fields_v1',JSON.stringify(next));
+        if(dbRef.current && hubCloudRef.current==='online') {
+          dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1')
+            .set({fields:next,updatedAt:new Date().toISOString()},{merge:true})
+            .catch(err=>setHubMessage('Terrains non synchronisés : '+err.message));
+        }
+      },[]);
+      const current=catalog.find(e=>e.id===selectedId)||catalog[0];
+      const selectTournament=id=>{
+        setSelectedId(id);setPage('tournoi');
+        localStorage.setItem('cslv_last_tournament_v1',JSON.stringify(id));
+        const params=new URLSearchParams(window.location.search);
+        params.set('tournament',id);
+        window.history.replaceState({},'',window.location.pathname+'?'+params.toString());
+      };
+      const addTournament=async()=>{
+        if(isViewer) return;
+        const cat=categoryInput.trim();
+        if(!cat || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {setHubMessage('Indique une catégorie et une date.');return;}
+        const id='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+        const event={id,category:cat.slice(0,60),title:(titleInput.trim()||'Tournoi '+cat).slice(0,120),date:dateInput};
+        const defaultConfig={name:event.title,format:'groups_knockout',numberOfGroups:2,customGroups:['Poule A','Poule B'],autoGroups:true,hasPlayoffs:true,hasConsolation:true,
+          adminPin:'1939',duration:15,breakDuration:5,startTime:'09:00',hasLunchBreak:true,lunchStart:'12:30',lunchEnd:'13:30',pointsWin:3,pointsDraw:1,pointsLoss:0,qualifiersPerGroup:2};
+        localStorage.setItem(tournamentStorageKey(id,'config'),JSON.stringify(defaultConfig));
+        localStorage.setItem(tournamentStorageKey(id,'teams'),'[]');
+        localStorage.setItem(tournamentStorageKey(id,'matches'),'[]');
+        setRecords(old=>({...old,[id]:{config:defaultConfig,teams:[],matches:[]}}));
+        const next=[...catalog,event];
+        if(dbRef.current && hubStatus==='online') {
+          try {
+            const batch=dbRef.current.batch();
+            batch.set(dbRef.current.collection('tournaments').doc(tournamentDocId(id)),{config:defaultConfig,teams:[],matches:[],fields:sharedFields,updatedAt:new Date().toISOString()});
+            batch.set(dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1'),{events:next,fields:sharedFields,updatedAt:new Date().toISOString()},{merge:true});
+            await batch.commit();
+          } catch(err){setHubMessage('Nouvelle catégorie créée seulement en local : '+err.message);}
+        }
+        setCatalog(next);setShowCreate(false);selectTournament(id);
+      };
+      const updateEventDate=(eventId,date)=>{
+        if(isViewer||!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
+        persistCatalog(catalog.map(e=>e.id===eventId?{...e,date}:e));
+      };
+
+      const eventData=event=>records[event.id]||localRecord(event.id);
+      const selectedDate=current?.date||TODAY_LOCAL();
+      const otherEvents=catalog.filter(e=>e.id!==current?.id && e.date===selectedDate).map(e=>({
+        ...e,...eventData(e)
+      }));
+      const busyEvents=catalog.filter(e=>e.date===dateFilter).flatMap(e=>{
+        const data=eventData(e);
+        const matches=(data.matches||[]).filter(m=>m.startTime&&m.endTime).map(m=>({
+          ...m,eventId:e.id,category:e.category,eventName:e.title,kind:'match'
+        }));
+        const reservations=((data.config&&data.config.reservedSlots)||[]).map(slot=>({
+          ...slot,eventId:e.id,category:e.category,eventName:e.title,kind:'réservation'
+        }));
+        return [...matches,...reservations];
+      }).sort((a,b)=>String(a.startTime).localeCompare(String(b.startTime))||String(a.fieldName||'').localeCompare(String(b.fieldName||'')));
+      const fieldConflicts=busyEvents.filter((m,i)=>busyEvents.some((other,j)=>j!==i && other.startTime<m.endTime && m.startTime<other.endTime &&
+        (m.kind==='réservation'||other.kind==='réservation'||m.exclusive||other.exclusive||(m.fieldId&&m.fieldId===other.fieldId))));
+      const cloudReady=hubStatus!=='loading' && hubStatus!=='error' &&
+        (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
+
+      return <div className="min-h-screen bg-[#0e0708] text-slate-100">
+        <section className="bg-[#22070c] border-b border-amber-900/30 px-3 sm:px-6 py-3 space-y-3">
+          <div className="max-w-7xl mx-auto space-y-2">
+            <div className="flex flex-wrap items-center gap-2 justify-between">
+              <div className="text-sm font-black text-amber-300">⚽ Tournois CSV · catégories</div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={()=>{if(page!=='planning')setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
+                  className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
+                  {page==='planning'?'← Tournoi':'📅 Planning général'}
+                </button>
+                {!isViewer && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);}}
+                  className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {catalog.map(e=><button type="button" key={e.id} onClick={()=>selectTournament(e.id)}
+                className={'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border '+
+                  (e.id===current.id&&page==='tournoi'?'bg-amber-500 text-black border-amber-500':'bg-[#17080b] text-slate-200 border-red-900/70')}>
+                {e.category} <span className="opacity-70 ml-1">{e.date}</span>
+              </button>)}
+            </div>
+            {hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
+            <div className="text-[11px] text-slate-400">{hubStatus==='online'?'☁ Catégories synchronisées avec Firebase':hubStatus==='loading'?'⏳ Chargement du planning commun…':'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>
+            {!isViewer && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
+              <label className="text-xs text-amber-300">Catégorie<input value={categoryInput} onChange={e=>{setCategoryInput(e.target.value);setTitleInput('Tournoi '+e.target.value);}}
+                placeholder="U13" className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white"/></label>
+              <label className="text-xs text-amber-300">Nom du tournoi<input value={titleInput} onChange={e=>setTitleInput(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white"/></label>
+              <label className="text-xs text-amber-300">Date<input type="date" value={dateInput} onChange={e=>setDateInput(e.target.value)}
+                className="mt-1 w-full rounded-lg bg-black border border-red-950 p-2 text-white"/></label>
+              <button type="button" onClick={addTournament} className="self-end rounded-lg bg-amber-500 py-2.5 font-bold text-xs text-black">Créer la catégorie</button>
+            </div>}
+          </div>
+        </section>
+        {page==='planning' ? <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-4">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <h2 className="text-lg font-black text-amber-300">📅 Planning général — tous les terrains</h2>
+            <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
+              className="ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white"/></label>
+          </div>
+          {fieldConflicts.length>0 && <div role="alert" className="text-sm text-amber-200 bg-red-950/60 border border-amber-500/40 rounded-xl p-3">
+            ⚠ {fieldConflicts.length} rencontre(s) ou réservation(s) en conflit sur les terrains communs. Vérifie leurs horaires.</div>}
+          {busyEvents.length===0?<div className="rounded-xl border border-red-950 p-5 text-slate-400 text-sm">Aucun match prévu ce jour.</div>:
+          <div className="overflow-x-auto rounded-xl border border-red-950">
+            <table className="w-full text-left text-xs sm:text-sm"><thead className="bg-[#2c0b12] text-amber-300"><tr>
+              <th className="p-3">Heure</th><th className="p-3">Terrain</th><th className="p-3">Catégorie</th><th className="p-3">Match / Créneau</th><th className="p-3">État</th>
+            </tr></thead><tbody className="divide-y divide-red-950">
+              {busyEvents.map((m,i)=>{
+                const data=eventData(catalog.find(e=>e.id===m.eventId));
+                const teamName=id=>(data.teams||[]).find(t=>t.id===id)?.name||'À déterminer';
+                return <tr key={m.eventId+'-'+m.id+'-'+i} className={fieldConflicts.includes(m)?'bg-rose-950/30':'bg-[#13080a]'}>
+                  <td className="p-3 whitespace-nowrap font-mono">{m.startTime}–{m.endTime}</td>
+                  <td className="p-3">{m.fieldName||sharedFields.find(f=>f.id===m.fieldId)?.name||'Terrain'}</td>
+                  <td className="p-3 font-bold text-amber-300">{m.category}</td>
+                  <td className="p-3">{m.kind==='réservation'?'🔒 '+(m.title||'Réservé'):teamName(m.team1Id)+' – '+teamName(m.team2Id)}</td>
+                  <td className="p-3">{m.kind==='réservation'||m.exclusive?'🔒 Exclusif':m.status==='finished'?'Terminé':'Prévu'}</td>
+                </tr>;
+              })}
+            </tbody></table>
+          </div>}
+          {!isViewer && <div className="border border-red-950 rounded-lg p-3 text-xs text-slate-400">
+            Pour modifier un horaire, ouvre la catégorie concernée puis l’onglet « Matchs ». La réservation d’une finale bloque tous les terrains du même jour.</div>}
+        </main> : <>
+          {!isViewer && current && <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 flex items-center gap-3 text-xs text-slate-300">
+            <label>📅 Date de cette catégorie <input type="date" value={current.date} onChange={e=>updateEventDate(current.id,e.target.value)}
+              className="bg-[#1b080b] border border-red-950 rounded-md p-1.5 ml-2 text-white"/></label>
+          </div>}
+          {current && <TournamentApp key={current.id} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
+            otherEvents={otherEvents} onTournamentUpdate={updateRecord} hubReady={cloudReady}
+            hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}/>}
+        </>}
+      </div>;
+    }
+
+    function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange }) {
       const [activeTab, setActiveTab] = useState('matches');
       const [userRole, setUserRole] = useState('editor');
       const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -307,21 +592,17 @@
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
 
-      // Terrains disponibles
-      const [fields, setFields] = useState(() => {
-        try {
-          const s = localStorage.getItem('cslv_fields');
-          return s ? JSON.parse(s) : DEFAULT_FIELDS;
-        } catch { return DEFAULT_FIELDS; }
-      });
+      // Terrains communs à toutes les catégories, sans renumérotation des IDs.
+      const fields = sharedFields;
+      const setFields = onFieldsChange;
       const [newFieldName, setNewFieldName] = useState('');
 
       // Liste des équipes
       const [teams, setTeams] = useState(() => {
         try {
-          const s = localStorage.getItem('cslv_teams');
-          return s ? JSON.parse(s) : DEMO_TEAMS;
-        } catch { return DEMO_TEAMS; }
+          const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'teams'));
+          return s ? JSON.parse(s) : (tournament.id === 'principal' ? DEMO_TEAMS : []);
+        } catch { return tournament.id === 'principal' ? DEMO_TEAMS : []; }
       });
       const [newTeamName, setNewTeamName] = useState('');
       const [selectedColor, setSelectedColor] = useState(TEAM_COLORS[0]);
@@ -331,7 +612,7 @@
       // Liste des matchs
       const [matches, setMatches] = useState(() => {
         try {
-          const s = localStorage.getItem('cslv_matches');
+          const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'matches'));
           return s ? JSON.parse(s) : [];
         } catch { return []; }
       });
@@ -342,6 +623,8 @@
       const [moveFieldId, setMoveFieldId] = useState('');
       const [moveStartTime, setMoveStartTime] = useState('');
       const [moveMode, setMoveMode] = useState('swap');
+      const [exclusiveWarning, setExclusiveWarning] = useState('');
+      const [exclusiveSuggestion, setExclusiveSuggestion] = useState(null);
       const [showReservedSlotEditor, setShowReservedSlotEditor] = useState(false);
       const [reservedTitle, setReservedTitle] = useState('Finale');
       const [reservedStart, setReservedStart] = useState('16:00');
@@ -370,9 +653,9 @@
 
       const [config, setConfig] = useState(() => {
         try {
-          const s = localStorage.getItem('cslv_config');
+          const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'config'));
           return s ? JSON.parse(s) : {
-            name: 'Tournoi du CS La Verpillière',
+            name: tournament.id === 'principal' ? 'Tournoi du CS La Verpillière' : (tournament.title || ('Tournoi ' + tournament.category)),
             adminPin: '1939',
             format: 'groups_knockout',
             numberOfGroups: 2,
@@ -391,7 +674,7 @@
             qualifiersPerGroup: 2
           };
         } catch {
-          return { name: 'Tournoi du CS La Verpillière', adminPin: '1939', format: 'groups_knockout', numberOfGroups: 2, customGroups: ['Poule A', 'Poule B'], hasPlayoffs: true, hasConsolation: true, duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
+          return { name: tournament.id === 'principal' ? 'Tournoi du CS La Verpillière' : (tournament.title || ('Tournoi ' + tournament.category)), adminPin: '1939', format: 'groups_knockout', numberOfGroups: 2, customGroups: ['Poule A', 'Poule B'], hasPlayoffs: true, hasConsolation: true, duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
         }
       });
       // État pour l'ajout d'une nouvelle poule personnalisée
@@ -525,15 +808,15 @@
         return () => { if (interval) clearInterval(interval); };
       }, [timerRunning]);
 
-      // Sauvegarde locale automatique
+      // Chaque catégorie dispose de son propre stockage ; le tournoi historique conserve ses clés.
       useEffect(() => {
         try {
-          localStorage.setItem('cslv_config', JSON.stringify(config));
-          localStorage.setItem('cslv_fields', JSON.stringify(fields));
-          localStorage.setItem('cslv_teams', JSON.stringify(teams));
-          localStorage.setItem('cslv_matches', JSON.stringify(matches));
-        } catch (e) {}
-      }, [config, fields, teams, matches]);
+          localStorage.setItem(tournamentStorageKey(tournament.id,'config'), JSON.stringify(config));
+          localStorage.setItem(tournamentStorageKey(tournament.id,'teams'), JSON.stringify(teams));
+          localStorage.setItem(tournamentStorageKey(tournament.id,'matches'), JSON.stringify(matches));
+          onTournamentUpdate(tournament.id, { config, teams, matches });
+        } catch (e) { console.warn('Sauvegarde locale', e); }
+      }, [config, teams, matches, tournament.id, onTournamentUpdate]);
 
       // Détection du rôle dans l'URL
       useEffect(() => {
@@ -592,14 +875,14 @@
               await firebase.auth().signInAnonymously();
             } catch (authErr) {}
 
-            const docRef = db.collection('tournaments').doc('cslv_main_data');
+            const docRef = db.collection('tournaments').doc(tournamentDocId(tournament.id));
 
             unsubscribe = docRef.onSnapshot(docSnap => {
               if (docSnap.exists) {
                 const data = docSnap.data();
                 isRemoteUpdate.current = true;
                 if (data.config) setConfig(data.config);
-                if (data.fields) setFields(data.fields);
+                // Les terrains sont gérés dans le catalogue commun.
                 if (data.teams) setTeams(data.teams);
                 if (data.matches) setMatches(data.matches);
                 setTimeout(() => { isRemoteUpdate.current = false; }, 300);
@@ -619,14 +902,14 @@
 
         setupCloud();
         return () => { if (unsubscribe) unsubscribe(); };
-      }, []);
+      }, [tournament.id]);
 
       // Émission des mises à jour vers le Cloud
       const broadcastUpdate = (newConfig, newFields, newTeams, newMatches) => {
         if (dbRef.current && cloudStatus === 'online' && !isRemoteUpdate.current) {
           try {
             const clean = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
-            dbRef.current.collection('tournaments').doc('cslv_main_data').set({
+            dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id)).set({
               config: clean(newConfig || config),
               fields: clean(newFields || fields),
               teams: clean(newTeams || teams),
@@ -670,6 +953,33 @@
       };
 
       // Créneaux exclusifs : blocs vides et matchs seuls sur tous les terrains.
+      // Matchs des autres catégories organisées à la même date.
+      const externalMatches = otherEvents.flatMap(e => (e.matches || []).map(m => ({
+        ...m, _eventId: e.id, _eventCategory: e.category
+      })));
+      const externalReservations = otherEvents.flatMap(e =>
+        ((e.config && e.config.reservedSlots) || []).map(r => ({...r, _eventCategory:e.category}))
+      );
+      const foreignFieldConflict = (match, others = externalMatches) => others.find(m =>
+        m.startTime && m.endTime && match.startTime && match.endTime &&
+        (m.fieldId === match.fieldId || m.exclusive || match.exclusive) &&
+        timeToMinutes(match.startTime) < timeToMinutes(m.endTime) &&
+        timeToMinutes(m.startTime) < timeToMinutes(match.endTime)
+      );
+      const foreignReservedConflict = (match) => externalReservations.some(slot =>
+        match.startTime && match.endTime &&
+        timeToMinutes(match.startTime) < timeToMinutes(slot.endTime) &&
+        timeToMinutes(slot.startTime) < timeToMinutes(match.endTime)
+      );
+      const foreignScheduleConflict = (scheduled, changedIds = null) => scheduled.some(m =>
+        (!changedIds || changedIds.includes(m.id)) && m.startTime && m.endTime &&
+        (foreignFieldConflict(m) || foreignReservedConflict(m))
+      );
+      const requireHub = () => {
+        if (hubReady) return true;
+        showToast('Synchronisation du planning général en cours. Réessaie après son chargement.', 'error');
+        return false;
+      };
       // Stockés dans config pour bénéficier des sauvegardes locales et de Firebase existants.
       const reservedSlots = Array.isArray(config.reservedSlots) ? config.reservedSlots : [];
       const timesOverlap = (aStart, aEnd, bStart, bEnd) =>
@@ -679,11 +989,13 @@
           timesOverlap(m.startTime, m.endTime, slot.startTime, slot.endTime));
       const hasExclusiveConflict = (scheduled, slots = reservedSlots) => {
         if (scheduled.some(m => isInsideReservedSlot(m, slots))) return true;
+        if (foreignScheduleConflict(scheduled)) return true;
         return scheduled.some(m => m.exclusive && m.startTime && m.endTime &&
           scheduled.some(other => other.id !== m.id && other.startTime && other.endTime &&
             timesOverlap(m.startTime, m.endTime, other.startTime, other.endTime)));
       };
       const saveEmptyReservedSlot = () => {
+        if (!requireHub()) return;
         const start = /^\d{2}:\d{2}$/.test(reservedStart) ? timeToMinutes(reservedStart) : -1;
         const duration = Number(reservedDuration);
         const field = fields.find(f => f.id === reservedFieldId) || fields[0];
@@ -693,7 +1005,9 @@
         const endTime = minutesToTime(start + duration);
         const startTime = minutesToTime(start);
         if (matches.some(m => m.startTime && m.endTime && timesOverlap(startTime, endTime, m.startTime, m.endTime)) ||
-            reservedSlots.some(b => timesOverlap(startTime, endTime, b.startTime, b.endTime))) {
+            reservedSlots.some(b => timesOverlap(startTime, endTime, b.startTime, b.endTime)) ||
+            externalMatches.some(m => m.startTime && m.endTime && timesOverlap(startTime, endTime, m.startTime, m.endTime)) ||
+            externalReservations.some(b => timesOverlap(startTime, endTime, b.startTime, b.endTime))) {
           showToast('Un match ou un autre créneau occupe déjà cet horaire. Déplace-le avant de réserver.', 'error'); return;
         }
         const newSlot = { id: 'reserve-' + Date.now(), title: reservedTitle.trim() || 'Créneau réservé',
@@ -711,6 +1025,7 @@
         broadcastUpdate(newCfg, fields, teams, matches);
       };
       const assignMatchToReservedSlot = (slotId) => {
+        if (!requireHub()) return;
         const slot = reservedSlots.find(s => s.id === slotId);
         const matchId = reservedAssignChoices[slotId];
         const match = matches.find(m => m.id === matchId);
@@ -731,16 +1046,83 @@
         broadcastUpdate(newCfg, fields, teams, updated);
         showToast('Match placé seul sur tous les terrains !');
       };
+      // Exclusivité expliquée dans la modale : si le créneau est occupé,
+      // proposer de déplacer uniquement ce match vers un horaire entièrement libre.
+      const findFreeExclusiveSlot = (match) => {
+        if (!match?.startTime || !match?.endTime) return null;
+        const duration = timeToMinutes(match.endTime) - timeToMinutes(match.startTime);
+        if (duration <= 0 || duration > 1440) return null;
+        const initial = Math.ceil(timeToMinutes(match.startTime) / 5) * 5;
+        for (let start = initial; start + duration <= 1439; start += 5) {
+          const startTime = minutesToTime(start);
+          const endTime = minutesToTime(start + duration);
+          if (config.hasLunchBreak && config.lunchStart && config.lunchEnd &&
+              timesOverlap(startTime, endTime, config.lunchStart, config.lunchEnd)) continue;
+          const busyMatch = [...matches.filter(other => other.id !== match.id), ...externalMatches]
+          .some(other => other.startTime && other.endTime &&
+            timesOverlap(startTime, endTime, other.startTime, other.endTime));
+          const busyReservation = [...reservedSlots, ...externalReservations].some(slot =>
+            timesOverlap(startTime, endTime, slot.startTime, slot.endTime));
+          if (!busyMatch && !busyReservation) return { startTime, endTime };
+        }
+        return null;
+      };
       const toggleMatchExclusive = (id) => {
+        if (!requireHub()) return;
         const match = matches.find(m => m.id === id);
         if (!match) return;
-        const updated = matches.map(m => m.id === id ? {...m, exclusive: !m.exclusive} : m);
-        if (hasExclusiveConflict(updated)) {
-          showToast('Impossible : un autre match est prévu au même moment.', 'error'); return;
+        setExclusiveWarning('');
+        setExclusiveSuggestion(null);
+        // Décocher libère simplement l'exclusivité, sans déplacer le match.
+        if (match.exclusive) {
+          const updated = matches.map(m => m.id === id ? { ...m, exclusive: false } : m);
+          setMatches(updated);
+          broadcastUpdate(config, fields, teams, updated);
+          showToast('Ce match peut de nouveau avoir des rencontres en parallèle.');
+          return;
+        }
+        if (!match.startTime || !match.endTime) {
+          setExclusiveWarning('Ce match n’a pas encore de créneau. Programme-le d’abord.');
+          return;
+        }
+        const parallel = [...matches.filter(m => m.id !== id), ...externalMatches].filter(m => m.startTime && m.endTime &&
+          timesOverlap(match.startTime, match.endTime, m.startTime, m.endTime));
+        const blocks = [...reservedSlots, ...externalReservations].filter(slot =>
+          timesOverlap(match.startTime, match.endTime, slot.startTime, slot.endTime));
+        if (parallel.length || blocks.length) {
+          const suggestion = findFreeExclusiveSlot(match);
+          setExclusiveWarning(`${parallel.length} autre(s) match(s) et ${blocks.length} réservation(s) occupent cet horaire. ` +
+            'Ce créneau ne peut pas être exclusif tant qu’il est partagé.');
+          setExclusiveSuggestion(suggestion);
+          return;
+        }
+        const updated = matches.map(m => m.id === id ? { ...m, exclusive: true } : m);
+        setMatches(updated);
+        broadcastUpdate(config, fields, teams, updated);
+        showToast('Match exclusif activé : aucun autre match en parallèle.');
+      };
+      const applySuggestedExclusiveSlot = () => {
+        if (!requireHub()) return;
+        const match = matches.find(m => m.id === movingMatchId);
+        const slot = exclusiveSuggestion;
+        if (!match || !slot) return;
+        if (match.status !== 'pending' &&
+            !window.confirm('Le match a déjà débuté ou est terminé. Déplacer son horaire sans modifier le score ?')) return;
+        const updated = matches.map(m => m.id === match.id ? {
+          ...m, startTime: slot.startTime, endTime: slot.endTime, exclusive: true
+        } : m);
+        // Vérifier à nouveau après une éventuelle synchronisation Firebase.
+        if (hasExclusiveConflict(updated) || hasTeamTimeConflict(updated, [match.id])) {
+          setExclusiveSuggestion(null);
+          setExclusiveWarning('Le créneau proposé vient d’être occupé. Décoche et recoche pour recalculer.');
+          return;
         }
         setMatches(updated);
         broadcastUpdate(config, fields, teams, updated);
-        showToast(match.exclusive ? 'Créneau partagé à nouveau.' : 'Match réservé : aucun match en parallèle.');
+        setMoveStartTime(slot.startTime);
+        setExclusiveSuggestion(null);
+        setExclusiveWarning('');
+        showToast(`Match déplacé à ${slot.startTime} et réservé seul sur tous les terrains.`);
       };
 
       // Planification des matchs : les rencontres et leurs résultats ne sont jamais recréés.
@@ -757,11 +1139,14 @@
         setMovingMatchId(matchId);
         setMoveMode('swap');
         setMoveTargetId('');
+        setExclusiveWarning('');
+        setExclusiveSuggestion(null);
         setMoveFieldId(match.fieldId || fields[0]?.id || '');
         setMoveStartTime(match.startTime || config.startTime || '09:00');
       };
 
       const swapMatchSlots = (sourceId, targetId) => {
+        if (!requireHub()) return;
         const source = matches.find(m => m.id === sourceId);
         const target = matches.find(m => m.id === targetId);
         if (!source || !target || sourceId === targetId) return;
@@ -816,6 +1201,7 @@
       };
 
       const applyManualMatchSlot = () => {
+        if (!requireHub()) return;
         const match = matches.find(m => m.id === movingMatchId);
         const field = fields.find(f => f.id === moveFieldId);
         if (!match || !field || !/^\d{2}:\d{2}$/.test(moveStartTime)) {
@@ -831,7 +1217,8 @@
           return;
         }
         const end = start + duration;
-        const conflict = matches.find(m => m.id !== match.id && m.fieldId === field.id &&
+        const conflict = [...matches.filter(m => m.id !== match.id), ...externalMatches]
+          .find(m => m.fieldId === field.id &&
           m.startTime && m.endTime && start < timeToMinutes(m.endTime) &&
           timeToMinutes(m.startTime) < end);
         if (conflict) {
@@ -915,6 +1302,7 @@
       // Calendrier multi-poules et élimination directe, sans perte involontaire de résultats.
       const generateSchedule = (overrideTeams = null, automatic = false) => {
         const sourceTeams = Array.isArray(overrideTeams) ? overrideTeams : teams;
+        if (!requireHub()) return;
         if (sourceTeams.length < 2 || fields.length === 0) { showToast('Il faut au moins 2 équipes et un terrain.','error'); return; }
         if (!automatic && matches.some(m => m.status === 'finished') && !window.confirm('ATTENTION : générer un nouveau calendrier efface les résultats enregistrés. Continuer ?')) return;
         let rawMatches = [];
@@ -963,21 +1351,38 @@
         const duration = Number(config.duration)||15, pause=Number(config.breakDuration)||5;
         const lunchStart = timeToMinutes(config.lunchStart||'12:30'), lunchEnd=timeToMinutes(config.lunchEnd||'13:30');
         const availability = fields.map(f=>({fieldId:f.id, fieldName:f.name,next:timeToMinutes(config.startTime||'09:00')}));
-        const scheduled = rawMatches.map(m=>{
-          availability.sort((a,b)=>a.next-b.next);
-          const f=availability[0];
-          let start=f.next;
-          // Ne jamais placer automatiquement un match pendant un créneau réservé.
-          for (let attempts = 0; attempts < 60; attempts++) {
-            if(config.hasLunchBreak && start<lunchEnd && start+duration>lunchStart)start=Math.max(start,lunchEnd);
-            const block = (Array.isArray(config.reservedSlots) ? config.reservedSlots : []).find(b =>
-              start < timeToMinutes(b.endTime) && timeToMinutes(b.startTime) < start + duration);
-            if (!block) break;
-            start = timeToMinutes(block.endTime);
+        const occupied = [...externalMatches];
+        const blocks = [...reservedSlots, ...externalReservations];
+        const scheduled = [];
+        for (const m of rawMatches) {
+          let best = null;
+          for (const f of availability) {
+            let start = f.next;
+            for (let attempts=0;attempts<200;attempts++) {
+              if (config.hasLunchBreak && start<lunchEnd && start+duration>lunchStart) {
+                start=Math.max(start,lunchEnd); continue;
+              }
+              const collidingBlock = blocks.find(b=>start<timeToMinutes(b.endTime) && timeToMinutes(b.startTime)<start+duration);
+              const collidingMatch = occupied.find(o=>o.startTime && o.endTime &&
+                start<timeToMinutes(o.endTime) && timeToMinutes(o.startTime)<start+duration &&
+                (o.exclusive || m.exclusive || o.fieldId===f.fieldId));
+              if (!collidingBlock && !collidingMatch) break;
+              const until = Math.max(collidingBlock?timeToMinutes(collidingBlock.endTime):0,
+                collidingMatch?timeToMinutes(collidingMatch.endTime):0);
+              start = Math.max(start+1,until);
+            }
+            if (start+duration<=1440 && (!best || start<best.start)) best={f,start};
           }
-          f.next=start+duration+pause;
-          return {...m,fieldId:f.fieldId,fieldName:f.fieldName,startTime:minutesToTime(start),endTime:minutesToTime(start+duration)};
-        });
+          if (!best) {
+            showToast('Pas assez de créneaux libres sur les terrains communs. Modifie les horaires.', 'error');
+            return;
+          }
+          const match={...m,fieldId:best.f.fieldId,fieldName:best.f.fieldName,
+            startTime:minutesToTime(best.start),endTime:minutesToTime(best.start+duration)};
+          scheduled.push(match);
+          occupied.push(match);
+          best.f.next=best.start+duration+pause;
+        }
         setTeams(nextTeams);setMatches(scheduled);
         broadcastUpdate(config,fields,nextTeams,scheduled);
         showToast(`Calendrier : ${scheduled.length} matchs, ${config.format==='knockout'?0:config.format==='round_robin'?1:activeGroupNames.length} poules.`);
@@ -1270,7 +1675,7 @@
       // Liens de partage complets
       const buildShareUrl = (role) => {
         let base = OFFICIAL_PUBLIC_URL;
-        let query = `?role=${role}`;
+        let query = `?role=${role}&tournament=${encodeURIComponent(tournament.id)}`;
         try {
           const saved = localStorage.getItem('cslv_firebase_config');
           if (saved) {
@@ -1310,7 +1715,7 @@
         <div className="min-h-screen bg-[#0e0708] text-slate-100 flex flex-col font-sans">
           {/* Notification Toast */}
           {notification && (
-            <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl border text-xs sm:text-sm font-bold shadow-2xl transition animate-bounce ${
+            <div className={`fixed top-4 right-4 z-[10050] px-4 py-3 rounded-xl border text-xs sm:text-sm font-bold shadow-2xl transition animate-bounce ${
               notification.type === 'error' ? 'bg-rose-950 border-rose-600 text-rose-200' : 'bg-red-950 border-amber-500 text-amber-200'
             }`}>
               {notification.message}
@@ -2777,9 +3182,26 @@
                 </div>
                 <div className="flex items-center justify-between gap-2 bg-[#0b0304] rounded-lg px-3 py-2">
                   <span className="text-xs text-slate-300">Match seul sur tous les terrains</span>
-                  <input type="checkbox" className="accent-amber-500" checked={!!matches.find(m => m.id === movingMatchId)?.exclusive}
+                  <input type="checkbox" aria-label="Match seul sur tous les terrains" className="w-5 h-5 accent-amber-500 cursor-pointer flex-shrink-0" checked={!!matches.find(m => m.id === movingMatchId)?.exclusive}
                     onChange={() => toggleMatchExclusive(movingMatchId)} />
                 </div>
+                {matches.find(m => m.id === movingMatchId)?.exclusive && (
+                  <p className="text-xs text-emerald-300">✓ Créneau exclusif activé : tous les autres terrains restent libres.</p>
+                )}
+                {exclusiveWarning && (
+                  <div role="alert" className="text-xs text-amber-200 bg-amber-950/40 border border-amber-700/50 rounded-lg p-3 space-y-2">
+                    <p>{exclusiveWarning}</p>
+                    {exclusiveSuggestion ? (
+                      <button type="button" onClick={applySuggestedExclusiveSlot}
+                        className="w-full text-xs bg-amber-500 text-black font-bold rounded-lg px-3 py-2">
+                        🔒 Déplacer ce match à {exclusiveSuggestion.startTime}–{exclusiveSuggestion.endTime} et le réserver seul
+                      </button>
+                    ) : (
+                      <p className="text-slate-300">Choisis un autre horaire dans « Choisir horaire et terrain ».</p>
+                    )}
+                    <p className="text-slate-400">Aucun autre match ni résultat ne sera modifié.</p>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button type="button" className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${moveMode === 'swap' ? 'bg-amber-500 text-black' : 'bg-[#2a1014] text-white'}`} onClick={() => setMoveMode('swap')}>Échanger 2 créneaux</button>
                   <button type="button" className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold ${moveMode === 'manual' ? 'bg-amber-500 text-black' : 'bg-[#2a1014] text-white'}`} onClick={() => setMoveMode('manual')}>Choisir horaire et terrain</button>
@@ -3103,7 +3525,7 @@
       );
     }
 
-    ReactDOM.render(<App />, document.getElementById('root'));
+    ReactDOM.render(<MultiTournamentShell />, document.getElementById('root'));
   </script>
 </body>
 </html>
