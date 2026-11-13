@@ -913,6 +913,235 @@
       return {updatedById,moves,signature:JSON.stringify(pair.map(p=>[p.event.id,tournamentPlanningSignature(p.data)]))};
     };
 
+
+    // Ne compare que les informations modifiées par la saisie de journée.
+    // Déplacer un match ou modifier son terrain ne doit pas déclencher de faux conflit.
+    const dayEntryMatchSignature = m => JSON.stringify({
+      team1Id:m?.team1Id||null, team2Id:m?.team2Id||null, group:m?.group||'',
+      score1: m?.score1 == null ? null : Number(m.score1),
+      score2: m?.score2 == null ? null : Number(m.score2),
+      pens1: m?.pens1 == null ? null : Number(m.pens1),
+      pens2: m?.pens2 == null ? null : Number(m.pens2),
+      status: m?.status || 'pending', mvp:m?.mvp||'',mvpTeamId:m?.mvpTeamId||null,
+      events: (m?.events||[]).filter(e=>e.type==='goal').map(e=>({type:e.type,player:e.player,teamId:e.teamId}))
+    });
+    const dayEntryCleanScore = value => value===null || value===undefined || value==='' ? null : Number(value);
+    const dayEntryIsKnockout = m =>
+      ['Phase Finale Principale','Tournoi Classement','Tournoi Consolante'].includes(m.group) ||
+      /finale|classement|élimination/i.test(String(m.group||''));
+
+    // Résolution des finalistes après un score saisi depuis la feuille de journée.
+    // Elle utilise les mêmes sources de qualification que la feuille de match classique.
+    function refreshDayEntryKnockouts(list, teamList, rules) {
+      let updated=list;
+      const groups = rules.format === 'round_robin' ? ['Poule Unique']
+        : rules.poolMode === 'two_large' ? ['Poule A','Poule B']
+        : rules.autoGroups===true && configuredPoolSizes(teamList.length,rules)
+        ? configuredPoolSizes(teamList.length,rules).map((_,i)=>alphabetPoolName(i))
+        : Array.isArray(rules.customGroups)&&rules.customGroups.length ? rules.customGroups
+        : Array.from({length:Math.min(8,Math.max(2,Number(rules.numberOfGroups)||2))},(_,i)=>alphabetPoolName(i));
+      const complete = group => {
+        const fixtures=updated.filter(m=>m.group===group && m.stage?.startsWith('Journée'));
+        return fixtures.length>0 && fixtures.every(m=>m.status==='finished' && m.score1!=null && m.score2!=null);
+      };
+      const sourceTeam=src=>{
+        if(!src) return null;
+        if(src.kind==='rank') return complete(src.group)?standingsFor(teamList,updated,src.group,rules)[src.position]?.team.id||null:null;
+        const result=resultOf(updated.find(m=>m.id===src.matchId));
+        return src.kind==='winner'?result?.winner||null:src.kind==='loser'?result?.loser||null:null;
+      };
+      const legacySource=(m,side)=>{
+        const a=groups[0],b=groups[1];
+        if(groups.length===1) {
+          if(m.id==='ko-semi-1') return {kind:'rank',group:a,position:side===1?0:3};
+          if(m.id==='ko-semi-2') return {kind:'rank',group:a,position:side===1?1:2};
+        }
+        if(groups.length===2){
+          const old={
+            'ko-semi-1':[{kind:'rank',group:a,position:0},{kind:'rank',group:b,position:1}],
+            'ko-semi-2':[{kind:'rank',group:b,position:0},{kind:'rank',group:a,position:1}],
+            'cons-semi-1':[{kind:'rank',group:a,position:2},{kind:'rank',group:b,position:3}],
+            'cons-semi-2':[{kind:'rank',group:b,position:2},{kind:'rank',group:a,position:3}],
+            'cons-final':[{kind:'winner',matchId:'cons-semi-1'},{kind:'winner',matchId:'cons-semi-2'}],
+            'rank-7-8':[{kind:'loser',matchId:'cons-semi-1'},{kind:'loser',matchId:'cons-semi-2'}]
+          };
+          if(old[m.id])return old[m.id][side-1];
+        }
+        if(m.id==='ko-final')return {kind:'winner',matchId:side===1?'ko-semi-1':'ko-semi-2'};
+        return null;
+      };
+      for(let pass=0;pass<6;pass++) {
+        updated=updated.map(m=>{
+          if(!['Phase Finale Principale','Tournoi Classement','Tournoi Consolante'].includes(m.group)||m.status==='finished') return m;
+          const s1=m.source1||legacySource(m,1),s2=m.source2||legacySource(m,2);
+          if(!s1&&!s2)return m;
+          const a=sourceTeam(s1),b=sourceTeam(s2);
+          return a===m.team1Id&&b===m.team2Id?m:{...m,team1Id:a||null,team2Id:b||null};
+        });
+      }
+      return updated;
+    }
+
+    // Fiches de saisie inline, conçues pour téléphone, tablette et PC.
+    function DayEntryMatchCard({event,match,teams,fields,onSave}) {
+      const [draft,setDraft]=useState(()=>({...match,events:[...(match.events||[])]}));
+      const [base,setBase]=useState(()=>JSON.parse(JSON.stringify(match)));
+      const [dirty,setDirty]=useState(false);
+      const [saving,setSaving]=useState(false);
+      const [message,setMessage]=useState('');
+      const [goalTeam,setGoalTeam]=useState(match.team1Id||'');
+      const [detailsOpen,setDetailsOpen]=useState(false);
+      const [scorer,setScorer]=useState('');
+      const [customScorer,setCustomScorer]=useState('');
+      useEffect(()=>{
+        if(!dirty){
+          setDraft({...match,events:[...(match.events||[])]});setBase(JSON.parse(JSON.stringify(match)));
+          setGoalTeam(match.team1Id||'');
+        }
+      },[match,dirty]);
+      const team=id=>teams.find(t=>t.id===id)||{name:'Équipe à déterminer',players:[]};
+      const a=team(match.team1Id),b=team(match.team2Id);
+      const teamsKnown=!!(match.team1Id&&match.team2Id);
+      const allPlayers=[...(a.players||[]).map(name=>({name,teamId:match.team1Id,team:a.name})),
+        ...(b.players||[]).map(name=>({name,teamId:match.team2Id,team:b.name}))];
+      const goalPlayers=team(goalTeam).players||[];
+      const change=fields=>{setDraft(d=>({...d,...fields}));setDirty(true);setMessage('');};
+      const addGoal=()=>{
+        const player=(scorer==='__other__'?customScorer:scorer).trim();
+        if(!player || !goalTeam){setMessage('Choisis le buteur ou saisis son nom.');return;}
+        const first=goalTeam===match.team1Id;
+        setDraft(d=>({...d,
+          score1:first?(Number(d.score1)||0)+1:d.score1,
+          score2:!first?(Number(d.score2)||0)+1:d.score2,
+          events:[...(d.events||[]),{id:'day-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),type:'goal',player,teamId:goalTeam}]
+        }));
+        setDirty(true);setScorer('');setCustomScorer('');setMessage('');
+      };
+      const removeGoal=index=>{
+        const e=draft.events[index];if(!e)return;
+        const first=e.teamId===match.team1Id;
+        setDraft(d=>({...d,
+          events:(d.events||[]).filter((_,i)=>i!==index),
+          score1:first&&Number(d.score1)>0?Number(d.score1)-1:d.score1,
+          score2:!first&&Number(d.score2)>0?Number(d.score2)-1:d.score2
+        }));setDirty(true);setMessage('');
+      };
+      const submit=async()=>{
+        setSaving(true);setMessage('');
+        try{
+          const saved=await onSave(event.id,draft,base);
+          setDraft({...saved,events:[...(saved.events||[])]});
+          setBase(JSON.parse(JSON.stringify(saved)));setDirty(false);
+          setMessage('✓ Enregistré');
+        }catch(err){setMessage('⚠ '+(err.message||String(err)));}
+        finally{setSaving(false);}
+      };
+      const selectClass='w-full min-h-[42px] rounded-lg border border-red-900/70 bg-[#0b0304] px-2 py-2 text-sm text-white';
+      const needsPens=dayEntryIsKnockout(match)&&draft.score1!=null&&draft.score2!=null&&Number(draft.score1)===Number(draft.score2);
+      const goals=(draft.events||[]).map((e,i)=>({...e,index:i})).filter(e=>e.type==='goal');
+      return <article className="rounded-2xl border border-red-900/80 bg-[#18090d] p-3 sm:p-4 space-y-3 shadow-lg" aria-label={'Saisie '+a.name+' - '+b.name}>
+        <div className="flex flex-wrap items-center gap-2 justify-between">
+          <span className="px-2 py-1 bg-amber-500/15 text-amber-300 rounded-lg text-[11px] font-black">{event.category}</span>
+          <span className="text-xs text-slate-300 font-mono">{match.startTime||'--:--'}{match.endTime?'–'+match.endTime:''} · {match.fieldName||fields.find(f=>f.id===match.fieldId)?.name||'Terrain'}</span>
+        </div>
+        <p className="text-[11px] text-slate-400">{match.group||'Rencontre'} · {match.stage||'Match'}</p>
+        <div className="grid grid-cols-[minmax(0,1fr)_60px_18px_60px_minmax(0,1fr)] gap-1.5 items-center">
+          <strong className="text-white text-xs sm:text-sm break-words text-right">{match.team1Id?a.name:(match.placeholder1||'Équipe à déterminer')}</strong>
+          <input aria-label={'Buts '+a.name} type="number" min="0" step="1" inputMode="numeric" value={draft.score1??''}
+            onChange={e=>change({score1:dayEntryCleanScore(e.target.value)})} disabled={!teamsKnown}
+            className="min-w-0 w-full h-12 rounded-lg bg-[#0b0304] border border-amber-700/60 text-center text-white font-black text-lg"/>
+          <span className="text-center text-amber-300 font-black">–</span>
+          <input aria-label={'Buts '+b.name} type="number" min="0" step="1" inputMode="numeric" value={draft.score2??''}
+            onChange={e=>change({score2:dayEntryCleanScore(e.target.value)})} disabled={!teamsKnown}
+            className="min-w-0 w-full h-12 rounded-lg bg-[#0b0304] border border-amber-700/60 text-center text-white font-black text-lg"/>
+          <strong className="text-white text-xs sm:text-sm break-words">{match.team2Id?b.name:(match.placeholder2||'Équipe à déterminer')}</strong>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-[11px] text-slate-400">Statut
+            <select value={draft.status||'pending'} disabled={!teamsKnown} onChange={e=>change({status:e.target.value})} className={selectClass}>
+              <option value="pending">À venir</option><option value="live">En direct</option><option value="finished">Terminé</option>
+            </select>
+          </label>
+          {needsPens && <div className="flex gap-2">
+            <label className="text-[11px] text-slate-400 flex-1">TAB {a.name}<input aria-label={'TAB '+a.name} type="number" min="0" value={draft.pens1??''} onChange={e=>change({pens1:dayEntryCleanScore(e.target.value)})} className={selectClass}/></label>
+            <label className="text-[11px] text-slate-400 flex-1">TAB {b.name}<input aria-label={'TAB '+b.name} type="number" min="0" value={draft.pens2??''} onChange={e=>change({pens2:dayEntryCleanScore(e.target.value)})} className={selectClass}/></label>
+          </div>}
+          <label className="text-[11px] text-slate-400">⭐ Meilleur joueur
+            <select className={selectClass} disabled={!teamsKnown}
+              value={allPlayers.find(p=>p.name===draft.mvp&&p.teamId===draft.mvpTeamId) ? JSON.stringify([draft.mvpTeamId,draft.mvp]):''}
+              onChange={e=>{const item=e.target.value?JSON.parse(e.target.value):null;change({mvp:item?item[1]:'',mvpTeamId:item?item[0]:null});}}>
+              <option value="">Non désigné</option>
+              {allPlayers.map((p,i)=><option key={i} value={JSON.stringify([p.teamId,p.name])}>{p.name} ({p.team})</option>)}
+            </select>
+          </label>
+        </div>
+        <button type="button" disabled={!teamsKnown} onClick={()=>setDetailsOpen(v=>!v)} aria-expanded={detailsOpen}
+          className="w-full min-h-[42px] rounded-lg border border-red-900/60 bg-[#210d10] px-3 py-2 text-left text-xs font-bold text-amber-300 flex justify-between items-center">
+          <span>⚽ Buteurs ({goals.length}) · Détails</span><span>{detailsOpen?'▲ Fermer':'▼ Ouvrir'}</span>
+        </button>
+        {detailsOpen && <div className="border-t border-red-900/50 pt-2 space-y-2">
+          <p className="text-xs font-bold text-amber-300">⚽ Buteurs</p>
+          {goals.length>0 && <div className="flex flex-wrap gap-1.5">{goals.map((g,i)=><span key={g.id||i} className="inline-flex items-center gap-1.5 rounded-lg bg-[#2c1216] border border-red-900/70 px-2 py-1 text-xs text-white">
+            {g.player} · {team(g.teamId).name}<button type="button" title="Retirer ce but" aria-label={'Retirer but '+g.player} onClick={()=>removeGoal(g.index)} className="text-rose-300 font-bold px-1">✕</button>
+          </span>)}</div>}
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+            <select value={goalTeam} onChange={e=>{setGoalTeam(e.target.value);setScorer('');setCustomScorer('');}} className={selectClass} aria-label="Équipe du buteur">
+              <option value={match.team1Id||''}>{a.name}</option><option value={match.team2Id||''}>{b.name}</option>
+            </select>
+            <div className="flex flex-col gap-1.5">
+              <select value={scorer} onChange={e=>setScorer(e.target.value)} className={selectClass} aria-label="Buteur">
+                <option value="">Choisir le buteur…</option>{goalPlayers.map((p,i)=><option key={i} value={p}>{p}</option>)}<option value="__other__">Autre joueur…</option>
+              </select>
+              {(scorer==='__other__'||goalPlayers.length===0) && <input value={customScorer} onChange={e=>{setCustomScorer(e.target.value);setScorer('__other__');}} placeholder="Nom du joueur" className={selectClass} aria-label="Nom du buteur"/>}
+            </div>
+            <button type="button" onClick={addGoal} className="min-h-[44px] rounded-lg border border-amber-600/60 text-amber-300 px-3 text-xs font-bold">+ But</button>
+          </div>
+          <p className="text-[10px] text-slate-500">Ajouter un buteur augmente aussi le score. Retirer son but le diminue. Tu peux saisir un score sans détailler tous les buteurs.</p>
+        </div>}
+        <div className="flex flex-wrap gap-2 items-center justify-between border-t border-red-900/50 pt-3">
+          <div role="status" aria-live="polite" className={'text-xs '+(message.startsWith('⚠')?'text-rose-300':'text-emerald-300')}>{message|| (!teamsKnown?'En attente de qualification des équipes':dirty?'● Modification non enregistrée':'')}</div>
+          <button type="button" disabled={!teamsKnown||!dirty||saving} onClick={submit} className="min-h-[44px] rounded-xl bg-amber-500 disabled:opacity-40 text-[#1a0709] font-black text-xs px-4">
+            {saving?'Enregistrement…':'💾 Enregistrer ce match'}
+          </button>
+        </div>
+      </article>;
+    }
+
+    function DayEntryPanel({date,events,records,fields,onSave,hubStatus}) {
+      const [filter,setFilter]=useState('all');
+      const [category,setCategory]=useState('all');
+      const fixtures=events.flatMap(event=>(records[event.id]?.matches||[]).filter(m=>m.kind!=='reservation'&&m.kind!=='réservation')
+        .map(match=>({event,match,teams:records[event.id]?.teams||[]})))
+        .filter(x=>category==='all'||x.event.id===category)
+        .filter(x=>filter==='all'||(filter==='pending'?(x.match.status||'pending')==='pending':x.match.status===filter))
+        .sort((a,b)=>String(a.match.startTime||'99:99').localeCompare(String(b.match.startTime||'99:99'))||String(a.match.fieldName||'').localeCompare(String(b.match.fieldName||'')||a.event.category.localeCompare(b.event.category,'fr')));
+      const allCount=events.reduce((n,e)=>n+(records[e.id]?.matches||[]).filter(m=>m.kind!=='reservation'&&m.kind!=='réservation').length,0);
+      return <section className="max-w-7xl mx-auto px-3 sm:px-6 py-5 pb-28 space-y-4">
+        <div className="space-y-1"><h1 className="text-xl sm:text-2xl font-black text-amber-300">📝 Saisie de la journée</h1>
+          <p className="text-xs sm:text-sm text-slate-300">Toutes les rencontres du {date.split('-').reverse().join('/')} : {allCount} match(s), {events.length} catégorie(s). Saisis scores, buteurs, MVP et statut directement sur cette page.</p>
+          <p className="text-[11px] text-slate-400">Enregistre chaque match avec son bouton 💾. Les poules et classements restent synchronisés avec les données du tournoi.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 rounded-xl bg-[#1b080c] border border-red-950 p-3">
+          <label className="text-xs text-amber-300">Catégorie
+            <select value={category} onChange={e=>setCategory(e.target.value)} className="mt-1 block w-full min-h-[44px] rounded-lg bg-[#0b0304] border border-red-900 text-white px-3">
+              <option value="all">Toutes les catégories</option>{events.map(e=><option key={e.id} value={e.id}>{e.category}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-amber-300">Afficher
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="mt-1 block w-full min-h-[44px] rounded-lg bg-[#0b0304] border border-red-900 text-white px-3">
+              <option value="all">Tous les matchs</option><option value="pending">À venir</option><option value="live">En direct</option><option value="finished">Terminés</option>
+            </select>
+          </label>
+          <div className="self-end text-xs text-slate-300 pb-2">{fixtures.length} rencontre(s) affichée(s)</div>
+        </div>
+        {hubStatus==='error'||hubStatus==='loading' ? <div className="rounded-lg border border-rose-700 p-3 text-rose-200 text-xs">⚠ Synchronisation en cours ou indisponible. La saisie est désactivée tant que l'état Firebase n'est pas stabilisé.</div> : null}
+        {fixtures.length===0?<div className="border border-red-900 rounded-xl p-8 text-center text-slate-400 text-sm">Aucune rencontre prévue pour cette journée et ces filtres.</div>:
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+            {fixtures.map(({event,match,teams})=><DayEntryMatchCard key={event.id+'|'+match.id} event={event} match={match} teams={teams} fields={fields} onSave={onSave}/>)}
+          </div>}
+      </section>;
+    }
+
     function MultiTournamentShell() {
       const params = new URLSearchParams(window.location.search);
       const urlTournament = params.get('tournament');
@@ -1018,6 +1247,12 @@
               if(event.id==='principal' && !catalogHasFields.current && Array.isArray(data.fields) && data.fields.length) {
                 setSharedFields(data.fields);
               }
+              // Les vues « Mon équipe » et « Matchs » relisent le stockage local au montage.
+              // Écrire aussi le snapshot évite d'afficher un ancien calendrier après la saisie du jour.
+              try {
+                for(const [kind,value] of [['config',data.config||{}],['teams',data.teams||[]],['matches',data.matches||[]]])
+                  localStorage.setItem(tournamentStorageKey(event.id,kind),JSON.stringify(value));
+              } catch(e) { console.warn('Cache planning',e); }
               setRecords(old=>({...old,[event.id]:{config:data.config||{},teams:data.teams||[],matches:data.matches||[]}}));
             } else {
               setRecords(old=>({...old,[event.id]:old[event.id]||{
@@ -1199,6 +1434,58 @@
       const updateEventDate=(eventId,date)=>{
         if(isViewer||!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
         persistCatalog(catalog.map(e=>e.id===eventId?{...e,date}:e));
+      };
+
+
+      // Sauvegarde ciblée : chaque match est enregistré dans sa catégorie,
+      // sans réécrire les scores d'une autre catégorie ou les terrains communs.
+      const saveDayEntryMatch=async(eventId,edited,base)=>{
+        if(!hubIsEditor)throw new Error('Accès organisateur requis.');
+        if(hubStatus==='loading'||hubStatus==='error')throw new Error('Synchronisation indisponible.');
+        if(hubStatus==='online'&&!loadedDocs[eventId])throw new Error('Le calendrier de cette catégorie est encore en chargement.');
+        const scoreFields=['score1','score2','pens1','pens2'];
+        for(const field of scoreFields){
+          const v=edited[field];
+          if(v!==null && v!==undefined && v!=='' && (!Number.isInteger(Number(v))||Number(v)<0))throw new Error('Scores et tirs au but : entiers positifs uniquement.');
+        }
+        if(edited.status==='finished' && (edited.score1==null||edited.score2==null))
+          throw new Error('Renseigne les deux scores pour terminer le match.');
+        if(dayEntryIsKnockout(edited)&&edited.status==='finished'&&Number(edited.score1)===Number(edited.score2)&&
+          (edited.pens1==null||edited.pens2==null||Number(edited.pens1)===Number(edited.pens2)))
+          throw new Error('Match de phase finale à égalité : indique un vainqueur aux tirs au but.');
+        const apply=(stored,teamList,rules)=>{
+          const latest=stored.find(m=>m.id===edited.id);
+          if(!latest)throw new Error('Match introuvable : rafraîchis le calendrier.');
+          if(dayEntryMatchSignature(latest)!==dayEntryMatchSignature(base))
+            throw new Error('Ce résultat a changé sur un autre appareil. Recharge la page avant de réenregistrer.');
+          const props={score1:edited.score1,score2:edited.score2,pens1:edited.pens1,pens2:edited.pens2,
+            status:edited.status,mvp:edited.mvp||'',mvpTeamId:edited.mvpTeamId||null,
+            // Un arbitre peut ajouter un carton en parallèle : ne jamais l'écraser
+            // depuis cette feuille réservée aux buts et aux scores.
+            events:[...(latest.events||[]).filter(e=>e.type!=='goal'),...(edited.events||[]).filter(e=>e.type==='goal')]};
+          const merged={...latest,...props};
+          const updated=refreshDayEntryKnockouts(stored.map(m=>m.id===latest.id?merged:m),teamList,rules);
+          return {saved:updated.find(m=>m.id===latest.id),matches:updated};
+        };
+        let result=null,finalData=null;
+        if(dbRef.current&&hubStatus==='online'){
+          const docRef=dbRef.current.collection('tournaments').doc(tournamentDocId(eventId));
+          await dbRef.current.runTransaction(async tx=>{
+            const snap=await tx.get(docRef);
+            if(!snap.exists)throw new Error('Tournoi indisponible dans Firebase.');
+            const data=snap.data()||{};
+            result=apply(data.matches||[],data.teams||[],data.config||{});
+            finalData={config:data.config||{},teams:data.teams||[],matches:result.matches};
+            tx.set(docRef,{matches:result.matches,updatedAt:new Date().toISOString()},{merge:true});
+          });
+        }else{
+          const data=records[eventId]||localRecord(eventId);
+          result=apply(data.matches||[],data.teams||[],data.config||{});
+          finalData={...data,matches:result.matches};
+        }
+        try{localStorage.setItem(tournamentStorageKey(eventId,'matches'),JSON.stringify(finalData.matches));}catch(e){}
+        setRecords(old=>({...old,[eventId]:finalData}));
+        return result.saved;
       };
 
       const eventData=event=>records[event.id]||localRecord(event.id);
@@ -1535,9 +1822,13 @@
                 <span className="text-[10px] border border-amber-700/40 rounded-full px-2 py-1 text-slate-300">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
               </div>
               <div className="flex items-center gap-2">
-                {!isViewer && <button type="button" onClick={()=>{if(page!=='planning')setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
-                  className="px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
+                {!isViewer && <button type="button" onClick={()=>{setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
+                  className="min-h-[42px] px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
                   {page==='planning'?'← Tournoi':'📅 Planning général'}
+                </button>}
+                {!isViewer && <button type="button" onClick={()=>{if(page==='tournoi')setDateFilter(selectedDate);setPage(page==='dayEntry'?'tournoi':'dayEntry');}}
+                  className={'min-h-[42px] px-3 py-2 rounded-lg text-xs font-black border '+(page==='dayEntry'?'bg-amber-500 text-black border-amber-400':'bg-[#39121a] text-amber-200 border-amber-700/50')}>
+                  {page==='dayEntry'?'← Tournoi':'📝 Saisie journée'}
                 </button>}
                 {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);setEditingEvent(null);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
@@ -1595,7 +1886,17 @@
             </div>}
           </div>
         </section>
-        {page==='planning' && !isViewer ? <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-4">
+        {page==='dayEntry' && !isViewer ? <>
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-4">
+            <label className="text-xs font-bold text-amber-300">📅 Jour à saisir
+              <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
+                className="ml-2 min-h-[42px] rounded-lg bg-[#0b0304] border border-red-900 px-3 text-white"/>
+            </label>
+          </div>
+          <DayEntryPanel date={dateFilter} events={catalog.filter(e=>e.date===dateFilter)}
+            records={Object.fromEntries(catalog.filter(e=>e.date===dateFilter).map(e=>[e.id,eventData(e)]))}
+            fields={sharedFields} onSave={saveDayEntryMatch} hubStatus={hubStatus}/>
+        </> : page==='planning' && !isViewer ? <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-3">
             <h2 className="text-lg font-black text-amber-300">📅 Planning général — tous les terrains</h2>
             <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
@@ -3353,7 +3654,7 @@
 
            {userRole === 'viewer' && viewerMoreOpen && <div className="xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2"
              style={{bottom:'calc(85px + env(safe-area-inset-bottom, 0px))'}} role="region" aria-label="Autres vues spectateur">
-             {[{id:'finalStandings',label:'🥇 Classement final'},{id:'stats',label:'⚽ Statistiques'},{id:'teams',label:'👥 Liste des équipes'}].map(tab=><button type="button" key={tab.id}
+             {[{id:'finalStandings',label:'🥇 Classement final'},{id:'stats',label:'⚽ Statistiques'}].map(tab=><button type="button" key={tab.id}
                onClick={()=>{setActiveTab(tab.id);setViewerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}}
                className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs">{tab.label}</button>)}
              <button type="button" onClick={()=>setViewerMoreOpen(false)} className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs">Fermer</button>
@@ -3869,7 +4170,6 @@
                     }
                     return (
                       <div className="space-y-2.5">
-                        <p className="text-[11px] text-slate-400">{teamMatches.length} rencontre(s) · Tri chronologique d'après le planning actuel</p>
                         {analysis.rows.map(({match:m,rest,warning},index) => {
                           const isT1 = m.team1Id === selectedTeamSchedule.id;
                           const opp = getTeam(isT1 ? m.team2Id : m.team1Id);
@@ -3892,7 +4192,7 @@
                               </div>
                               <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
                                 <span className={m.status==='live'?'text-emerald-400 font-bold':m.status==='finished'?'text-amber-300':'text-cyan-300'}>{m.status==='live'?'● En direct':m.status==='finished'?'✓ Terminé':'À venir'}</span>
-                                {rest !== null && <span className={warning ? 'text-amber-300 font-semibold' : 'text-slate-400'}>
+                                {userRole === 'editor' && rest !== null && <span className={warning ? 'text-amber-300 font-semibold' : 'text-slate-400'}>
                                   {warning==='overlap'?'⚠ Horaires qui se chevauchent':`Repos depuis le match précédent : ${rest} min`}{warning==='quick'?' ⚠':warning==='long'?' ⏳':''}
                                 </span>}
                               </div>
@@ -3943,23 +4243,6 @@
                     </button>
                   </div>
                 </div>
-
-                {userRole === 'viewer' && <div className="xl:hidden rounded-2xl border border-amber-600/40 bg-[#1b0b0e] p-3 sm:p-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">👟</span>
-                    <div><p className="font-bold text-amber-300 text-sm">Le calendrier de mon équipe</p>
-                      <p className="text-[11px] text-slate-400">Tous ses matchs dans l'ordre, mis à jour après un changement d'horaire</p></div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <select value={viewerTeamId} onChange={e=>setViewerTeamId(e.target.value)} aria-label="Choisir mon équipe"
-                      className="min-h-[46px] flex-1 min-w-0 rounded-lg border border-red-900 bg-[#0c0406] text-white px-3 py-2 text-sm">
-                      <option value="">Choisir une équipe…</option>{teams.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr')).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                    <button type="button" disabled={!teams.some(t=>t.id===viewerTeamId)}
-                      onClick={()=>setSelectedTeamSchedule(teams.find(t=>t.id===viewerTeamId))}
-                      className="min-h-[46px] px-5 rounded-lg bg-amber-500 text-[#1a0508] text-sm font-black disabled:opacity-40">📅 Voir les matchs</button>
-                  </div>
-                </div>}
 
                 {userRole === 'viewer' && (
                   <div className="xl:hidden grid grid-cols-3 gap-2" role="group" aria-label="Filtrer les matchs sur téléphone et tablette">
