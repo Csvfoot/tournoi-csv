@@ -444,6 +444,9 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .min-h-\[39px\] {
   min-height: 39px;
 }
+.min-h-\[40px\] {
+  min-height: 40px;
+}
 .min-h-\[42px\] {
   min-height: 42px;
 }

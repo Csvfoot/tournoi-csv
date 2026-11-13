@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.2';
+const CSV_APP_VERSION = '6.3';
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
 function verifyCsvBackup(raw) {
@@ -363,13 +363,15 @@ const cleanCategories = events => {
         unique.set('principal', initialTournaments()[0]);
     return [...unique.values()];
 };
-const csvDayIsPublished = (events, date) => {
+const csvDayIsPublished = (events, date) => (events || [])
+    .some(e => e.date === date && e.published !== false);
+const csvDayIsFullyPublished = (events, date) => {
     const same = (events || []).filter(e => e.date === date);
     return same.length > 0 && same.every(e => e.published !== false);
 };
 const csvNewDayPublication = (events, date) => {
     const same = (events || []).filter(e => e.date === date);
-    return same.length > 0 ? same.every(e => e.published !== false) : false;
+    return same.length > 0 ? same.some(e => e.published !== false) : false;
 };
 const csvValidDay = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') &&
     Number.isFinite(Date.parse(value + 'T12:00:00'));
@@ -1476,6 +1478,9 @@ function MultiTournamentShell() {
     const [cloudFromCache, setCloudFromCache] = useState(false);
     const [catalogSynced, setCatalogSynced] = useState(false);
     const catalogServerSeen = useRef(false);
+    const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+    const [catalogRefreshMessage, setCatalogRefreshMessage] = useState('');
+    const refreshInFlight = useRef(false);
     const [offlineReady, setOfflineReady] = useState(() => csvTrustedOffline());
     const [shortLimit, setShortLimit] = useState(25);
     const [longLimit, setLongLimit] = useState(85);
@@ -1588,20 +1593,49 @@ function MultiTournamentShell() {
         return () => { cancelled = true; if (unsubscribe)
             unsubscribe(); };
     }, []);
-    const refreshServerCatalog = useCallback(async () => {
-        if (navigator.onLine === false || !dbRef.current) {
-            setHubMessage('Connexion nécessaire pour actualiser les journées publiées.');
+    const refreshServerCatalog = useCallback(async (options = {}) => {
+        const manual = Boolean(options.manual);
+        if (refreshInFlight.current) {
+            if (manual)
+                setCatalogRefreshMessage('Actualisation déjà en cours…');
             return false;
         }
+        if (navigator.onLine === false) {
+            if (manual)
+                setCatalogRefreshMessage('⚠ Pas de connexion Internet. Le programme affiché reste celui de la dernière consultation.');
+            return false;
+        }
+        refreshInFlight.current = true;
+        if (manual) {
+            setCatalogRefreshing(true);
+            setCatalogRefreshMessage('⏳ Recherche des journées publiées sur Firebase…');
+        }
         try {
-            const snap = await dbRef.current.collection('tournaments')
+            let db = dbRef.current;
+            if (!db) {
+                const conf = loadCloudConfig();
+                if (!conf?.apiKey || !conf?.projectId)
+                    throw new Error('Configuration Firebase absente.');
+                if (!firebase.apps.length)
+                    firebase.initializeApp(conf);
+                db = firebase.firestore();
+                dbRef.current = db;
+                await csvEnsureFirebaseAuth();
+            }
+            const snap = await db.collection('tournaments')
                 .doc('cslv_multi_catalog_v1').get({ source: 'server' });
             if (!snap.exists)
-                throw new Error('Catalogue absent sur Firebase.');
+                throw new Error('Le catalogue des tournois est absent sur Firebase.');
             const data = snap.data() || {};
             if (!Array.isArray(data.events))
-                throw new Error('Catalogue de tournois incomplet.');
-            setCatalog(cleanCategories(data.events));
+                throw new Error('Le catalogue Firebase ne contient pas de liste de catégories.');
+            const fresh = cleanCategories(data.events);
+            catalogRef.current = fresh;
+            setCatalog(fresh);
+            try {
+                localStorage.setItem('cslv_multi_catalog_v1', JSON.stringify(fresh));
+            }
+            catch (e) { }
             if (Array.isArray(data.fields) && data.fields.length) {
                 catalogHasFields.current = true;
                 setSharedFields(data.fields);
@@ -1611,11 +1645,29 @@ function MultiTournamentShell() {
             setCatalogSynced(true);
             setHubStatus('online');
             setHubMessage('');
+            if (manual) {
+                const published = [...new Set(fresh.filter(e => csvDayIsPublished(fresh, e.date)).map(e => e.date))];
+                const stamp = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                setCatalogRefreshMessage(published.length
+                    ? `✅ Actualisé à ${stamp} · ${published.length} journée(s) publiée(s) · ${fresh.filter(e => e.published !== false).length} catégorie(s) visible(s).`
+                    : `ℹ Actualisé à ${stamp} · Aucune journée publiée dans Firebase. Vérifie la publication depuis l'organisateur.`);
+            }
             return true;
         }
         catch (error) {
-            setHubMessage('Actualisation des journées indisponible : ' + (error.message || String(error)));
+            const detail = error?.code === 'permission-denied'
+                ? 'Lecture refusée par les règles Firebase pour ce spectateur. Vérifie les autorisations Firestore.'
+                : (error?.message || String(error));
+            if (manual)
+                setCatalogRefreshMessage('⚠ Échec de l’actualisation : ' + detail);
+            else
+                setHubMessage('Actualisation des journées indisponible : ' + detail);
             return false;
+        }
+        finally {
+            refreshInFlight.current = false;
+            if (manual)
+                setCatalogRefreshing(false);
         }
     }, []);
     useEffect(() => {
@@ -1930,7 +1982,7 @@ function MultiTournamentShell() {
         if (!hubIsEditor || !current)
             return;
         const date = current.date;
-        const currentlyPublic = csvDayIsPublished(catalog, date);
+        const currentlyPublic = csvDayIsFullyPublished(catalog, date);
         if (hubStatus !== 'online' || !dbRef.current) {
             setPublicationNotice('Une connexion Firebase active est nécessaire pour publier ou masquer une journée.');
             return;
@@ -2811,14 +2863,20 @@ function MultiTournamentShell() {
                     React.createElement("span", { className: "text-xs text-slate-200" },
                         "\uD83D\uDCC5 ",
                         csvReadableDay(current.date)),
-                    React.createElement("span", { className: 'rounded-lg px-2 py-1 text-[11px] font-bold ' + (csvDayIsPublished(catalog, current.date) ? 'bg-emerald-900/60 text-emerald-200' : 'bg-slate-800 text-amber-200') }, csvDayIsPublished(catalog, current.date) ? '● Journée publiée' : '○ Journée masquée'),
-                    React.createElement("button", { type: "button", onClick: toggleDayPublication, disabled: hubStatus !== 'online', className: "ml-auto min-h-[38px] px-3 py-1.5 bg-[#39121a] border border-amber-600/50 rounded-lg text-xs font-bold text-amber-200 disabled:opacity-40" }, csvDayIsPublished(catalog, current.date) ? '🙈 Masquer la journée' : '📣 Publier la journée')),
+                    React.createElement("span", { className: 'rounded-lg px-2 py-1 text-[11px] font-bold ' + (csvDayIsPublished(catalog, current.date) ? 'bg-emerald-900/60 text-emerald-200' : 'bg-slate-800 text-amber-200') }, csvDayIsFullyPublished(catalog, current.date) ? '● Journée publiée' : csvDayIsPublished(catalog, current.date) ? '◐ Journée partiellement publiée' : '○ Journée masquée'),
+                    React.createElement("button", { type: "button", onClick: toggleDayPublication, disabled: hubStatus !== 'online', className: "ml-auto min-h-[38px] px-3 py-1.5 bg-[#39121a] border border-amber-600/50 rounded-lg text-xs font-bold text-amber-200 disabled:opacity-40" }, csvDayIsFullyPublished(catalog, current.date) ? '🙈 Masquer la journée' : '📣 Publier la journée')),
                 publicationNotice && hubIsEditor && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, publicationNotice),
-                isViewer && React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
-                    React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Journée en attente de publication'),
-                    React.createElement("button", { type: "button", onClick: () => void refreshServerCatalog(), className: "min-h-[36px] rounded-lg border border-amber-800/50 px-3 py-1 text-amber-200 font-bold" }, "\u21BB Actualiser le programme")),
-                isViewer && !lockedViewerDay && publishedDays.length > 1 && React.createElement("div", { className: "flex flex-wrap items-center gap-2 rounded-xl border border-amber-900/40 bg-[#17090c] px-3 py-2" },
-                    React.createElement("label", { htmlFor: "csv-public-day", className: "text-xs text-amber-200 font-bold" }, "\uD83D\uDCC5 Journ\u00E9e"),
+                isViewer && React.createElement("div", { className: "space-y-2" },
+                    React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
+                        React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Aucun programme publié pour cette date'),
+                        React.createElement("button", { type: "button", onClick: () => void refreshServerCatalog({ manual: true }), disabled: catalogRefreshing, className: "min-h-[40px] rounded-lg border border-amber-800/50 px-3 py-1 text-amber-200 font-bold disabled:opacity-40" }, catalogRefreshing ? '⏳ Actualisation…' : '↻ Actualiser le programme')),
+                    catalogRefreshMessage && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, catalogRefreshMessage),
+                    lockedViewerDay && React.createElement("p", { className: "text-[11px] text-slate-400" },
+                        "\uD83D\uDD12 Ce lien QR est limit\u00E9 au ",
+                        csvReadableDay(lockedViewerDay),
+                        ". Pour choisir parmi toutes les journ\u00E9es publi\u00E9es, ouvre l\u2019adresse principale du site sans le param\u00E8tre \u00AB day \u00BB.")),
+                isViewer && !lockedViewerDay && publishedDays.length > 0 && React.createElement("div", { className: "flex flex-wrap items-center gap-2 rounded-xl border border-amber-900/40 bg-[#17090c] px-3 py-2" },
+                    React.createElement("label", { htmlFor: "csv-public-day", className: "text-xs text-amber-200 font-bold" }, "\uD83D\uDCC5 Journ\u00E9e publi\u00E9e"),
                     React.createElement("select", { id: "csv-public-day", value: viewerDay || '', onChange: e => selectPublicDay(e.target.value), className: "min-h-[44px] flex-1 min-w-[170px] bg-[#210b12] text-white border border-amber-800/60 rounded-lg px-3 text-sm" }, publishedDays.map(date => React.createElement("option", { key: date, value: date }, csvReadableDay(date))))),
                 React.createElement("div", { className: "flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar" }, accessibleEvents.map(e => React.createElement("button", { type: "button", key: e.id, onClick: () => selectTournament(e.id), className: 'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border ' +
                         (e.id === current?.id && page === 'tournoi' ? 'bg-amber-500 text-black border-amber-500' : 'bg-[#17080b] text-slate-200 border-red-900/70') },
