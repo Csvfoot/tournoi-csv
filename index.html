@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Tournoi CS La Verpillière — V5.7</title>
+  <title>Tournoi CS La Verpillière — V5.9</title>
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=20261106b">
   <link rel="icon" type="image/png" href="./apple-touch-icon.png?v=20261106b">
   <meta name="apple-mobile-web-app-title" content="Tournoi CSV">
@@ -83,7 +83,7 @@
 
   <script type="text/babel">    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    const CSV_APP_VERSION = '5.8';
+    const CSV_APP_VERSION = '5.9';
     const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
     const CSV_BACKUP_VERSION = 1;
 
@@ -106,7 +106,7 @@
             !Number.isFinite(Date.parse(e.date+'T12:00:00')))
           throw new Error('Une catégorie de la sauvegarde est invalide ou en double.');
         ids.add(e.id);
-        return {id:e.id,category:e.category.slice(0,60),title:e.title.slice(0,120),date:e.date};
+        return {id:e.id,category:e.category.slice(0,60),title:e.title.slice(0,120),date:e.date,published:e.published!==false};
       });
       if (!ids.has('principal')) throw new Error('Le tournoi Principal est absent de cette sauvegarde.');
       if (raw.fields.length > 100 || raw.fields.some(f=> !f || typeof f.id !== 'string' ||
@@ -127,6 +127,8 @@
       }
       return {format:CSV_BACKUP_FORMAT,version:CSV_BACKUP_VERSION,
         exportedAt:typeof raw.exportedAt==='string'?raw.exportedAt:'',
+        // Les anciens exports ne contiennent pas l'état de publication.
+        legacyPublication:raw.catalog.some(e=>typeof e.published!=='boolean'),
         catalog:cleaned,fields:raw.fields,records:restored};
     }
 
@@ -412,7 +414,7 @@
       const d = new Date();
       return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
     };
-    const initialTournaments = () => [{id:'principal',category:'Principal',title:'Tournoi actuel',date:TODAY_LOCAL()}];
+    const initialTournaments = () => [{id:'principal',category:'Principal',title:'Tournoi actuel',date:TODAY_LOCAL(),published:true}];
     const tournamentDocId = id => id==='principal' ? 'cslv_main_data' : 'cslv_mt_'+id;
     const tournamentStorageKey = (id,kind) => id==='principal' ? 'cslv_'+kind : 'cslv_mt_'+id+'_'+kind;
     const readLocalJson = (key, fallback) => {
@@ -427,12 +429,39 @@
           id:event.id,
           category:String(event.category||'Catégorie').slice(0,60),
           title:String(event.title||'Tournoi').slice(0,120),
-          date:/^\d{4}-\d{2}-\d{2}$/.test(event.date||'')?event.date:TODAY_LOCAL()
+          date:/^\d{4}-\d{2}-\d{2}$/.test(event.date||'')?event.date:TODAY_LOCAL(),
+          published:event.published!==false
         });
       }
       if(!unique.has('principal')) unique.set('principal',initialTournaments()[0]);
       return [...unique.values()];
     };
+    // Publication par date : compatibilité avec les anciens catalogues (déjà visibles).
+    // Toute NOUVELLE date démarre masquée ; les autres catégories du même jour
+    // adoptent son état de publication. Ce filtre d'interface N'EST PAS une ACL Firebase.
+    const csvDayIsPublished = (events,date) => {
+      const same=(events||[]).filter(e=>e.date===date);
+      return same.length>0 && same.every(e=>e.published!==false);
+    };
+    const csvNewDayPublication = (events,date) => {
+      const same=(events||[]).filter(e=>e.date===date);
+      return same.length>0 ? same.every(e=>e.published!==false) : false;
+    };
+    const csvValidDay = value => /^\d{4}-\d{2}-\d{2}$/.test(value||'') &&
+      Number.isFinite(Date.parse(value+'T12:00:00'));
+    const csvPublicDay = (events,dayFromUrl,requestedTournament) => {
+      if(csvValidDay(dayFromUrl))return dayFromUrl; // lien public verrouillé sur la date
+      const desired=(events||[]).find(e=>e.id===requestedTournament);
+      if(desired && csvDayIsPublished(events,desired.date))return desired.date;
+      const days=[...new Set((events||[]).filter(e=>csvDayIsPublished(events,e.date)).map(e=>e.date))].sort();
+      return days.find(d=>d>=TODAY_LOCAL()) || days[days.length-1] || null;
+    };
+    const csvReadableDay=date=>{
+      if(!csvValidDay(date))return 'non publiée';
+      return new Date(date+'T12:00:00').toLocaleDateString('fr-FR',
+        {weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    };
+
     // Configuration publique Firebase déjà utilisée dans le lien de partage CSV.
     // Cette clé de projet client n'est pas un secret ; les règles Firestore
     // doivent toujours protéger l'écriture des données.
@@ -1533,6 +1562,12 @@
       },[]);
       const [catalog,setCatalog] = useState(()=>cleanCategories(readLocalJson('cslv_multi_catalog_v1',initialTournaments())));
       const [selectedId,setSelectedId] = useState(()=>urlTournament || readLocalJson('cslv_last_tournament_v1','principal'));
+      const loginTargetDay=organizerLinkPending && !hubIsEditor
+        ? catalog.find(e=>e.id===selectedId)?.date : null;
+      const viewerDay = csvPublicDay(catalog,loginTargetDay||params.get('day'),params.has('tournament')?selectedId:null);
+      const publicEvents = csvDayIsPublished(catalog,viewerDay)
+        ? catalog.filter(e=>e.date===viewerDay && e.published!==false) : [];
+      const accessibleEvents = hubIsEditor ? catalog : publicEvents;
       const [page,setPage] = useState('tournoi');
       const [sharedFields,setSharedFields] = useState(()=>readLocalJson('cslv_shared_fields_v1',readLocalJson('cslv_fields',DEFAULT_FIELDS)));
       const [loadedDocs,setLoadedDocs] = useState({});
@@ -1611,7 +1646,7 @@
       useEffect(()=>{
         if(hubStatus!=='online'||!dbRef.current)return;
         let cancelled=false;
-        const unsubs=catalog.map(event=>dbRef.current.collection('tournaments').doc(tournamentDocId(event.id))
+        const unsubs=accessibleEvents.map(event=>dbRef.current.collection('tournaments').doc(tournamentDocId(event.id))
           .onSnapshot(snap=>{
             if(cancelled)return;
             setLoadedDocs(old=>({...old,[event.id]:true}));
@@ -1639,7 +1674,7 @@
             }
           },err=>{setHubMessage('Planning partiellement indisponible : '+err.message);setHubStatus('error');}));
         return()=>{cancelled=true;unsubs.forEach(u=>u());};
-      },[hubStatus,catalog.map(e=>e.id).join('|')]);
+      },[hubStatus,hubIsEditor,viewerDay,catalog.map(e=>e.id+':'+e.date+':'+e.published).join('|')]);
 
       const localRecord=id=>({
         config:readLocalJson(tournamentStorageKey(id,'config'),{}),
@@ -1764,21 +1799,81 @@
         }catch(err){setBackupNotice('Aucune restauration appliquée : '+(err.message||String(err)));}
         finally{setBackupWorking(false);}
       };
-      const current=catalog.find(e=>e.id===selectedId)||catalog[0];
+      const current=accessibleEvents.find(e=>e.id===selectedId)||accessibleEvents[0]||null;
       const selectTournament=id=>{
+        const target=accessibleEvents.find(e=>e.id===id);
+        if(!target)return; // un spectateur ne peut pas sortir de la journée publiée
         setSelectedId(id);setPage('tournoi');
-        localStorage.setItem('cslv_last_tournament_v1',JSON.stringify(id));
-        const params=new URLSearchParams(window.location.search);
-        params.set('tournament',id);
-        const search=params.toString();
+        try{localStorage.setItem('cslv_last_tournament_v1',JSON.stringify(id));}catch(err){}
+        const nextParams=new URLSearchParams(window.location.search);
+        nextParams.set('tournament',id);
+        if(!hubIsEditor){nextParams.set('role','viewer');nextParams.set('day',viewerDay);}
+        else nextParams.delete('day');
+        const search=nextParams.toString();
         window.history.replaceState({},'',window.location.pathname+(search?'?'+search:'')+window.location.hash);
+      };
+      // Entrée organisateur de secours quand toutes les journées sont masquées.
+      // Le contenu du tournoi n'est pas monté avant vérification de l'accès.
+      const [shellLoginOpen,setShellLoginOpen]=useState(false);
+      const [shellPin,setShellPin]=useState('');
+      const [shellEmail,setShellEmail]=useState('');
+      const [shellPassword,setShellPassword]=useState('');
+      const [shellLoginError,setShellLoginError]=useState('');
+      const [shellLoginBusy,setShellLoginBusy]=useState(false);
+      useEffect(()=>{
+        if(organizerLinkPending && !hubIsEditor && !current)setShellLoginOpen(true);
+      },[organizerLinkPending,hubIsEditor,current?.id]);
+      const verifyShellOrganizer=async(method)=>{
+        if(shellLoginBusy)return;
+        setShellLoginBusy(true);setShellLoginError('');
+        try{
+          if(method==='firebase'){
+            if(!shellEmail.trim()||!shellPassword)throw new Error('Indique l’e-mail et le mot de passe Firebase.');
+            if(!firebase.apps.length)firebase.initializeApp(loadCloudConfig());
+            const result=await firebase.auth().signInWithEmailAndPassword(shellEmail.trim(),shellPassword);
+            await result.user.reload(); await result.user.getIdToken(true);
+            if(!firebase.auth().currentUser?.emailVerified)throw new Error('Adresse e-mail Firebase non vérifiée.');
+          }else{
+            if(!shellPin.trim())throw new Error('Saisis ton code PIN organisateur.');
+            const event=catalog.find(e=>e.id===selectedId)||catalog.find(e=>e.id==='principal')||catalog[0];
+            if(!event)throw new Error('Aucune catégorie disponible pour vérifier le code.');
+            let config=localRecord(event.id).config||{};
+            if(dbRef.current&&hubStatus==='online'){
+              const doc=await dbRef.current.collection('tournaments').doc(tournamentDocId(event.id)).get();
+              if(doc.exists)config=doc.data()?.config||config;
+            }
+            if(shellPin!==(config.adminPin||'1939'))throw new Error('Code PIN incorrect.');
+          }
+          onRoleChange('editor');setShellLoginOpen(false);setShellPassword('');setShellPin('');
+        }catch(err){setShellLoginError(err.message||String(err));}
+        finally{setShellLoginBusy(false);}
+      };
+      const [publicationNotice,setPublicationNotice] = useState('');
+      const toggleDayPublication=async()=>{
+        if(!hubIsEditor||!current)return;
+        const date=current.date;
+        const currentlyPublic=csvDayIsPublished(catalog,date);
+        if(hubStatus!=='online'||!dbRef.current){
+          setPublicationNotice('Une connexion Firebase active est nécessaire pour publier ou masquer une journée.');return;
+        }
+        if(!window.confirm(currentlyPublic
+          ?`Masquer toute la journée du ${csvReadableDay(date)} aux spectateurs ?`
+          :`Publier toutes les catégories du ${csvReadableDay(date)} pour les spectateurs ?`))return;
+        const next=catalog.map(e=>e.date===date?{...e,published:!currentlyPublic}:e);
+        try{
+          await dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1')
+            .set({events:next,fields:sharedFields,updatedAt:new Date().toISOString()},{merge:true});
+          setCatalog(next);
+          setPublicationNotice(currentlyPublic?'Journée masquée aux spectateurs.':'Journée publiée : les liens et QR codes de cette date sont actifs.');
+        }catch(err){setPublicationNotice('Publication non enregistrée sur Firebase : '+(err.message||String(err)));}
       };
       const addTournament=async()=>{
         if(isViewer) return;
         const cat=categoryInput.trim();
         if(!cat || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {setHubMessage('Indique une catégorie et une date.');return;}
         const id='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-        const event={id,category:cat.slice(0,60),title:(titleInput.trim()||'Tournoi '+cat).slice(0,120),date:dateInput};
+        const event={id,category:cat.slice(0,60),title:(titleInput.trim()||'Tournoi '+cat).slice(0,120),date:dateInput,
+          published:csvNewDayPublication(catalog,dateInput)};
         const defaultConfig={name:event.title,format:'groups_knockout',numberOfGroups:2,customGroups:['Poule A','Poule B'],autoGroups:true,hasPlayoffs:true,hasConsolation:true,
           adminPin:'1939',duration:15,breakDuration:5,startTime:'09:00',hasLunchBreak:true,lunchStart:'12:30',lunchEnd:'13:30',pointsWin:3,pointsDraw:1,pointsLoss:0,qualifiersPerGroup:2};
         localStorage.setItem(tournamentStorageKey(id,'config'),JSON.stringify(defaultConfig));
@@ -1814,7 +1909,7 @@
         }
         const id='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,9);
         const title='Tournoi '+category;
-        const event={id,category,title,date:dateInputCopy};
+        const event={id,category,title,date:dateInputCopy,published:csvNewDayPublication(catalog,dateInputCopy)};
         const source=eventData(original);
         // Jamais de scores ni calendrier copiés : évite les conflits de terrains
         // et donne un nouveau départ à la catégorie dupliquée.
@@ -1851,7 +1946,9 @@
           return;
         }
         const next=catalog.map(event=>event.id===editingEvent.id ?
-          {...event,category:category.slice(0,60),title:title.slice(0,120),date} : event);
+          {...event,category:category.slice(0,60),title:title.slice(0,120),date,
+            published:date===event.date?event.published!==false:
+              csvNewDayPublication(catalog.filter(x=>x.id!==event.id),date)} : event);
         // Le même ID est conservé : aucune équipe, rencontre ni donnée Firebase n'est recréée.
         await persistCatalog(next);
         setDateFilter(date);
@@ -1874,7 +1971,8 @@
           ?'Dernière confirmation : vider entièrement le tournoi principal ? Un tournoi principal vide sera conservé.'
           :'Dernière confirmation : supprimer définitivement ce tournoi, y compris de Firebase ?'))return;
         const principal=event.id==='principal';
-        const nextEvent={id:'principal',category:'Principal',title:'Nouveau tournoi',date:TODAY_LOCAL()};
+        const nextEvent={id:'principal',category:'Principal',title:'Nouveau tournoi',date:TODAY_LOCAL(),
+          published:csvNewDayPublication(catalog.filter(e=>e.id!=='principal'),TODAY_LOCAL())};
         const next=principal?catalog.map(x=>x.id==='principal'?nextEvent:x):catalog.filter(x=>x.id!==event.id);
         const emptyData={config:{...data.config,name:'Nouveau tournoi CS La Verpillière',reservedSlots:[]},teams:[],matches:[]};
         try{
@@ -1906,7 +2004,8 @@
       };
       const updateEventDate=(eventId,date)=>{
         if(isViewer||!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
-        persistCatalog(catalog.map(e=>e.id===eventId?{...e,date}:e));
+        persistCatalog(catalog.map(e=>e.id===eventId?{...e,date,
+          published:date===e.date?e.published!==false:csvNewDayPublication(catalog.filter(x=>x.id!==e.id),date)}:e));
       };
 
 
@@ -2443,7 +2542,7 @@
           <div className="max-w-7xl mx-auto space-y-2">
             <div className="flex flex-wrap items-center gap-2 justify-between">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-black text-amber-300">⚽ Tournois CSV · catégories</div>
+                <div className="text-sm font-black text-amber-300">{isViewer?'⚽ Tournoi CSV · '+csvReadableDay(viewerDay):'⚽ Tournois CSV · catégories'}</div>
                 <span className="text-[10px] border border-amber-700/40 rounded-full px-2 py-1 text-slate-300">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
               </div>
               <div className="flex items-center gap-2">
@@ -2467,11 +2566,21 @@
                   title="Gérer ce tournoi : renommer, dupliquer, supprimer">✎ Gérer</button>}
               </div>
             </div>
+            {hubIsEditor && current && <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[#17090c] border border-amber-900/40 px-3 py-2">
+              <span className="text-xs text-slate-200">📅 {csvReadableDay(current.date)}</span>
+              <span className={'rounded-lg px-2 py-1 text-[11px] font-bold '+(csvDayIsPublished(catalog,current.date)?'bg-emerald-900/60 text-emerald-200':'bg-slate-800 text-amber-200')}>
+                {csvDayIsPublished(catalog,current.date)?'● Journée publiée':'○ Journée masquée'}</span>
+              <button type="button" onClick={toggleDayPublication} disabled={hubStatus!=='online'}
+                className="ml-auto min-h-[38px] px-3 py-1.5 bg-[#39121a] border border-amber-600/50 rounded-lg text-xs font-bold text-amber-200 disabled:opacity-40">
+                {csvDayIsPublished(catalog,current.date)?'🙈 Masquer la journée':'📣 Publier la journée'}</button>
+            </div>}
+            {publicationNotice && hubIsEditor && <p role="status" className="text-xs text-amber-200">{publicationNotice}</p>}
+            {isViewer && publicEvents.length>0 && <p className="text-xs text-slate-300">📅 Programme de cette journée uniquement · {publicEvents.length} catégorie(s)</p>}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {catalog.map(e=><button type="button" key={e.id} onClick={()=>selectTournament(e.id)}
+              {accessibleEvents.map(e=><button type="button" key={e.id} onClick={()=>selectTournament(e.id)}
                 className={'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border '+
-                  (e.id===current.id&&page==='tournoi'?'bg-amber-500 text-black border-amber-500':'bg-[#17080b] text-slate-200 border-red-900/70')}>
-                {e.category} <span className="opacity-70 ml-1">{e.date}</span>
+                  (e.id===current?.id&&page==='tournoi'?'bg-amber-500 text-black border-amber-500':'bg-[#17080b] text-slate-200 border-red-900/70')}>
+                {e.category} {hubIsEditor && <span className="opacity-70 ml-1">{e.date}</span>}
               </button>)}
             </div>
             {hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
@@ -2496,6 +2605,7 @@
                     className="block max-w-full text-xs text-slate-200 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-rose-900 file:text-white" />
                   {backupCandidate && <div className="space-y-2">
                     <p className="text-xs text-amber-200">Sauvegarde du {backupCandidate.exportedAt?new Date(backupCandidate.exportedAt).toLocaleString('fr-FR'):'jour non précisé'} : {backupCandidate.catalog.length} catégories et {backupCandidate.catalog.reduce((n,e)=>n+backupCandidate.records[e.id].matches.length,0)} matchs.</p>
+                    {backupCandidate.legacyPublication && <p role="alert" className="text-xs text-rose-200">⚠ Ancienne sauvegarde : après restauration, les dates seront publiées par défaut. Vérifie chaque journée avant de partager les liens.</p>}
                     <button type="button" onClick={restoreFullBackup} disabled={backupWorking||!cloudBackupReady}
                       className="min-h-[44px] rounded-xl bg-rose-800 px-4 text-xs font-black text-white disabled:opacity-40">{backupWorking?'Restauration…':'⚠ Remplacer toutes les données'}</button>
                   </div>}
@@ -2742,11 +2852,47 @@
           {!isViewer && <div className="border border-red-950 rounded-lg p-3 text-xs text-slate-400">
             Pour modifier un horaire, ouvre la catégorie concernée puis l’onglet « Matchs ». La réservation d’une finale bloque tous les terrains du même jour.</div>}
         </main> : <>
+          {isViewer && !current && <main className="max-w-xl mx-auto px-4 py-14 text-center space-y-4" role="status">
+            <div className="text-5xl">📅</div>
+            <h2 className="text-xl font-black text-amber-300">Programme non disponible</h2>
+            <p className="text-slate-300 text-sm">{viewerDay
+              ?`La journée du ${csvReadableDay(viewerDay)} n'est pas encore publiée, ou ne comporte pas de tournoi accessible.`
+              :'Aucune journée de tournoi n’est actuellement publiée.'}</p>
+            <p className="text-xs text-slate-500">Reviens lorsque les organisateurs auront publié le calendrier.</p>
+            <button type="button" onClick={()=>{setShellLoginOpen(true);setShellLoginError('');}}
+              className="min-h-[44px] rounded-lg border border-amber-900 px-4 py-2 text-xs text-amber-200">🔒 Accès organisateur</button>
+          </main>}
+          {!hubIsEditor && !current && shellLoginOpen && <div className="fixed inset-0 z-[220] bg-black/90 flex items-center justify-center p-4">
+            <section role="dialog" aria-modal="true" aria-label="Connexion organisateur" className="w-full max-w-sm rounded-2xl border border-amber-600/70 bg-[#18080e] p-5 space-y-3 shadow-2xl max-h-[90dvh] overflow-y-auto">
+              <div className="flex justify-between gap-2"><h2 className="font-black text-amber-300">🔒 Accès organisateur</h2>
+                <button type="button" onClick={()=>{setShellLoginOpen(false);setOrganizerLinkPending(false);}} aria-label="Fermer" className="text-slate-300 px-2">✕</button></div>
+              <p className="text-xs text-slate-300">Cette journée est masquée. Identifie-toi pour gérer les tournois.</p>
+              <label className="block text-xs text-amber-200">Code PIN du tournoi
+                <input type="password" autoComplete="off" maxLength="8" value={shellPin} onChange={e=>setShellPin(e.target.value)}
+                  onKeyDown={e=>{if(e.key==='Enter')verifyShellOrganizer('pin');}}
+                  className="mt-1 w-full min-h-[44px] bg-black border border-amber-900 rounded-lg px-3 text-white"/>
+              </label>
+              <button type="button" disabled={shellLoginBusy} onClick={()=>verifyShellOrganizer('pin')} className="w-full min-h-[44px] bg-amber-500 text-black rounded-lg font-bold disabled:opacity-50">Valider le PIN</button>
+              <div className="border-t border-amber-900/50 pt-3 space-y-2">
+                <p className="text-xs text-emerald-200">Ou connexion Firebase organisateur</p>
+                <input type="email" autoComplete="username" placeholder="E-mail Firebase" value={shellEmail} onChange={e=>setShellEmail(e.target.value)}
+                  className="w-full min-h-[44px] bg-black border border-amber-900 rounded-lg px-3 text-white"/>
+                <input type="password" autoComplete="current-password" placeholder="Mot de passe Firebase" value={shellPassword} onChange={e=>setShellPassword(e.target.value)}
+                  className="w-full min-h-[44px] bg-black border border-amber-900 rounded-lg px-3 text-white"/>
+                <button type="button" disabled={shellLoginBusy} onClick={()=>verifyShellOrganizer('firebase')}
+                  className="w-full min-h-[44px] bg-emerald-700 text-white font-bold rounded-lg disabled:opacity-50">Connexion Firebase</button>
+              </div>
+              {shellLoginError && <p role="alert" className="text-xs text-rose-300">{shellLoginError}</p>}
+              <p className="text-[10px] text-slate-400">Le PIN est une protection d'interface ; seules des règles Firebase adaptées protègent les données.</p>
+            </section>
+          </div>}
           {!isViewer && current && <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 flex items-center gap-3 text-xs text-slate-300">
             <label>📅 Date de cette catégorie <input type="date" value={current.date} onChange={e=>updateEventDate(current.id,e.target.value)}
               className="bg-[#1b080b] border border-red-950 rounded-md p-1.5 ml-2 text-white"/></label>
           </div>}
-          {current && <TournamentApp key={current.id+'-'+resetEpoch} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
+          {isViewer && current && (hubStatus==='loading'||(hubStatus==='online'&&!loadedDocs[current.id])) && <div role="status" className="max-w-lg mx-auto text-center text-amber-200 text-sm p-8">⏳ Chargement du calendrier de cette journée…</div>}
+          {isViewer && current && hubStatus==='error' && <div role="alert" className="max-w-lg mx-auto text-center text-rose-200 text-sm p-8">Connexion aux résultats indisponible. Vérifie ta connexion Internet et actualise la page.</div>}
+          {current && (!isViewer || (hubStatus==='online'&&loadedDocs[current.id])) && <TournamentApp key={current.id+'-'+resetEpoch} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
             otherEvents={otherEvents} onTournamentUpdate={updateRecord} hubReady={cloudReady}
             hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}
             organizerLinkPending={organizerLinkPending && !hubIsEditor} onOrganizerLinkHandled={acknowledgeOrganizerLink}
@@ -4208,6 +4354,7 @@
       const buildShareUrl = (role) => {
         let base = OFFICIAL_PUBLIC_URL;
         let query = `?role=${role}&tournament=${encodeURIComponent(tournament.id)}`;
+        if(role==='viewer') query += `&day=${encodeURIComponent(tournament.date)}`;
         try {
           const saved = localStorage.getItem('cslv_firebase_config');
           if (saved) {
@@ -5812,7 +5959,7 @@
                       onClick={() => setSelectedQrType('viewer')}
                       className={`px-3 py-1 rounded-lg text-xs font-bold ${selectedQrType === 'viewer' ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 text-slate-700'}`}
                     >
-                      QR Spectateur
+                      QR Journée
                     </button>
                     {userRole === 'editor' && (
                       <button
@@ -5833,10 +5980,14 @@
                   🖨 Imprimer l'Affiche QR Code A4 (Buvette & Terrains)
                 </button>
 
-                {/* Liens à copier */}
+                {userRole === 'editor' && <p className="text-[11px] text-amber-200 bg-amber-950/30 border border-amber-900/50 p-2 rounded-lg">
+                    📅 Le lien et le QR spectateur affichent uniquement les catégories de cette date.
+                    La journée doit être publiée pour être visible sur les téléphones des parents.
+                  </p>}
+                  {/* Liens à copier */}
                 <div className="space-y-2">
                   <div className="p-3 bg-[#0b0304] rounded-xl border border-red-950">
-                    <span className="text-[11px] font-bold text-amber-400 block mb-1">Lien Public Spectateurs</span>
+                    <span className="text-[11px] font-bold text-amber-400 block mb-1">Lien spectateur — journée du {csvReadableDay(tournament.date)}</span>
                     <div className="flex gap-2">
                       <input
                         type="text"
