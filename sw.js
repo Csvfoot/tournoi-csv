@@ -1,6 +1,6 @@
 // Tournoi CSV V6.0 - application shell cache. Never cache Firestore/auth API responses.
-const CACHE = 'tournoi-csv-shell-v6.0';
-const CORE = ['./','./index.html','./app.js?v=6.0','./styles.css?v=6.0','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
+const CACHE = 'tournoi-csv-shell-v6.1';
+const CORE = ['./','./index.html','./app.js?v=6.1','./styles.css?v=6.1','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
 const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
@@ -46,9 +46,14 @@ self.addEventListener('fetch',event=>{
     })());return;
   }
   event.respondWith((async()=>{
-    const cache=await caches.open(CACHE);const saved=await cache.match(request);
-    if(saved)return saved;
-    try{const response=await fetch(request);if(response.ok||response.type==='opaque')await cache.put(request,response.clone());return response;}
-    catch(e){return (await cache.match(request,{ignoreSearch:true}))||Response.error();}
+    const cache=await caches.open(CACHE);
+    const freshFirst=own&&/\/(?:app\.js|styles\.css)(?:$)/.test(url.pathname);
+    const saved=await cache.match(request);
+    if(!freshFirst&&saved)return saved;
+    try{
+      const response=await fetch(request);
+      if(response.ok||response.type==='opaque')await cache.put(request,response.clone());
+      return response;
+    }catch(e){return saved||(await cache.match(request,{ignoreSearch:true}))||Response.error();}
   })());
 });

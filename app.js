@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.0';
+const CSV_APP_VERSION = '6.1';
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
 function verifyCsvBackup(raw) {
@@ -1339,7 +1339,9 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
     const [goalScorerName, setGoalScorerName] = useState('');
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState('');
+    const [savedNotice, setSavedNotice] = useState('');
     const openMatch = (event, match, teams) => {
+        setSavedNotice('');
         setActiveEntry({ event, teams, base: JSON.parse(JSON.stringify(match)) });
         setEditingMatch(JSON.parse(JSON.stringify(match)));
         setGoalTeamId(match.team1Id || '');
@@ -1358,6 +1360,7 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
         setSaveError('');
         try {
             await onSave(activeEntry.event.id, editingMatch, activeEntry.base);
+            setSavedNotice('✅ Résultat enregistré sur Firebase. Les classements, statistiques et calendriers sont actualisés.');
             setEditingMatch(null);
             setActiveEntry(null);
         }
@@ -1403,7 +1406,8 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
             React.createElement("div", { className: "self-end text-xs text-slate-300 pb-2" },
                 fixtures.length,
                 " rencontre(s) affich\u00E9e(s)")),
-        hubStatus === 'error' || hubStatus === 'loading' ? React.createElement("div", { className: "rounded-lg border border-rose-700 p-3 text-rose-200 text-xs" }, "\u26A0 Synchronisation en cours ou indisponible. La saisie est d\u00E9sactiv\u00E9e tant que l'\u00E9tat Firebase n'est pas stabilis\u00E9.") : null,
+        savedNotice && React.createElement("p", { role: "status", className: "rounded-lg border border-emerald-800 bg-emerald-950/30 p-3 text-emerald-200 text-xs" }, savedNotice),
+        hubStatus !== 'online' ? React.createElement("div", { role: "alert", className: "rounded-lg border border-rose-700 p-3 text-rose-200 text-xs" }, "\u26A0 Synchronisation Firebase indisponible : les scores ne peuvent pas \u00EAtre enregistr\u00E9s.") : null,
         fixtures.length === 0 ? React.createElement("div", { className: "border border-red-900 rounded-xl p-8 text-center text-slate-400 text-sm" }, "Aucune rencontre pr\u00E9vue pour cette journ\u00E9e et ces filtres.") :
             React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4 items-start" }, fixtures.map(({ event, match, teams }) => React.createElement(DayEntryMatchCard, { key: event.id + '|' + match.id, event: event, match: match, teams: teams, fields: fields, onOpen: openMatch }))),
         editingMatch && React.createElement(MatchDetailModal, { editingMatch: editingMatch, setEditingMatch: setEditingMatch, getTeam: getModalTeam, fields: fields, goalTeamId: goalTeamId, setGoalTeamId: setGoalTeamId, goalScorerName: goalScorerName, setGoalScorerName: setGoalScorerName, onSave: saveMatch, onClose: closeMatch, categoryLabel: activeEntry?.event.category || '', readOnlySchedule: true, requireKnownTeams: true, saving: saving, saveError: saveError }));
@@ -1562,7 +1566,8 @@ function MultiTournamentShell() {
                         }
                     }
                     setHubStatus('online');
-                    setHubMessage('');
+                    if (!doc.metadata?.fromCache)
+                        setHubMessage('');
                 }, err => { setHubStatus('error'); setHubMessage('Catalogue non synchronisé : ' + err.message); });
             }
             catch (err) {
@@ -1573,6 +1578,49 @@ function MultiTournamentShell() {
         return () => { cancelled = true; if (unsubscribe)
             unsubscribe(); };
     }, []);
+    const refreshServerCatalog = useCallback(async () => {
+        if (navigator.onLine === false || !dbRef.current) {
+            setHubMessage('Connexion nécessaire pour actualiser les journées publiées.');
+            return false;
+        }
+        try {
+            const snap = await dbRef.current.collection('tournaments')
+                .doc('cslv_multi_catalog_v1').get({ source: 'server' });
+            if (!snap.exists)
+                throw new Error('Catalogue absent sur Firebase.');
+            const data = snap.data() || {};
+            if (!Array.isArray(data.events))
+                throw new Error('Catalogue de tournois incomplet.');
+            setCatalog(cleanCategories(data.events));
+            if (Array.isArray(data.fields) && data.fields.length) {
+                catalogHasFields.current = true;
+                setSharedFields(data.fields);
+            }
+            setCloudFromCache(false);
+            setHubStatus('online');
+            setHubMessage('');
+            return true;
+        }
+        catch (error) {
+            setHubMessage('Actualisation des journées indisponible : ' + (error.message || String(error)));
+            return false;
+        }
+    }, []);
+    useEffect(() => {
+        const onResume = () => { if (document.visibilityState !== 'hidden')
+            void refreshServerCatalog(); };
+        const onConnect = () => void refreshServerCatalog();
+        window.addEventListener('pageshow', onResume);
+        window.addEventListener('focus', onResume);
+        window.addEventListener('online', onConnect);
+        document.addEventListener('visibilitychange', onResume);
+        return () => {
+            window.removeEventListener('pageshow', onResume);
+            window.removeEventListener('focus', onResume);
+            window.removeEventListener('online', onConnect);
+            document.removeEventListener('visibilitychange', onResume);
+        };
+    }, [refreshServerCatalog]);
     useEffect(() => {
         if (hubStatus !== 'online' || !dbRef.current)
             return;
@@ -2046,9 +2094,9 @@ function MultiTournamentShell() {
             throw new Error('Hors connexion : attends la reconnexion avant d’enregistrer les scores.');
         if (!hubIsEditor)
             throw new Error('Accès organisateur requis.');
-        if (hubStatus === 'loading' || hubStatus === 'error')
-            throw new Error('Synchronisation indisponible.');
-        if (hubStatus === 'online' && !loadedDocs[eventId])
+        if (hubStatus !== 'online' || !dbRef.current || cloudFromCache)
+            throw new Error('Aucun résultat enregistré : Firebase n’est pas connecté au serveur. Reconnecte-toi et réessaie.');
+        if (!loadedDocs[eventId])
             throw new Error('Le calendrier de cette catégorie est encore en chargement.');
         const scoreFields = ['score1', 'score2', 'pens1', 'pens2'];
         for (const field of scoreFields) {
@@ -2061,21 +2109,24 @@ function MultiTournamentShell() {
         if (dayEntryIsKnockout(edited) && edited.status === 'finished' && Number(edited.score1) === Number(edited.score2) &&
             (edited.pens1 == null || edited.pens2 == null || Number(edited.pens1) === Number(edited.pens2)))
             throw new Error('Match de phase finale à égalité : indique un vainqueur aux tirs au but.');
+        const normalized = { ...edited,
+            score1: dayEntryCleanScore(edited.score1), score2: dayEntryCleanScore(edited.score2),
+            pens1: dayEntryCleanScore(edited.pens1), pens2: dayEntryCleanScore(edited.pens2) };
         const apply = (stored, teamList, rules) => {
-            const latest = stored.find(m => m.id === edited.id);
+            const latest = stored.find(m => m.id === normalized.id);
             if (!latest)
                 throw new Error('Match introuvable : rafraîchis le calendrier.');
             if (dayEntryMatchSignature(latest) !== dayEntryMatchSignature(base))
                 throw new Error('Ce résultat a changé sur un autre appareil. Recharge la page avant de réenregistrer.');
-            const props = { score1: edited.score1, score2: edited.score2, pens1: edited.pens1, pens2: edited.pens2,
-                status: edited.status, mvp: edited.mvp || '', mvpTeamId: edited.mvpTeamId || null,
-                events: [...(latest.events || []).filter(e => e.type !== 'goal'), ...(edited.events || []).filter(e => e.type === 'goal')] };
+            const props = { score1: normalized.score1, score2: normalized.score2, pens1: normalized.pens1, pens2: normalized.pens2,
+                status: normalized.status, mvp: normalized.mvp || '', mvpTeamId: normalized.mvpTeamId || null,
+                events: [...(latest.events || []).filter(e => e.type !== 'goal'), ...(normalized.events || []).filter(e => e.type === 'goal')] };
             const merged = { ...latest, ...props };
             const updated = refreshDayEntryKnockouts(stored.map(m => m.id === latest.id ? merged : m), teamList, rules);
             return { saved: updated.find(m => m.id === latest.id), matches: updated };
         };
         let result = null, finalData = null, auditEvent = null;
-        if (dbRef.current && hubStatus === 'online') {
+        {
             const docRef = dbRef.current.collection('tournaments').doc(tournamentDocId(eventId));
             await dbRef.current.runTransaction(async (tx) => {
                 const snap = await tx.get(docRef);
@@ -2093,13 +2144,8 @@ function MultiTournamentShell() {
                 tx.set(docRef, patch, { merge: true });
             });
         }
-        else {
-            const data = records[eventId] || localRecord(eventId);
-            result = apply(data.matches || [], data.teams || [], data.config || {});
-            const before = (data.matches || []).find(m => m.id === edited.id);
-            auditEvent = csvMatchAudit(eventId, before, result.saved, 'Saisie de la journée');
-            finalData = { ...data, matches: result.matches };
-        }
+        if (!result?.saved || !finalData?.matches)
+            throw new Error('Firebase n’a pas confirmé ce résultat.');
         try {
             localStorage.setItem(tournamentStorageKey(eventId, 'matches'), JSON.stringify(finalData.matches));
         }
@@ -2733,10 +2779,9 @@ function MultiTournamentShell() {
                     React.createElement("span", { className: 'rounded-lg px-2 py-1 text-[11px] font-bold ' + (csvDayIsPublished(catalog, current.date) ? 'bg-emerald-900/60 text-emerald-200' : 'bg-slate-800 text-amber-200') }, csvDayIsPublished(catalog, current.date) ? '● Journée publiée' : '○ Journée masquée'),
                     React.createElement("button", { type: "button", onClick: toggleDayPublication, disabled: hubStatus !== 'online', className: "ml-auto min-h-[38px] px-3 py-1.5 bg-[#39121a] border border-amber-600/50 rounded-lg text-xs font-bold text-amber-200 disabled:opacity-40" }, csvDayIsPublished(catalog, current.date) ? '🙈 Masquer la journée' : '📣 Publier la journée')),
                 publicationNotice && hubIsEditor && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, publicationNotice),
-                isViewer && publicEvents.length > 0 && React.createElement("p", { className: "text-xs text-slate-300" },
-                    "\uD83D\uDCC5 Programme de cette journ\u00E9e uniquement \u00B7 ",
-                    publicEvents.length,
-                    " cat\u00E9gorie(s)"),
+                isViewer && React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
+                    React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Journée en attente de publication'),
+                    React.createElement("button", { type: "button", onClick: () => void refreshServerCatalog(), className: "min-h-[36px] rounded-lg border border-amber-800/50 px-3 py-1 text-amber-200 font-bold" }, "\u21BB Actualiser le programme")),
                 React.createElement("div", { className: "flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar" }, accessibleEvents.map(e => React.createElement("button", { type: "button", key: e.id, onClick: () => selectTournament(e.id), className: 'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border ' +
                         (e.id === current?.id && page === 'tournoi' ? 'bg-amber-500 text-black border-amber-500' : 'bg-[#17080b] text-slate-200 border-red-900/70') },
                     e.category,
@@ -2748,8 +2793,8 @@ function MultiTournamentShell() {
                 React.createElement("div", { className: "flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs", role: "status" },
                     React.createElement("span", { className: netOnline && hubStatus === 'online' && !cloudFromCache ? 'text-emerald-200' : 'text-amber-200' }, netOnline && hubStatus === 'online' && !cloudFromCache ? '🟢 Connecté — données synchronisées' : !netOnline ? '📴 Hors ligne — consultation du dernier programme chargé' : hubStatus === 'online' && cloudFromCache ? '🟡 Dernières données en cache — connexion Firebase à confirmer' :
                         hubStatus === 'loading' ? '⏳ Connexion en cours' : '⚠ Données potentiellement anciennes — Firebase indisponible'),
-                    netOnline && !offlineReady && React.createElement("button", { type: "button", onClick: activateOffline, className: "min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold text-amber-200" }, "\uD83D\uDCE5 Activer le cache hors ligne (appareil priv\u00E9)"),
-                    offlineReady && React.createElement("span", { className: "text-[10px] text-slate-400" }, "Cache autoris\u00E9 sur cet appareil"),
+                    hubIsEditor && netOnline && !offlineReady && React.createElement("button", { type: "button", onClick: activateOffline, className: "min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold text-amber-200" }, "\uD83D\uDCE5 Activer le cache hors ligne (appareil priv\u00E9)"),
+                    hubIsEditor && offlineReady && React.createElement("span", { className: "text-[10px] text-slate-400" }, "Cache autoris\u00E9 sur cet appareil"),
                     netOnline && hubStatus === 'error' && React.createElement("button", { type: "button", onClick: () => window.location.reload(), className: "min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold" }, "\u21BB Reconnecter")),
                 !isViewer && selectedHealthCount > 0 && React.createElement("div", { role: "alert", className: "flex flex-wrap gap-2 justify-between items-center rounded-lg border border-amber-600/60 bg-[#3b180d] px-3 py-2 text-xs text-amber-100" },
                     React.createElement("span", null,
@@ -3207,13 +3252,13 @@ function MultiTournamentShell() {
                 React.createElement("p", { className: "text-sm text-slate-300" }, "Ouvre une premi\u00E8re fois cette journ\u00E9e avec Internet pour enregistrer ses matchs sur cet appareil.")),
             isViewer && current && !((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id)) && (hubStatus === 'loading' || (hubStatus === 'online' && !loadedDocs[current.id])) && React.createElement("div", { role: "status", className: "max-w-lg mx-auto text-center text-amber-200 text-sm p-8" }, "\u23F3 Chargement du calendrier de cette journ\u00E9e\u2026"),
             isViewer && current && hubStatus === 'error' && !csvCachedTournament(current.id) && React.createElement("div", { role: "alert", className: "max-w-lg mx-auto text-center text-rose-200 text-sm p-8" }, "Connexion aux r\u00E9sultats indisponible. V\u00E9rifie ta connexion Internet et actualise la page."),
-            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
+            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
                     const data = eventData(e);
                     return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
                         ...((data.config?.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
-function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount }) {
+function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount }) {
     const [activeTab, setActiveTab] = useState(hubIsEditor ? 'dashboard' : 'matches');
     const userRole = hubIsEditor ? 'editor' : 'viewer';
     const setUserRole = onRoleChange;
@@ -3288,6 +3333,8 @@ function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, 
     const setFields = onFieldsChange;
     const [newFieldName, setNewFieldName] = useState('');
     const [teams, setTeams] = useState(() => {
+        if (tournamentRecord && Array.isArray(tournamentRecord.teams))
+            return tournamentRecord.teams;
         try {
             const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'teams'));
             return s ? JSON.parse(s) : (tournament.id === 'principal' ? DEMO_TEAMS : []);
@@ -3316,6 +3363,8 @@ function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, 
         catch (e) { }
     }, [viewerTeamId, tournament.id]);
     const [matches, setMatches] = useState(() => {
+        if (tournamentRecord && Array.isArray(tournamentRecord.matches))
+            return tournamentRecord.matches;
         try {
             const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'matches'));
             return s ? JSON.parse(s) : [];
@@ -3358,6 +3407,8 @@ function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, 
     const [editingTeamNameModal, setEditingTeamNameModal] = useState(null);
     const [editTeamNameInput, setEditTeamNameInput] = useState('');
     const [config, setConfig] = useState(() => {
+        if (tournamentRecord && tournamentRecord.config && Object.keys(tournamentRecord.config).length)
+            return tournamentRecord.config;
         try {
             const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'config'));
             return s ? JSON.parse(s) : {
@@ -3507,7 +3558,14 @@ function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, 
         return () => { if (interval)
             clearInterval(interval); };
     }, [timerRunning]);
+    const initialLocalSync = useRef(true);
     useEffect(() => {
+        if (initialLocalSync.current) {
+            initialLocalSync.current = false;
+            return;
+        }
+        if (isRemoteUpdate.current)
+            return;
         try {
             localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(config));
             localStorage.setItem(tournamentStorageKey(tournament.id, 'teams'), JSON.stringify(teams));
@@ -3568,6 +3626,17 @@ function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, 
                             setTeams(data.teams);
                         if (data.matches)
                             setMatches(data.matches);
+                        try {
+                            if (data.config)
+                                localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(data.config));
+                            if (data.teams)
+                                localStorage.setItem(tournamentStorageKey(tournament.id, 'teams'), JSON.stringify(data.teams));
+                            if (data.matches)
+                                localStorage.setItem(tournamentStorageKey(tournament.id, 'matches'), JSON.stringify(data.matches));
+                        }
+                        catch (e) {
+                            console.warn('Cache tournoi', e);
+                        }
                         setTimeout(() => { isRemoteUpdate.current = false; }, 300);
                     }
                     setCloudStatus('online');
