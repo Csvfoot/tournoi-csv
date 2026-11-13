@@ -1608,7 +1608,7 @@ function MultiTournamentShell() {
         refreshInFlight.current = true;
         if (manual) {
             setCatalogRefreshing(true);
-            setCatalogRefreshMessage('⏳ Recherche des journées publiées sur Firebase…');
+            setCatalogRefreshMessage('⏳ Recherche des journées publiées…');
         }
         try {
             let db = dbRef.current;
@@ -1650,7 +1650,7 @@ function MultiTournamentShell() {
                 const stamp = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
                 setCatalogRefreshMessage(published.length
                     ? `✅ Actualisé à ${stamp} · ${published.length} journée(s) publiée(s) · ${fresh.filter(e => e.published !== false).length} catégorie(s) visible(s).`
-                    : `ℹ Actualisé à ${stamp} · Aucune journée publiée dans Firebase. Vérifie la publication depuis l'organisateur.`);
+                    : `ℹ Actualisé à ${stamp} · Aucune journée publiée pour le moment.`);
             }
             return true;
         }
@@ -1659,7 +1659,7 @@ function MultiTournamentShell() {
                 ? 'Lecture refusée par les règles Firebase pour ce spectateur. Vérifie les autorisations Firestore.'
                 : (error?.message || String(error));
             if (manual)
-                setCatalogRefreshMessage('⚠ Échec de l’actualisation : ' + detail);
+                setCatalogRefreshMessage('⚠ Actualisation impossible. Vérifie ta connexion ou contacte l’organisateur si le problème persiste.');
             else
                 setHubMessage('Actualisation des journées indisponible : ' + detail);
             return false;
@@ -2883,7 +2883,7 @@ function MultiTournamentShell() {
                     e.category,
                     " ",
                     hubIsEditor && React.createElement("span", { className: "opacity-70 ml-1" }, e.date)))),
-                hubMessage && React.createElement("div", { role: "alert", className: "text-xs text-amber-300" },
+                hubIsEditor && hubMessage && React.createElement("div", { role: "alert", className: "text-xs text-amber-300" },
                     "\u26A0 ",
                     hubMessage),
                 hubIsEditor && React.createElement("div", { className: "flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs", role: "status" },
@@ -2934,7 +2934,7 @@ function MultiTournamentShell() {
                                 backupCandidate.legacyPublication && React.createElement("p", { role: "alert", className: "text-xs text-rose-200" }, "\u26A0 Ancienne sauvegarde : apr\u00E8s restauration, les dates seront publi\u00E9es par d\u00E9faut. V\u00E9rifie chaque journ\u00E9e avant de partager les liens."),
                                 React.createElement("button", { type: "button", onClick: restoreFullBackup, disabled: backupWorking || !cloudBackupReady, className: "min-h-[44px] rounded-xl bg-rose-800 px-4 text-xs font-black text-white disabled:opacity-40" }, backupWorking ? 'Restauration…' : '⚠ Remplacer toutes les données')))),
                     backupNotice && React.createElement("p", { className: "text-xs font-semibold text-amber-200", role: "status" }, backupNotice)),
-                React.createElement("div", { className: "text-[11px] text-slate-400" }, hubStatus === 'online' ? '☁ Catégories synchronisées avec Firebase' : hubStatus === 'loading' ? '⏳ Chargement du planning commun…' : 'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'),
+                hubIsEditor && React.createElement("div", { className: "text-[11px] text-slate-400" }, hubStatus === 'online' ? '☁ Catégories synchronisées avec Firebase' : hubStatus === 'loading' ? '⏳ Chargement du planning commun…' : 'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'),
                 hubIsEditor && editingEvent && React.createElement("div", { className: "bg-[#130508] p-3 sm:p-4 border border-amber-900/40 rounded-xl space-y-3", role: "form", "aria-label": "Modifier l'onglet du tournoi" },
                     React.createElement("h3", { className: "text-sm text-amber-300 font-bold" },
                         "\u270F\uFE0F Modifier l'onglet ",
@@ -3314,7 +3314,7 @@ function MultiTournamentShell() {
                         })))),
             !isViewer && React.createElement("div", { className: "border border-red-950 rounded-lg p-3 text-xs text-slate-400" }, "Pour modifier un horaire, ouvre la cat\u00E9gorie concern\u00E9e puis l\u2019onglet \u00AB Matchs \u00BB. La r\u00E9servation d\u2019une finale bloque tous les terrains du m\u00EAme jour.")) : React.createElement(React.Fragment, null,
             isViewer && !current && netOnline && !catalogSynced && (hubStatus === 'loading' || hubStatus === 'online') &&
-                React.createElement("main", { role: "status", className: "max-w-xl mx-auto px-4 py-14 text-center text-sm text-amber-200" }, "\u23F3 V\u00E9rification des journ\u00E9es publi\u00E9es sur Firebase\u2026"),
+                React.createElement("main", { role: "status", className: "max-w-xl mx-auto px-4 py-14 text-center text-sm text-amber-200" }, "\u23F3 Chargement des journ\u00E9es publi\u00E9es\u2026"),
             isViewer && !current && !(netOnline && !catalogSynced && (hubStatus === 'loading' || hubStatus === 'online')) && React.createElement("main", { className: "max-w-xl mx-auto px-4 py-14 text-center space-y-4", role: "status" },
                 React.createElement("div", { className: "text-5xl" }, "\uD83D\uDCC5"),
                 React.createElement("h2", { className: "text-xl font-black text-amber-300" }, "Programme non disponible"),
@@ -4894,8 +4894,8 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             React.createElement("span", { className: `hidden sm:inline text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${userRole === 'editor' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-red-500/20 text-red-300 border border-red-500/30'}` }, userRole === 'editor' ? 'Organisateur' : 'Spectateur')),
                         React.createElement("div", { className: "flex items-center gap-2 text-[11px] text-amber-400 font-semibold" },
                             React.createElement("span", { className: userRole === 'viewer' ? 'hidden sm:inline' : '' }, "CS La Verpilli\u00E8re 1939"),
-                            React.createElement("span", { className: userRole === 'viewer' ? 'hidden sm:inline text-slate-400' : 'text-slate-400' }, "\u2022"),
-                            React.createElement("span", { className: cloudStatus === 'online' ? 'text-emerald-400 font-bold flex items-center gap-1' : 'text-slate-400' },
+                            userRole === 'editor' && React.createElement("span", { className: "text-slate-400" }, "\u2022"),
+                            userRole === 'editor' && React.createElement("span", { className: cloudStatus === 'online' ? 'text-emerald-400 font-bold flex items-center gap-1' : 'text-slate-400' },
                                 cloudStatus === 'online' && React.createElement("span", { className: "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" }),
                                 cloudStatus === 'online' ? 'En direct (Cloud)' : (userRole === 'viewer' ? React.createElement("span", null, "Hors ligne") :
                                     React.createElement("button", { onClick: () => setFirebaseModalOpen(true), className: "hover:text-amber-400 underline decoration-dotted text-slate-400 font-medium", title: "Cliquer pour configurer ou reconnecter le Cloud" }, "Mode Local (\u26A1 Reconnecter)")))))),

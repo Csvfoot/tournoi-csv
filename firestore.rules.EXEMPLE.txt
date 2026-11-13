@@ -1,0 +1,29 @@
+// TOURNOI CSV V5.8 — EXEMPLE À ADAPTER, NE PAS PUBLIER TEL QUEL
+// La protection réelle ne fonctionne qu'après publication de ces règles
+// dans Firebase Console > Firestore Database > Rules.
+// Crée d'abord le compte organisateur Firebase Email/Password, vérifie son
+// adresse e-mail, puis recopie son UID depuis Authentication > Users.
+// Tu peux autoriser plusieurs UID si plusieurs dirigeants ont leur compte.
+// Ne déploie pas la valeur de démonstration ci-dessous : cela bloquerait
+// les écritures de tous les organisateurs.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOrganizer() {
+      return request.auth != null
+          && request.auth.uid in [
+            'REMPLACER_PAR_UID_DU_COMPTE_ORGANISATEUR'
+          ]
+          && request.auth.token.email_verified == true;
+    }
+
+    match /tournaments/{documentId} {
+      // Lecture publique pour les spectateurs.
+      allow get, list: if true;
+      // Écriture uniquement pour le compte organisateur vérifié.
+      allow create, update, delete: if isOrganizer();
+    }
+    // Fusionne avec tes autres règles existantes si tu as d'autres collections.
+  }
+}
