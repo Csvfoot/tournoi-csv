@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Tournoi CS La Verpillière - V5.5</title>
+  <title>Tournoi CS La Verpillière — V5.7</title>
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=20261106b">
   <link rel="icon" type="image/png" href="./apple-touch-icon.png?v=20261106b">
   <meta name="apple-mobile-web-app-title" content="Tournoi CSV">
@@ -82,6 +82,52 @@
   <div id="root"></div>
 
   <script type="text/babel">    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    const CSV_APP_VERSION = '5.7';
+    const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
+    const CSV_BACKUP_VERSION = 1;
+
+    // Protection des données importées : aucun script et aucune opération Firebase
+    // ne sont déclenchés pendant la lecture ou la validation d'un fichier.
+    function verifyCsvBackup(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+          raw.format !== CSV_BACKUP_FORMAT || raw.version !== CSV_BACKUP_VERSION)
+        throw new Error('Ce fichier n’est pas une sauvegarde Tournoi CSV V5.7 reconnue.');
+      if (!Array.isArray(raw.catalog) || !raw.catalog.length || raw.catalog.length > 350 ||
+          !Array.isArray(raw.fields) || !raw.fields.length || !raw.records ||
+          typeof raw.records !== 'object' || Array.isArray(raw.records))
+        throw new Error('La sauvegarde est incomplète (catégories, terrains ou données).');
+      const ids = new Set();
+      const cleaned = raw.catalog.map(e => {
+        if (!e || typeof e !== 'object' || typeof e.id !== 'string' ||
+            !/^[a-zA-Z0-9_-]{1,100}$/.test(e.id) || ids.has(e.id) ||
+            typeof e.category !== 'string' || typeof e.title !== 'string' ||
+            typeof e.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.date) ||
+            !Number.isFinite(Date.parse(e.date+'T12:00:00')))
+          throw new Error('Une catégorie de la sauvegarde est invalide ou en double.');
+        ids.add(e.id);
+        return {id:e.id,category:e.category.slice(0,60),title:e.title.slice(0,120),date:e.date};
+      });
+      if (!ids.has('principal')) throw new Error('Le tournoi Principal est absent de cette sauvegarde.');
+      if (raw.fields.length > 100 || raw.fields.some(f=> !f || typeof f.id !== 'string' ||
+          typeof f.name !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(f.id)))
+        throw new Error('La liste des terrains est invalide.');
+      const restored = Object.create(null);
+      for (const event of cleaned) {
+        if (!Object.prototype.hasOwnProperty.call(raw.records,event.id))
+          throw new Error('Données manquantes pour « '+event.category+' ».');
+        const data = raw.records[event.id];
+        if (!data || typeof data !== 'object' || !data.config ||
+            typeof data.config !== 'object' || Array.isArray(data.config) ||
+            !Array.isArray(data.teams) || !Array.isArray(data.matches) ||
+            data.teams.length > 5000 || data.matches.length > 20000)
+          throw new Error('Données incorrectes pour « '+event.category+' ».');
+        restored[event.id] = {config:data.config,teams:data.teams,matches:data.matches};
+      }
+      return {format:CSV_BACKUP_FORMAT,version:CSV_BACKUP_VERSION,
+        exportedAt:typeof raw.exportedAt==='string'?raw.exportedAt:'',
+        catalog:cleaned,fields:raw.fields,records:restored};
+    }
 
     const OFFICIAL_PUBLIC_URL = 'https://csvfoot.github.io/tournoi-csv/';
 
@@ -1416,6 +1462,10 @@
       }}));
       const [hubStatus,setHubStatus] = useState('local');
       const [hubMessage,setHubMessage] = useState('');
+      const [showBackupPanel,setShowBackupPanel] = useState(false);
+      const [backupCandidate,setBackupCandidate] = useState(null);
+      const [backupNotice,setBackupNotice] = useState('');
+      const [backupWorking,setBackupWorking] = useState(false);
       const [showCreate,setShowCreate] = useState(false);
       const [editingEvent,setEditingEvent] = useState(null);
       const [categoryInput,setCategoryInput] = useState('U11');
@@ -1523,6 +1573,98 @@
             .catch(err=>setHubMessage('Terrains non synchronisés : '+err.message));
         }
       },[]);
+      // Sauvegarde totale : ne jamais prétendre exporter un cloud complet si
+      // l'un des documents de tournoi n'a pas été chargé.
+      const cloudBackupReady = hubStatus==='online' && catalog.every(e=>loadedDocs[e.id]);
+      const exportFullBackup=()=>{
+        if(isViewer)return;
+        if(hubStatus==='loading' || hubStatus==='error' || (hubStatus==='online' && !cloudBackupReady)){
+          setBackupNotice('Impossible d’exporter un ensemble fiable : attends que tous les tournois soient synchronisés.');return;
+        }
+        const allRecords=Object.create(null);
+        for(const event of catalog){
+          const record=records[event.id]||localRecord(event.id);
+          allRecords[event.id]={config:record.config||{},teams:record.teams||[],matches:record.matches||[]};
+        }
+        const doc={format:CSV_BACKUP_FORMAT,version:CSV_BACKUP_VERSION,
+          appVersion:CSV_APP_VERSION,exportedAt:new Date().toISOString(),
+          catalog,fields:sharedFields,records:allRecords};
+        try{
+          verifyCsvBackup(doc);
+          const blob=new Blob([JSON.stringify(doc,null,2)],{type:'application/json'});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement('a');a.href=url;
+          a.download='tournoi-csv-sauvegarde-'+TODAY_LOCAL()+'.json';
+          document.body.appendChild(a);a.click();a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url),1500);
+          setBackupNotice('Fichier de sauvegarde préparé : conserve-le dans un lieu sûr. Il contient les codes organisateur.'+(hubStatus==='local'?' ATTENTION : sans Firebase, seuls les fichiers présents dans cet appareil ont pu être exportés.':''));
+        }catch(err){setBackupNotice('Sauvegarde impossible : '+(err.message||String(err)));}
+      };
+      const importBackupFile=async(file)=>{
+        setBackupCandidate(null);
+        if(!file)return;
+        try{
+          if(file.size > 25*1024*1024)throw new Error('Fichier trop volumineux (limite 25 Mo).');
+          const value=verifyCsvBackup(JSON.parse(await file.text()));
+          const matchCount=value.catalog.reduce((n,e)=>n+value.records[e.id].matches.length,0);
+          const teamCount=value.catalog.reduce((n,e)=>n+value.records[e.id].teams.length,0);
+          setBackupCandidate(value);
+          setBackupNotice('Fichier valide : '+value.catalog.length+' tournoi(s), '+teamCount+
+            ' équipe(s), '+matchCount+' rencontre(s). Vérifie les informations avant restauration.');
+        }catch(err){setBackupNotice('Fichier refusé : '+(err.message||String(err)));}
+      };
+      const restoreFullBackup=async()=>{
+        if(isViewer || !backupCandidate || backupWorking)return;
+        if(hubStatus!=='online' || !dbRef.current || !cloudBackupReady){
+          setBackupNotice('Restauration bloquée : Firebase et tous les tournois doivent être synchronisés.');return;
+        }
+        if(backupCandidate.catalog.length+catalog.length+1 > 450){
+          setBackupNotice('Trop de catégories pour une restauration atomique : contacte un administrateur.');return;
+        }
+        const verified=verifyCsvBackup(backupCandidate);
+        if(window.prompt('Cette opération REMPLACE les catégories, terrains, équipes, résultats et codes PIN actuels.\nTape RESTAURER pour confirmer :')!=='RESTAURER')return;
+        if(!window.confirm('Dernière confirmation : remplacer toutes les données de tous les tournois sur Firebase ?'))return;
+        setBackupWorking(true);setBackupNotice('Restauration des tournois en cours…');
+        try{
+          // Un seul lot Firebase garantit que le catalogue et les données
+          // basculent ensemble (ou que rien ne soit modifié en cas d’erreur).
+          const batch=dbRef.current.batch();
+          const collection=dbRef.current.collection('tournaments');
+          const future=new Set(verified.catalog.map(e=>e.id));
+          for(const oldEvent of catalog){
+            if(!future.has(oldEvent.id))batch.delete(collection.doc(tournamentDocId(oldEvent.id)));
+          }
+          for(const event of verified.catalog){
+            batch.set(collection.doc(tournamentDocId(event.id)),{
+              ...verified.records[event.id],fields:verified.fields,
+              updatedAt:new Date().toISOString()});
+          }
+          batch.set(collection.doc('cslv_multi_catalog_v1'),{
+            events:verified.catalog,fields:verified.fields,
+            updatedAt:new Date().toISOString()},{merge:true});
+          await batch.commit();
+          // Le cache local n'est changé qu'après une écriture Firebase réussie.
+          for(const previous of catalog){
+            if(!future.has(previous.id))for(const kind of ['config','teams','matches'])
+              localStorage.removeItem(tournamentStorageKey(previous.id,kind));
+          }
+          for(const event of verified.catalog){
+            for(const kind of ['config','teams','matches'])
+              localStorage.setItem(tournamentStorageKey(event.id,kind),
+                JSON.stringify(verified.records[event.id][kind]));
+          }
+          localStorage.setItem('cslv_multi_catalog_v1',JSON.stringify(verified.catalog));
+          localStorage.setItem('cslv_shared_fields_v1',JSON.stringify(verified.fields));
+          setCatalog(verified.catalog);setSharedFields(verified.fields);
+          setRecords(verified.records);setLoadedDocs(Object.fromEntries(verified.catalog.map(e=>[e.id,true])));
+          setSelectedId(verified.catalog.find(e=>e.id===selectedId)?.id||'principal');
+          setDateFilter(verified.catalog[0].date);
+          setPage('tournoi');setEditingEvent(null);setShowCreate(false);
+          setResetEpoch(x=>x+1);setBackupCandidate(null);
+          setBackupNotice('Restauration terminée sur Firebase et sur cet appareil. Vérifie tes calendriers.');
+        }catch(err){setBackupNotice('Aucune restauration appliquée : '+(err.message||String(err)));}
+        finally{setBackupWorking(false);}
+      };
       const current=catalog.find(e=>e.id===selectedId)||catalog[0];
       const selectTournament=id=>{
         setSelectedId(id);setPage('tournoi');
@@ -2057,18 +2199,23 @@
               </div>
               <div className="flex items-center gap-2">
                 {!isViewer && <button type="button" onClick={()=>{setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
-                  className="min-h-[42px] px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
+                  className="hidden xl:inline-flex items-center min-h-[42px] px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
                   {page==='planning'?'← Tournoi':'📅 Planning général'}
                 </button>}
                 {!isViewer && <button type="button" onClick={()=>{if(page==='tournoi')setDateFilter(selectedDate);setPage(page==='dayEntry'?'tournoi':'dayEntry');}}
-                  className={'min-h-[42px] px-3 py-2 rounded-lg text-xs font-black border '+(page==='dayEntry'?'bg-amber-500 text-black border-amber-400':'bg-[#39121a] text-amber-200 border-amber-700/50')}>
+                  className={'hidden xl:inline-flex items-center min-h-[42px] px-3 py-2 rounded-lg text-xs font-black border '+(page==='dayEntry'?'bg-amber-500 text-black border-amber-400':'bg-[#39121a] text-amber-200 border-amber-700/50')}>
                   {page==='dayEntry'?'← Tournoi':'📝 Saisie journée'}
                 </button>}
+                {!isViewer && page!=='tournoi' && <button type="button" onClick={()=>setPage('tournoi')}
+                  className="xl:hidden min-h-[42px] rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-black">← Retour au tournoi</button>}
+                {hubIsEditor && <button type="button" onClick={()=>{setShowBackupPanel(v=>!v);setBackupCandidate(null);setBackupNotice('');}}
+                  className="min-h-[42px] rounded-lg border border-emerald-800/60 bg-[#12302b] px-3 py-2 text-xs font-bold text-emerald-100"
+                  aria-expanded={showBackupPanel}>💾 <span className="hidden sm:inline">Sauvegarde</span></button>}
                 {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);setEditingEvent(null);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
                 {hubIsEditor && current && <button type="button" onClick={()=>{setEditingEvent({...current});setShowCreate(false);}}
                   className="px-3 py-2 rounded-lg text-xs font-bold border border-red-900/70 bg-[#18090d] text-amber-200"
-                  title="Renommer cet onglet et modifier sa date">✎ Modifier</button>}
+                  title="Gérer ce tournoi : renommer, dupliquer, supprimer">✎ Gérer</button>}
               </div>
             </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -2079,6 +2226,34 @@
               </button>)}
             </div>
             {hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
+            {hubIsEditor && showBackupPanel && <section aria-label="Sauvegarder et restaurer tous les tournois" className="bg-[#130b12] rounded-2xl p-3 sm:p-5 border border-emerald-800/50 space-y-3">
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div><h3 className="font-black text-emerald-200 text-sm">💾 Sauvegarde et restauration</h3>
+                  <p className="text-xs text-slate-300 mt-1">Toutes les catégories, équipes, joueurs, rencontres, scores, réservations et terrains.</p></div>
+                <button type="button" onClick={()=>setShowBackupPanel(false)} aria-label="Fermer la sauvegarde" className="text-xs text-slate-300 border border-slate-700 rounded-lg p-2">✕ Fermer</button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-[#082019] border border-emerald-900 rounded-xl p-3 space-y-2">
+                  <div className="font-bold text-emerald-200 text-sm">1. Télécharger une sauvegarde</div>
+                  <p className="text-xs text-slate-300">Copie JSON de tous tes tournois. Contient les codes PIN : ne partage pas ce fichier.</p>
+                  <button type="button" onClick={exportFullBackup} disabled={hubStatus==='loading'||hubStatus==='error'||(hubStatus==='online'&&!cloudBackupReady)}
+                    className="min-h-[44px] rounded-xl bg-emerald-600 text-white text-xs font-black px-4 disabled:opacity-40">⬇ Télécharger le fichier JSON</button>
+                </div>
+                <div className="bg-[#2c1115] border border-red-900 rounded-xl p-3 space-y-2">
+                  <div className="font-bold text-rose-200 text-sm">2. Restaurer une ancienne sauvegarde</div>
+                  <p className="text-xs text-slate-300">Remplace toutes les données du site. Une connexion Firebase active est obligatoire.</p>
+                  <input type="file" accept=".json,application/json" aria-label="Choisir une sauvegarde Tournoi CSV"
+                    onChange={e=>importBackupFile(e.target.files?.[0])}
+                    className="block max-w-full text-xs text-slate-200 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-rose-900 file:text-white" />
+                  {backupCandidate && <div className="space-y-2">
+                    <p className="text-xs text-amber-200">Sauvegarde du {backupCandidate.exportedAt?new Date(backupCandidate.exportedAt).toLocaleString('fr-FR'):'jour non précisé'} : {backupCandidate.catalog.length} catégories et {backupCandidate.catalog.reduce((n,e)=>n+backupCandidate.records[e.id].matches.length,0)} matchs.</p>
+                    <button type="button" onClick={restoreFullBackup} disabled={backupWorking||!cloudBackupReady}
+                      className="min-h-[44px] rounded-xl bg-rose-800 px-4 text-xs font-black text-white disabled:opacity-40">{backupWorking?'Restauration…':'⚠ Remplacer toutes les données'}</button>
+                  </div>}
+                </div>
+              </div>
+              {backupNotice && <p className="text-xs font-semibold text-amber-200" role="status">{backupNotice}</p>}
+            </section>}
             <div className="text-[11px] text-slate-400">{hubStatus==='online'?'☁ Catégories synchronisées avec Firebase':hubStatus==='loading'?'⏳ Chargement du planning commun…':'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>
             {hubIsEditor && editingEvent && <div className="bg-[#130508] p-3 sm:p-4 border border-amber-900/40 rounded-xl space-y-3" role="form" aria-label="Modifier l'onglet du tournoi">
               <h3 className="text-sm text-amber-300 font-bold">✏️ Modifier l'onglet {editingEvent.category}</h3>
@@ -2268,13 +2443,20 @@
           {current && <TournamentApp key={current.id+'-'+resetEpoch} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
             otherEvents={otherEvents} onTournamentUpdate={updateRecord} hubReady={cloudReady}
             hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}
-            organizerLinkPending={organizerLinkPending && !hubIsEditor} onOrganizerLinkHandled={acknowledgeOrganizerLink}/>}
+            organizerLinkPending={organizerLinkPending && !hubIsEditor} onOrganizerLinkHandled={acknowledgeOrganizerLink}
+            onOpenDayEntry={()=>{setDateFilter(selectedDate);setPage('dayEntry');}}
+            onOpenPlanning={()=>{setDateFilter(selectedDate);setPage('planning');}}
+            onOpenBackup={()=>{setShowBackupPanel(true);setBackupCandidate(null);setBackupNotice('');window.scrollTo({top:0,behavior:'smooth'});}}
+            hubStatus={hubStatus} hubConflictsCount={catalog.filter(e=>e.date===selectedDate).flatMap(e=>{
+              const data=eventData(e);return [...(data.matches||[]).filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:e.id,kind:'match'})),
+                ...((data.config?.reservedSlots)||[]).map(m=>({...m,eventId:e.id,kind:'réservation'}))];
+            }).reduce((sum,m,i,arr)=>sum+(arr.slice(i+1).some(o=>planningConflict(m,o))?1:0),0)}/>}
         </>}
       </div>;
     }
 
-    function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled }) {
-      const [activeTab, setActiveTab] = useState('matches');
+    function TournamentApp({ tournament, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount }) {
+      const [activeTab, setActiveTab] = useState(hubIsEditor ? 'dashboard' : 'matches');
       // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
       const userRole = hubIsEditor ? 'editor' : 'viewer';
       const setUserRole = onRoleChange;
@@ -3821,6 +4003,8 @@
 
             {/* Barre de navigation des onglets */}
             <div className={`max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25 hidden xl:flex`}>
+              {userRole === 'editor' && <button onClick={()=>setActiveTab('dashboard')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${activeTab==='dashboard'?'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow':'text-zinc-400 hover:text-white'}`}>🏠 Accueil</button>}
               {userRole === 'editor' && (
                 <button
                   onClick={() => setActiveTab('config')}
@@ -3931,7 +4115,8 @@
                    <div className="grid grid-cols-2 gap-2">
                      {[
                        {id:'config',icon:'⚙️',text:'Réglages'},
-                       ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Phases finales'}] : []),
+                       {id:'teams',icon:'👥',text:'Équipes'},
+                       {id:'standings',icon:'📊',text:'Poules'},
                        {id:'finalStandings',icon:'🥇',text:'Classement final'},
                        {id:'stats',icon:'📈',text:'Statistiques'}
                      ].map(tab => (
@@ -3940,7 +4125,8 @@
                          {tab.icon} {tab.text}
                        </button>
                      ))}
-                     <button type="button" onClick={() => { setShowTimerModal(true); setOrganizerMoreOpen(false); }} className="min-h-[46px] rounded-xl border border-red-900/50 bg-[#2a1014] text-left px-2 text-xs font-semibold text-slate-100">⏱ Chronomètre</button>
+                     <button type="button" onClick={() => {onOpenPlanning();setOrganizerMoreOpen(false);}} className="min-h-[46px] rounded-xl border border-red-900/50 bg-[#2a1014] text-left px-2 text-xs font-semibold text-slate-100">📅 Planning général</button>
+                     <button type="button" onClick={() => {onOpenBackup();setOrganizerMoreOpen(false);}} className="min-h-[46px] rounded-xl border border-emerald-900/50 bg-[#12302b] text-left px-2 text-xs font-semibold text-emerald-100">💾 Sauvegarde</button>
                      <button type="button" onClick={() => { setIsShareModalOpen(true); setOrganizerMoreOpen(false); }} className="min-h-[46px] rounded-xl border border-red-900/50 bg-[#2a1014] text-left px-2 text-xs font-semibold text-slate-100">🔗 Partager</button>
                      <button type="button" onClick={() => { setUserRole('viewer'); setActiveTab('matches'); setOrganizerMoreOpen(false); }} className="col-span-2 min-h-[44px] rounded-xl border border-red-900/50 bg-[#2a1014] text-xs font-semibold text-amber-200">👁 Passer en vue spectateur</button>
                    </div>
@@ -3950,12 +4136,12 @@
                  style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
                  <div className="grid grid-cols-5 gap-1 px-2 pt-2">
                    {[
+                     {id:'dashboard',icon:'🏠',text:'Accueil'},
                      {id:'matches',icon:'📅',text:'Matchs'},
-                     {id:'teams',icon:'👥',text:'Équipes'},
-                     {id:'standings',icon:'📊',text:'Poules'},
-                     ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Finales'}] : [{id:'config',icon:'⚙️',text:'Réglages'}])
+                     {id:'dayEntry',icon:'📝',text:'Saisie'},
+                     ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Finales'}] : [{id:'standings',icon:'📊',text:'Poules'}])
                    ].map(tab=><button type="button" key={tab.id} aria-current={activeTab===tab.id?'page':undefined}
-                     onClick={()=>{setActiveTab(tab.id);setOrganizerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}}
+                     onClick={()=>{if(tab.id==='dayEntry')onOpenDayEntry();else setActiveTab(tab.id);setOrganizerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}}
                      className={`min-w-0 min-h-[54px] rounded-xl px-1 py-1.5 flex flex-col items-center justify-center gap-1 text-[10px] font-bold touch-manipulation ${activeTab===tab.id?'bg-amber-500 text-black':'text-slate-200'}`}>
                      <span className="text-xl leading-none" aria-hidden="true">{tab.icon}</span>
                      <span className="truncate w-full text-center">{tab.text}</span>
@@ -3974,6 +4160,50 @@
           <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6">
 
             
+            {/* Accueil organisateur : informations de pilotage, sans duplications de boutons. */}
+            {activeTab === 'dashboard' && userRole === 'editor' && (
+              <section className="space-y-4" aria-label="Tableau de bord organisateur">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><h2 className="text-xl font-black text-amber-300">🏠 Tableau de bord</h2>
+                    <p className="text-xs text-slate-400 mt-1">{tournament.category} · {tournament.date} · Tournoi CSV V{CSV_APP_VERSION}</p></div>
+                  <span className={`rounded-full px-3 py-2 border text-xs font-bold ${hubStatus==='online'?'text-emerald-200 border-emerald-700 bg-emerald-950/50':'text-amber-200 border-amber-900 bg-amber-950/40'}`}>
+                    {hubStatus==='online'?'☁ Synchronisé':hubStatus==='loading'?'⏳ Synchronisation…':'⚠ Mode local / connexion à vérifier'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                  {[
+                    {label:'À venir',value:matches.filter(m=>m.status!=='finished'&&m.status!=='live').length,icon:'📅'},
+                    {label:'En direct',value:matches.filter(m=>m.status==='live').length,icon:'🟢'},
+                    {label:'Terminés',value:matches.filter(m=>m.status==='finished').length,icon:'✅'}
+                  ].map(item=><div key={item.label} className="bg-[#190a0d] rounded-xl border border-red-900/60 p-3 sm:p-5 text-center">
+                    <div className="text-[11px] text-slate-300">{item.icon} {item.label}</div>
+                    <div className="text-2xl sm:text-3xl text-amber-300 font-black mt-1 tabular-nums">{item.value}</div>
+                  </div>)}
+                </div>
+                {hubConflictsCount>0 && <button type="button" onClick={onOpenPlanning}
+                  className="w-full text-left rounded-xl border border-rose-700/70 bg-rose-950/40 text-rose-100 text-xs font-semibold p-3">
+                    ⚠ {hubConflictsCount} conflit(s) potentiel(s) sur les terrains communs — Voir le planning général
+                </button>}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button type="button" onClick={onOpenDayEntry} className="min-h-[48px] rounded-xl bg-amber-500 text-black text-xs sm:text-sm font-black p-3">📝 Saisie journée</button>
+                  <button type="button" onClick={()=>setActiveTab('matches')} className="min-h-[48px] rounded-xl bg-[#33121a] border border-amber-700/40 text-amber-200 text-xs sm:text-sm font-bold p-3">📅 Calendrier & scores</button>
+                  <button type="button" onClick={onOpenPlanning} className="min-h-[48px] rounded-xl bg-[#33121a] border border-amber-700/40 text-amber-200 text-xs sm:text-sm font-bold p-3">🗺 Planning général</button>
+                  <button type="button" onClick={onOpenBackup} className="min-h-[48px] rounded-xl bg-[#12302b] border border-emerald-800 text-emerald-100 text-xs sm:text-sm font-bold p-3">💾 Sauvegardes</button>
+                </div>
+                <div className="rounded-2xl border border-red-900/60 bg-[#150709] p-3 sm:p-5 space-y-3">
+                  <h3 className="text-sm font-black text-amber-300">📍 Prochaines rencontres programmées</h3>
+                  {matches.filter(m=>m.status!=='finished'&&m.startTime).sort((a,b)=>a.startTime.localeCompare(b.startTime)).slice(0,6).length===0 ?
+                    <p className="text-xs text-slate-400">Aucune rencontre à venir dans cette catégorie.</p> :
+                    matches.filter(m=>m.status!=='finished'&&m.startTime).sort((a,b)=>a.startTime.localeCompare(b.startTime)).slice(0,6).map(m=><div key={m.id}
+                      className="flex flex-wrap items-center justify-between gap-2 border-b border-red-950/70 pb-2 text-xs">
+                      <span className="font-bold text-amber-300">{m.startTime} · {m.fieldName||fields.find(f=>f.id===m.fieldId)?.name||'Terrain'}</span>
+                      <span className="text-white">{getTeam(m.team1Id).name} — {getTeam(m.team2Id).name}</span>
+                      <span className="text-slate-300">{m.status==='live'?'🟢 En direct':'À venir'}</span>
+                    </div>)}
+                </div>
+              </section>
+            )}
+
             {/* ONGLET 1 : CONFIGURATION */}
             {activeTab === 'config' && userRole === 'editor' && (
               <div className="space-y-6">
@@ -3984,7 +4214,9 @@
                       <p className="text-xs text-slate-400">Configurez le nom, la formule, les poules multiples, terrains et horaires.</p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    <details className="w-full sm:w-auto rounded-xl border border-rose-900/50 bg-[#220c12] p-2">
+                      <summary className="cursor-pointer select-none text-xs font-bold text-rose-200 min-h-[30px] flex items-center">⚠ Opérations sensibles</summary>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         onClick={handleResetScheduleOnly}
                         className="px-3 py-1.5 bg-[#25090d] hover:bg-[#380e14] text-amber-400 border border-amber-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1"
@@ -3999,7 +4231,8 @@
                       >
                         ⚠️ Réinitialiser tournoi
                       </button>
-                    </div>
+                      </div>
+                    </details>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
