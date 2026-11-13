@@ -1,6 +1,6 @@
-// Tournoi CSV V6.0 - application shell cache. Never cache Firestore/auth API responses.
-const CACHE = 'tournoi-csv-shell-v6.1';
-const CORE = ['./','./index.html','./app.js?v=6.1','./styles.css?v=6.1','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
+// Tournoi CSV V6.2 - application shell cache. Never cache Firestore/auth API responses.
+const CACHE = 'tournoi-csv-shell-v6.2';
+const CORE = ['./','./index.html','./app.js?v=6.2','./styles.css?v=6.2','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
 const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',

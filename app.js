@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.1';
+const CSV_APP_VERSION = '6.2';
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
 function verifyCsvBackup(raw) {
@@ -1452,9 +1452,13 @@ function MultiTournamentShell() {
     }, []);
     const [catalog, setCatalog] = useState(() => cleanCategories(readLocalJson('cslv_multi_catalog_v1', initialTournaments())));
     const [selectedId, setSelectedId] = useState(() => urlTournament || readLocalJson('cslv_last_tournament_v1', 'principal'));
+    const [viewerDayChoice, setViewerDayChoice] = useState(null);
+    const lockedViewerDay = csvValidDay(params.get('day')) ? params.get('day') : null;
+    const publishedDays = [...new Set(catalog.filter(e => csvDayIsPublished(catalog, e.date)).map(e => e.date))].sort();
     const loginTargetDay = organizerLinkPending && !hubIsEditor
         ? catalog.find(e => e.id === selectedId)?.date : null;
-    const viewerDay = csvPublicDay(catalog, loginTargetDay || params.get('day'), params.has('tournament') ? selectedId : null);
+    const viewerDay = lockedViewerDay || (viewerDayChoice && publishedDays.includes(viewerDayChoice) ? viewerDayChoice :
+        csvPublicDay(catalog, loginTargetDay, params.has('tournament') ? selectedId : null));
     const publicEvents = csvDayIsPublished(catalog, viewerDay)
         ? catalog.filter(e => e.date === viewerDay && e.published !== false) : [];
     const accessibleEvents = hubIsEditor ? catalog : publicEvents;
@@ -1470,6 +1474,8 @@ function MultiTournamentShell() {
     const [hubStatus, setHubStatus] = useState('local');
     const [netOnline, setNetOnline] = useState(() => navigator.onLine !== false);
     const [cloudFromCache, setCloudFromCache] = useState(false);
+    const [catalogSynced, setCatalogSynced] = useState(false);
+    const catalogServerSeen = useRef(false);
     const [offlineReady, setOfflineReady] = useState(() => csvTrustedOffline());
     const [shortLimit, setShortLimit] = useState(25);
     const [longLimit, setLongLimit] = useState(85);
@@ -1555,8 +1561,9 @@ function MultiTournamentShell() {
                 unsubscribe = db.collection('tournaments').doc('cslv_multi_catalog_v1').onSnapshot({ includeMetadataChanges: true }, doc => {
                     if (cancelled)
                         return;
-                    setCloudFromCache(Boolean(doc.metadata?.fromCache));
-                    if (doc.exists) {
+                    const fromCache = Boolean(doc.metadata?.fromCache);
+                    setCloudFromCache(fromCache);
+                    if (doc.exists && (!fromCache || !catalogServerSeen.current)) {
                         const data = doc.data();
                         if (Array.isArray(data.events))
                             setCatalog(cleanCategories(data.events));
@@ -1565,9 +1572,12 @@ function MultiTournamentShell() {
                             setSharedFields(data.fields);
                         }
                     }
-                    setHubStatus('online');
-                    if (!doc.metadata?.fromCache)
+                    if (!fromCache) {
+                        catalogServerSeen.current = true;
+                        setCatalogSynced(true);
                         setHubMessage('');
+                    }
+                    setHubStatus('online');
                 }, err => { setHubStatus('error'); setHubMessage('Catalogue non synchronisé : ' + err.message); });
             }
             catch (err) {
@@ -1596,7 +1606,9 @@ function MultiTournamentShell() {
                 catalogHasFields.current = true;
                 setSharedFields(data.fields);
             }
+            catalogServerSeen.current = true;
             setCloudFromCache(false);
+            setCatalogSynced(true);
             setHubStatus('online');
             setHubMessage('');
             return true;
@@ -1829,10 +1841,33 @@ function MultiTournamentShell() {
         nextParams.set('tournament', id);
         if (!hubIsEditor) {
             nextParams.set('role', 'viewer');
-            nextParams.set('day', viewerDay);
+            if (lockedViewerDay)
+                nextParams.set('day', lockedViewerDay);
+            else
+                nextParams.delete('day');
         }
         else
             nextParams.delete('day');
+        const search = nextParams.toString();
+        window.history.replaceState({}, '', window.location.pathname + (search ? '?' + search : '') + window.location.hash);
+    };
+    const selectPublicDay = date => {
+        if (lockedViewerDay || !publishedDays.includes(date))
+            return;
+        const event = catalog.find(e => e.date === date && e.published !== false);
+        if (!event)
+            return;
+        setViewerDayChoice(date);
+        setSelectedId(event.id);
+        setPage('tournoi');
+        try {
+            localStorage.setItem('cslv_last_tournament_v1', JSON.stringify(event.id));
+        }
+        catch (e) { }
+        const nextParams = new URLSearchParams(window.location.search);
+        nextParams.set('tournament', event.id);
+        nextParams.set('role', 'viewer');
+        nextParams.delete('day');
         const search = nextParams.toString();
         window.history.replaceState({}, '', window.location.pathname + (search ? '?' + search : '') + window.location.hash);
     };
@@ -2782,6 +2817,9 @@ function MultiTournamentShell() {
                 isViewer && React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
                     React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Journée en attente de publication'),
                     React.createElement("button", { type: "button", onClick: () => void refreshServerCatalog(), className: "min-h-[36px] rounded-lg border border-amber-800/50 px-3 py-1 text-amber-200 font-bold" }, "\u21BB Actualiser le programme")),
+                isViewer && !lockedViewerDay && publishedDays.length > 1 && React.createElement("div", { className: "flex flex-wrap items-center gap-2 rounded-xl border border-amber-900/40 bg-[#17090c] px-3 py-2" },
+                    React.createElement("label", { htmlFor: "csv-public-day", className: "text-xs text-amber-200 font-bold" }, "\uD83D\uDCC5 Journ\u00E9e"),
+                    React.createElement("select", { id: "csv-public-day", value: viewerDay || '', onChange: e => selectPublicDay(e.target.value), className: "min-h-[44px] flex-1 min-w-[170px] bg-[#210b12] text-white border border-amber-800/60 rounded-lg px-3 text-sm" }, publishedDays.map(date => React.createElement("option", { key: date, value: date }, csvReadableDay(date))))),
                 React.createElement("div", { className: "flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar" }, accessibleEvents.map(e => React.createElement("button", { type: "button", key: e.id, onClick: () => selectTournament(e.id), className: 'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border ' +
                         (e.id === current?.id && page === 'tournoi' ? 'bg-amber-500 text-black border-amber-500' : 'bg-[#17080b] text-slate-200 border-red-900/70') },
                     e.category,
@@ -2790,7 +2828,7 @@ function MultiTournamentShell() {
                 hubMessage && React.createElement("div", { role: "alert", className: "text-xs text-amber-300" },
                     "\u26A0 ",
                     hubMessage),
-                React.createElement("div", { className: "flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs", role: "status" },
+                hubIsEditor && React.createElement("div", { className: "flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs", role: "status" },
                     React.createElement("span", { className: netOnline && hubStatus === 'online' && !cloudFromCache ? 'text-emerald-200' : 'text-amber-200' }, netOnline && hubStatus === 'online' && !cloudFromCache ? '🟢 Connecté — données synchronisées' : !netOnline ? '📴 Hors ligne — consultation du dernier programme chargé' : hubStatus === 'online' && cloudFromCache ? '🟡 Dernières données en cache — connexion Firebase à confirmer' :
                         hubStatus === 'loading' ? '⏳ Connexion en cours' : '⚠ Données potentiellement anciennes — Firebase indisponible'),
                     hubIsEditor && netOnline && !offlineReady && React.createElement("button", { type: "button", onClick: activateOffline, className: "min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold text-amber-200" }, "\uD83D\uDCE5 Activer le cache hors ligne (appareil priv\u00E9)"),
@@ -3217,7 +3255,9 @@ function MultiTournamentShell() {
                                 React.createElement("td", { className: "p-3" }, m.kind === 'réservation' || m.exclusive ? '🔒 Exclusif' : m.status === 'finished' ? 'Terminé' : 'Prévu'));
                         })))),
             !isViewer && React.createElement("div", { className: "border border-red-950 rounded-lg p-3 text-xs text-slate-400" }, "Pour modifier un horaire, ouvre la cat\u00E9gorie concern\u00E9e puis l\u2019onglet \u00AB Matchs \u00BB. La r\u00E9servation d\u2019une finale bloque tous les terrains du m\u00EAme jour.")) : React.createElement(React.Fragment, null,
-            isViewer && !current && React.createElement("main", { className: "max-w-xl mx-auto px-4 py-14 text-center space-y-4", role: "status" },
+            isViewer && !current && netOnline && !catalogSynced && (hubStatus === 'loading' || hubStatus === 'online') &&
+                React.createElement("main", { role: "status", className: "max-w-xl mx-auto px-4 py-14 text-center text-sm text-amber-200" }, "\u23F3 V\u00E9rification des journ\u00E9es publi\u00E9es sur Firebase\u2026"),
+            isViewer && !current && !(netOnline && !catalogSynced && (hubStatus === 'loading' || hubStatus === 'online')) && React.createElement("main", { className: "max-w-xl mx-auto px-4 py-14 text-center space-y-4", role: "status" },
                 React.createElement("div", { className: "text-5xl" }, "\uD83D\uDCC5"),
                 React.createElement("h2", { className: "text-xl font-black text-amber-300" }, "Programme non disponible"),
                 React.createElement("p", { className: "text-slate-300 text-sm" }, viewerDay

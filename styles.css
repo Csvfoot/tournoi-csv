@@ -552,6 +552,9 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .min-w-\[54px\] {
   min-width: 54px;
 }
+.min-w-\[170px\] {
+  min-width: 170px;
+}
 .min-w-\[200px\] {
   min-width: 200px;
 }
@@ -1138,6 +1141,9 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 .bg-\[\#200d11\] {
   background-color: #200d11;
+}
+.bg-\[\#210b12\] {
+  background-color: #210b12;
 }
 .bg-\[\#220c12\] {
   background-color: #220c12;
