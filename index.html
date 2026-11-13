@@ -117,6 +117,15 @@
       if (n > 5 * count) return null;
       return Array.from({ length: count }, (_, i) => 4 + (i < n - 4 * count ? 1 : 0));
     };
+    // Mode volontaire : deux poules équilibrées d'au moins 6 équipes.
+    // Le mode 4/5 reste le comportement normal des tournois existants.
+    const configuredPoolSizes = (n, config = {}) => {
+      if (config.poolMode === 'two_large') {
+        if (n < 12 || n > 32 || n % 2 !== 0) return null;
+        return [n / 2, n / 2];
+      }
+      return getPoolSizes(n);
+    };
     const alphabetPoolName = i => `Poule ${String.fromCharCode(65 + i)}`;
 
     // Le classement utilise l'affectation ACTUELLE des équipes, mais conserve
@@ -482,6 +491,158 @@
       };
     };
 
+    // Alternance en vagues : une catégorie occupe tous les terrains disponibles,
+    // puis la seconde catégorie les utilise au créneau suivant. Le premier tournoi
+    // est l'ordre voulu par l'organisateur ; on ne touche jamais aux scores.
+    const buildAlternatingWaves = (pair, allEvents, fields) => {
+      if(pair.length!==2||!fields.length)return {error:'Choisis 2 tournois du même jour et au moins un terrain.'};
+      if(pair.some(p=>!(p.data.matches||[]).length))return {error:'Génère d’abord les calendriers des deux tournois.'};
+      const isPending=m=>!m.status||m.status==='pending';
+      // Les matchs joués ou en cours ne bougent jamais. Les autres rencontres
+      // peuvent être réorganisées après le dernier créneau verrouillé.
+      const locked=pair.flatMap(p=>(p.data.matches||[]).filter(m=>!isPending(m)&&m.startTime&&m.endTime)
+        .map(m=>({...m,eventId:p.event.id,kind:'match'})));
+      if(pair.every(p=>(p.data.matches||[]).every(m=>!isPending(m))))
+        return {error:'Aucun match restant à alterner : les deux tournois sont déjà terminés ou en cours.'};
+      const ids=new Set(pair.map(p=>p.event.id));
+      const phases=new Set(['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante']);
+      const baseTime=p=>Math.max(0,planningMinutes(p.data.config?.startTime||'09:00'));
+      const pause=p=>Math.max(0,Number(p.data.config?.breakDuration)||0);
+      const duration=(m,p)=>{
+        const a=planningMinutes(m.startTime),b=planningMinutes(m.endTime);
+        const n=b-a;
+        return (a>=0&&n>0&&n<=180)?n:(Number(p.data.config?.duration)||15);
+      };
+      const fixed=allEvents.flatMap(p=>{
+        const fixtures=ids.has(p.event.id)?[]:(p.data.matches||[]).filter(x=>x.startTime&&x.endTime)
+          .map(x=>({...x,eventId:p.event.id,kind:'match'}));
+        const reserved=(p.data.config?.reservedSlots||[]).filter(x=>x.startTime&&x.endTime)
+          .map(x=>({...x,eventId:p.event.id,kind:'réservation'}));
+        return [...fixtures,...reserved];
+      });
+      const occupied=[...fixed,...locked];
+      const planned=new Map(pair.map(p=>[p.event.id,[]]));
+      const firstTime=Math.max(...pair.map(baseTime));
+      const lastLockedEnd=locked.length?Math.max(...locked.map(m=>planningMinutes(m.endTime))):0;
+      let cursor=Math.ceil(Math.max(firstTime,lastLockedEnd+(locked.length?Math.max(...pair.map(pause)):0))/5)*5;
+      const lunchCollision=(candidate,p)=>{
+        const cfg=p.data.config||{};
+        return !!(cfg.hasLunchBreak&&cfg.lunchStart&&cfg.lunchEnd&&
+          planningOverlap(candidate,{startTime:cfg.lunchStart,endTime:cfg.lunchEnd}));
+      };
+      const placeBatch=(p,list,exclusive=false)=>{
+        if(!list.length)return true;
+        // Une vague = même horaire pour tous les matchs de cette catégorie.
+        // S'il reste un seul match, les terrains inutilisés restent libres.
+        // Une même équipe ne peut jouer deux rencontres dans une même vague.
+        // On sélectionne les matchs compatibles, même s'ils ne sont pas contigus
+        // dans le calendrier initial (cas fréquent avec 6+ équipes par poule).
+        const games=[];
+        const usedTeams=new Set();
+        const limit=(exclusive||list[0]?.exclusive)?1:fields.length;
+        for(const m of list){
+          if(games.length>=limit)break;
+          if(m.exclusive && games.length)continue;
+          const members=[m.team1Id,m.team2Id].filter(Boolean);
+          if(members.some(id=>usedTeams.has(id)))continue;
+          games.push(m);
+          members.forEach(id=>usedTeams.add(id));
+          if(m.exclusive)break;
+        }
+        if(!games.length)return false;
+        const maxDuration=Math.max(...games.map(m=>duration(m,p)));
+        let begin=Math.ceil(Math.max(cursor,baseTime(p))/5)*5;
+        for(let tryN=0;tryN<290&&begin+maxDuration<=1440;tryN++,begin+=5){
+          const proposals=games.map((m,i)=>({
+            ...m,eventId:p.event.id,kind:'match',exclusive:exclusive||!!m.exclusive,
+            fieldId:fields[i].id,fieldName:fields[i].name,
+            startTime:planningTime(begin),endTime:planningTime(begin+duration(m,p))
+          }));
+          if(proposals.some(x=>lunchCollision(x,p)))continue;
+          if(proposals.some(x=>occupied.some(y=>planningConflict(x,y))))continue;
+          if(proposals.some((x,i)=>proposals.slice(0,i).some(y=>planningConflict(x,y))))continue;
+          // Même catégorie : une équipe ne joue jamais deux matchs simultanément.
+          if(proposals.some((x,i)=>proposals.slice(0,i).some(y=>
+            [x.team1Id,x.team2Id].some(id=>id&&(id===y.team1Id||id===y.team2Id)))))continue;
+          occupied.push(...proposals);
+          planned.get(p.event.id).push(...proposals);
+          const selected=new Set(games.map(m=>m.id));
+          for(let i=list.length-1;i>=0;i--)if(selected.has(list[i].id))list.splice(i,1);
+          cursor=begin+maxDuration+Math.max(...pair.map(pause));
+          return true;
+        }
+        return false;
+      };
+      // Les matchs de poule ont priorité ; alternance par groupes de 2 terrains.
+      const pools=pair.map(p=>({p,queue:(p.data.matches||[])
+        .filter(m=>isPending(m)&&!phases.has(m.group))
+        .sort((a,b)=>String(a.startTime||'').localeCompare(String(b.startTime||''))||String(a.id).localeCompare(String(b.id)))}));
+      let waveCount=0;
+      while(pools.some(x=>x.queue.length)){
+        for(const item of pools){
+          if(!item.queue.length)continue;
+          if(!placeBatch(item.p,item.queue))return {error:`Impossible de placer une vague de ${item.p.event.category}. Vérifie les réservations et la pause de midi.`};
+          waveCount++;
+        }
+      }
+      // Tours à élimination directe : respecte la profondeur des liens de qualification.
+      const preliminary=pair.map(p=>{
+        const all=p.data.matches||[];
+        const byId=new Map(all.map(m=>[m.id,m]));
+        const depth=(m,seen=new Set())=>{
+          if(seen.has(m.id))return 0;
+          const deps=[m.source1,m.source2].filter(x=>x&&(x.kind==='winner'||x.kind==='loser'))
+            .map(x=>byId.get(x.matchId)).filter(Boolean);
+          if(deps.length)return Math.max(...deps.map(d=>1+depth(d,new Set([...seen,m.id]))));
+          return /Demi-Finale/.test(m.stage||'')?2:/Quart/.test(m.stage||'')?1:0;
+        };
+        const matches=all.filter(m=>isPending(m)&&phases.has(m.group)&&m.group!=='Tournoi Classement'&&m.group!=='Tournoi Consolante'&&
+          m.id!=='ko-final'&&m.id!=='ko-bronze'&&m.stage!=='Grande Finale'&&!/3(?:ème|e)\s*\/\s*4/.test(String(m.stage||'')));
+        return {p,levels:matches.map(m=>({m,level:depth(m)}))};
+      });
+      const levels=[...new Set(preliminary.flatMap(x=>x.levels.map(y=>y.level)))].sort((a,b)=>a-b);
+      for(const level of levels){
+        const chunks=preliminary.map(x=>({p:x.p,queue:x.levels.filter(y=>y.level===level).map(y=>y.m)}));
+        while(chunks.some(x=>x.queue.length))for(const item of chunks){
+          if(item.queue.length&&!placeBatch(item.p,item.queue))return {error:'Impossible de placer un tour de phase finale.'};
+        }
+      }
+      // Les matchs de classement avant les petites et grandes finales.
+      const rankings=pair.map(p=>({p,queue:(p.data.matches||[]).filter(m=>isPending(m)&&(
+        m.group==='Tournoi Classement'||m.group==='Tournoi Consolante'))}));
+      while(rankings.some(x=>x.queue.length))for(const item of rankings){
+        if(item.queue.length&&!placeBatch(item.p,item.queue))return {error:'Impossible de programmer les matchs de classement.'};
+      }
+      // La petite puis la grande finale de chaque catégorie sont seules,
+      // sur un créneau exclusif, y compris vis-à-vis des autres catégories.
+      for(const p of pair){
+        const all=p.data.matches||[];
+        const bronze=all.find(m=>isPending(m)&&(m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/.test(String(m.stage||''))));
+        const final=all.find(m=>isPending(m)&&(m.id==='ko-final'||m.stage==='Grande Finale'));
+        for(const m of [bronze,final].filter(Boolean)){
+          if(!placeBatch(p,[m],true))return {error:`Impossible d'isoler les finales de ${p.event.category}.`};
+        }
+      }
+      const updatedById={};const moves=[];
+      for(const p of pair){
+        const lookup=new Map(planned.get(p.event.id).map(m=>[m.id,m]));
+        updatedById[p.event.id]=(p.data.matches||[]).map(m=>{
+          const chosen=lookup.get(m.id);
+          if(!chosen)return m;
+          const updated={...m,fieldId:chosen.fieldId,fieldName:chosen.fieldName,
+            startTime:chosen.startTime,endTime:chosen.endTime,exclusive:chosen.exclusive};
+          if(m.startTime!==updated.startTime||m.fieldId!==updated.fieldId||!!m.exclusive!==!!updated.exclusive){
+            moves.push({eventId:p.event.id,category:p.event.category,id:m.id,stage:m.stage,
+              from:(m.startTime||'--:--')+' · '+(m.fieldName||'Terrain'),
+              to:updated.startTime+' · '+updated.fieldName});
+          }
+          return updated;
+        });
+      }
+      return {updatedById,moves,waveCount,
+        signature:JSON.stringify(pair.map(p=>[p.event.id,p.data.matches]))};
+    };
+
     // Plan d'alternance pour DEUX catégories le même jour.
     // Aucun match joué n'est déplacé. Les créneaux réservés et les autres
     // catégories restent fixes ; les finales sont isolées sur tous les terrains.
@@ -688,6 +849,7 @@
       const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
       const [repairPreview,setRepairPreview] = useState(null);
       const [alternateFirst,setAlternateFirst] = useState('');
+      const [alternateMode,setAlternateMode] = useState('waves');
       const [alternateSecond,setAlternateSecond] = useState('');
       const [alternatePreview,setAlternatePreview] = useState(null);
       const [alternateNotice,setAlternateNotice] = useState('');
@@ -812,6 +974,51 @@
         }
         setCatalog(next);setShowCreate(false);selectTournament(id);
       };
+      const duplicateTournament=async()=>{
+        if(isViewer||!editingEvent)return;
+        const original=catalog.find(x=>x.id===editingEvent.id);
+        if(!original)return;
+        if(hubStatus!=='online'||!dbRef.current||!loadedDocs[original.id]){
+          setHubMessage('Connecte Firebase pour dupliquer le tournoi sur tous les appareils.');return;
+        }
+        const name=window.prompt('Nom de la nouvelle catégorie :',original.category+' copie');
+        if(name===null)return;
+        const category=name.trim().slice(0,60);
+        if(!category){setHubMessage('La catégorie du duplicata ne peut pas être vide.');return;}
+        const dateInputCopy=window.prompt('Date du nouveau tournoi (AAAA-MM-JJ) :',original.date);
+        if(dateInputCopy===null)return;
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(dateInputCopy)||Number.isNaN(new Date(dateInputCopy+'T12:00:00').getTime())){
+          setHubMessage('Date invalide : utilise le format AAAA-MM-JJ.');return;
+        }
+        const id='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,9);
+        const title='Tournoi '+category;
+        const event={id,category,title,date:dateInputCopy};
+        const source=eventData(original);
+        // Jamais de scores ni calendrier copiés : évite les conflits de terrains
+        // et donne un nouveau départ à la catégorie dupliquée.
+        const config=JSON.parse(JSON.stringify(source.config||{}));
+        config.name=title;
+        config.reservedSlots=[];
+        const teams=JSON.parse(JSON.stringify(source.teams||[])).map((t,i)=>({
+          ...t,id:'t-copy-'+id+'-'+i
+        }));
+        const copy={config,teams,matches:[]};
+        const next=[...catalog,event];
+        try{
+          const batch=dbRef.current.batch();
+          batch.set(dbRef.current.collection('tournaments').doc(tournamentDocId(id)),{
+            ...copy,fields:sharedFields,updatedAt:new Date().toISOString()
+          });
+          batch.set(dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1'),{
+            events:next,fields:sharedFields,updatedAt:new Date().toISOString()
+          },{merge:true});
+          await batch.commit();
+          for(const key of ['config','teams','matches'])localStorage.setItem(tournamentStorageKey(id,key),JSON.stringify(copy[key]));
+          setRecords(old=>({...old,[id]:copy}));
+          setCatalog(next);setEditingEvent(null);selectTournament(id);
+          setHubMessage(`Tournoi dupliqué : ${category}. Paramètres, poules et ${teams.length} équipe(s) copiés ; scores, réservations et calendrier remis à zéro.`);
+        }catch(err){setHubMessage('Duplication annulée, sans modifier le tournoi initial : '+(err.message||String(err)));}
+      };
       const saveEventMetadata=async()=>{
         if(isViewer || !editingEvent) return;
         const category=String(editingEvent.category||'').trim();
@@ -828,7 +1035,7 @@
         setDateFilter(date);
         setEditingEvent(null);
       };
-      // Supprimer une catégorie terminée et ses données Firebase en une seule
+      // Supprimer une catégorie à tout moment et ses données Firebase en une seule
       // opération. Le tournoi historique « principal » est vidé, puis recréé
       // vide à sa place afin de conserver le fonctionnement de l'application.
       const deleteFinishedTournament=async()=>{
@@ -836,17 +1043,14 @@
         const event=catalog.find(x=>x.id===editingEvent.id);
         if(!event)return;
         const data=eventData(event);
-        if((data.matches||[]).some(m=>m.status!=='finished')){
-          setHubMessage('Suppression interdite : il reste des rencontres non terminées.');return;
-        }
         if(hubStatus!=='online' || !dbRef.current || !loadedDocs[event.id]){
           setHubMessage('Suppression disponible uniquement quand Firebase est synchronisé, pour éviter un tournoi qui réapparaît sur un autre appareil.');return;
         }
-        const word=window.prompt(`Suppression définitive de « ${event.category} » (${event.date}).\nToutes les équipes, matchs, scores, poules, statistiques et réservations seront perdus.\nTape SUPPRIMER pour confirmer :`);
+        const word=window.prompt(`Suppression définitive de « ${event.category} » (${event.date}).\nToutes les équipes, matchs, scores, poules, statistiques et réservations seront perdus, même si le tournoi est en cours.\nTape SUPPRIMER pour confirmer :`);
         if(word!=='SUPPRIMER')return;
         if(!window.confirm(event.id==='principal'
-          ?'Dernière confirmation : vider entièrement le tournoi principal terminé ? Un tournoi principal vide sera conservé.'
-          :'Dernière confirmation : supprimer définitivement ce tournoi terminé, y compris de Firebase ?'))return;
+          ?'Dernière confirmation : vider entièrement le tournoi principal ? Un tournoi principal vide sera conservé.'
+          :'Dernière confirmation : supprimer définitivement ce tournoi, y compris de Firebase ?'))return;
         const principal=event.id==='principal';
         const nextEvent={id:'principal',category:'Principal',title:'Nouveau tournoi',date:TODAY_LOCAL()};
         const next=principal?catalog.map(x=>x.id==='principal'?nextEvent:x):catalog.filter(x=>x.id!==event.id);
@@ -907,22 +1111,26 @@
       const previewAlternation=()=>{
         setAlternateNotice('');setAlternatePreview(null);
         if(isViewer)return;
-        if(!alternateFirst || !alternateSecond || alternateFirst===alternateSecond){
+        const firstId=alternateFirst||sameDayCategories[0]?.id;
+        const secondId=alternateSecond||sameDayCategories.find(e=>e.id!==firstId)?.id;
+        if(!firstId || !secondId || firstId===secondId){
           setAlternateNotice('Sélectionne deux catégories différentes du même jour.');return;
         }
+        setAlternateFirst(firstId);setAlternateSecond(secondId);
         if(hubStatus==='loading'||hubStatus==='error'||
           (hubStatus==='online' && sameDayCategories.some(e=>!loadedDocs[e.id]))){
           setAlternateNotice('Attends la synchronisation du planning commun avant de calculer une alternance.');return;
         }
-        const first=sameDayCategories.find(e=>e.id===alternateFirst);
-        const second=sameDayCategories.find(e=>e.id===alternateSecond);
+        const first=sameDayCategories.find(e=>e.id===firstId);
+        const second=sameDayCategories.find(e=>e.id===secondId);
         if(!first||!second){setAlternateNotice('Les deux tournois doivent être programmés à la même date.');return;}
-        const plan=buildAlternatingSchedule(
-          [{event:first,data:eventData(first)},{event:second,data:eventData(second)}],
-          sameDayCategories.map(event=>({event,data:eventData(event)})),sharedFields);
+        const selectedPair=[{event:first,data:eventData(first)},{event:second,data:eventData(second)}];
+        const allDay=sameDayCategories.map(event=>({event,data:eventData(event)}));
+        const plan=(alternateMode==='waves'?buildAlternatingWaves:buildAlternatingSchedule)(
+          selectedPair,allDay,sharedFields);
         if(plan.error){setAlternateNotice(plan.error);return;}
         setAlternatePreview(plan);
-        if(!plan.moves.length)setAlternateNotice('Ces deux calendriers sont déjà compatibles avec cette alternance.');
+        if(!plan.moves.length)setAlternateNotice('Ces calendriers respectent déjà l’alternance demandée.');
       };
       const applyAlternation=async()=>{
         if(isViewer||!alternatePreview||!alternatePreview.moves.length)return;
@@ -1190,13 +1398,16 @@
                 </label>
               </div>
               <p className="text-[11px] text-slate-400">La catégorie et sa date changent, mais ses équipes, ses scores et son identifiant Firebase restent inchangés. Le titre dans l'en-tête du match se règle dans Configuration.</p>
-              <p className="text-[11px] text-rose-200/80">La suppression est définitive et disponible uniquement lorsque tous les matchs sont terminés et que Firebase est connecté. Le tournoi « Principal » est vidé et reste disponible pour repartir de zéro.</p>
+              <p className="text-[11px] text-slate-400">Dupliquer copie les paramètres, les poules et les équipes (avec leurs joueurs), mais crée un calendrier vierge, sans résultats ni réservations.</p>
+              <p className="text-[11px] text-rose-200/80">Suppression possible à tout moment, même avant la fin des matchs, après double confirmation. Firebase doit être synchronisé pour éviter que les données réapparaissent. Le tournoi « Principal » est vidé et reste disponible.</p>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveEventMetadata} className="bg-amber-500 text-black font-black rounded-lg px-4 py-2 text-xs">Enregistrer</button>
+                <button type="button" onClick={duplicateTournament} disabled={hubStatus!=='online'||!loadedDocs[editingEvent.id]}
+                  className="border border-amber-600/50 text-amber-200 bg-[#25100e] rounded-lg px-4 py-2 text-xs font-bold disabled:opacity-40">📋 Dupliquer</button>
                 <button type="button" onClick={()=>setEditingEvent(null)} className="bg-[#37151b] text-slate-200 rounded-lg px-4 py-2 text-xs">Annuler</button>
-                <button type="button" onClick={deleteFinishedTournament} disabled={(eventData(editingEvent).matches||[]).some(m=>m.status!=='finished') || hubStatus!=='online'}
+                <button type="button" onClick={deleteFinishedTournament} disabled={hubStatus!=='online' || !loadedDocs[editingEvent.id]}
                   className="border border-rose-800/80 bg-rose-950/40 text-rose-200 rounded-lg px-4 py-2 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Supprime les données et le tournoi terminé après double confirmation">🗑 {editingEvent.id==='principal'?'Vider le tournoi terminé':'Supprimer le tournoi terminé'}</button>
+                  title="Supprime le tournoi à tout moment après double confirmation">🗑 {editingEvent.id==='principal'?'Vider le tournoi':'Supprimer le tournoi'}</button>
               </div>
             </div>}
             {hubIsEditor && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
@@ -1218,7 +1429,17 @@
           </div>
           {sameDayCategories.length>=2 && <section className="bg-[#1b090e] rounded-xl border border-amber-800/50 p-3 sm:p-4 space-y-3" aria-label="Alterner deux tournois">
             <h3 className="text-amber-300 font-bold text-sm">🔄 Alterner les matchs de deux catégories</h3>
-            <p className="text-xs text-slate-400">Choisis deux tournois du même jour. Prévisualise les nouveaux horaires avant de les appliquer. Un match déjà commencé ou terminé empêche cette redistribution automatique. Les réservations, autres catégories, petites finales et grandes finales exclusives sont respectées.</p>
+            <p className="text-xs text-slate-400">Par vagues : tous les terrains servent une catégorie, puis l'autre au créneau suivant. Tu peux inverser l'ordre, choisir l'ancienne alternance match par match ou déplacer manuellement certains matchs après validation. Les matchs commencés ou terminés restent inchangés ; les réservations et finales exclusives restent protégées.</p>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <label className="text-slate-200">Type d'alternance
+                <select value={alternateMode} onChange={e=>{setAlternateMode(e.target.value);setAlternatePreview(null);}}
+                  className="ml-2 rounded-lg bg-black border border-red-900 px-3 py-2 text-white">
+                  <option value="waves">Par vagues — 2 terrains U11, puis 2 terrains U13…</option>
+                  <option value="single">Match par match — alternance libre</option>
+                </select>
+              </label>
+              <span className="text-slate-400">Le premier tournoi joue la première vague. Inverse les deux sélections pour changer l'ordre. Les matchs déjà joués restent à leur place.</span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <label className="text-xs text-slate-200">Premier tournoi
                 <select value={alternateFirst} onChange={e=>{setAlternateFirst(e.target.value);setAlternatePreview(null);}} className="mt-1 w-full rounded-lg bg-black border border-red-900 p-2 text-white">
@@ -1230,7 +1451,14 @@
                   <option value="">Choisir…</option>{sameDayCategories.filter(e=>e.id!==alternateFirst).map(e=><option key={e.id} value={e.id}>{e.category} — {e.title}</option>)}
                 </select>
               </label>
-              <button type="button" onClick={previewAlternation} className="sm:self-end px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-black">Prévisualiser l'alternance</button>
+              <div className="flex gap-2 sm:self-end">
+                <button type="button" onClick={()=>{
+                  const a=alternateFirst||sameDayCategories[0]?.id||'';
+                  const b=alternateSecond||sameDayCategories.find(x=>x.id!==a)?.id||'';
+                  setAlternateFirst(b);setAlternateSecond(a);setAlternatePreview(null);setAlternateNotice('');
+                }} className="px-3 py-2 rounded-lg border border-amber-700/50 text-amber-200 text-xs">⇄ Inverser</button>
+                <button type="button" onClick={previewAlternation} className="flex-1 px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-black">Prévisualiser</button>
+              </div>
             </div>
             {alternateNotice && <p role="status" className="text-xs text-amber-300">{alternateNotice}</p>}
             {alternatePreview && <div className="border-t border-amber-800/40 pt-3 space-y-2">
@@ -1474,14 +1702,15 @@
 
       const activeGroupNames = useMemo(() => {
         if (config.format === 'round_robin') return ['Poule Unique'];
+        if (config.poolMode === 'two_large') return ['Poule A','Poule B'];
         if (config.autoGroups === true) {
-          const sizes = getPoolSizes(teams.length);
+          const sizes = configuredPoolSizes(teams.length,config);
           if (sizes) return sizes.map((_,i) => alphabetPoolName(i));
         }
         if (config.customGroups && config.customGroups.length) return config.customGroups;
         const n = Math.min(8, Math.max(2, Number(config.numberOfGroups) || 2));
         return Array.from({length:n},(_,i) => alphabetPoolName(i));
-      }, [config.format,config.autoGroups,config.customGroups,config.numberOfGroups,teams.length]);
+      }, [config.format,config.autoGroups,config.customGroups,config.numberOfGroups,config.poolMode,teams.length]);
 
             const showToast = (message, type = 'success') => {
         setNotification({ message, type });
@@ -1497,7 +1726,7 @@
         if (oldTeam.group === targetGroup) return;
         // Compléter les affectations encore absentes sans déplacer les choix existants.
         // Les premiers calendriers peuvent ne pas enregistrer le champ group.
-        const capacities = getPoolSizes(teams.length);
+        const capacities = configuredPoolSizes(teams.length,config);
         const counts = Object.fromEntries(activeGroupNames.map(g => [g,teams.filter(t => t.group === g).length]));
         const withGroups = teams.map(t => {
           if (activeGroupNames.includes(t.group)) return t;
@@ -1511,12 +1740,12 @@
 
         // Une répartition manuelle peut provisoirement avoir 3/5 équipes.
         // On n'efface ni ne remplace jamais les choix de l'organisateur.
-        const sizes = getPoolSizes(nextTeams.length);
+        const sizes = configuredPoolSizes(nextTeams.length,config);
         const balanced = config.format === 'round_robin' || (sizes &&
           activeGroupNames.length === sizes.length &&
           activeGroupNames.every((g,i) => nextTeams.filter(t => t.group === g).length === sizes[i]));
         if (!balanced) {
-          showToast('Équipe déplacée. Rééquilibrez les poules (4 ou 5 équipes chacune) avant de mettre à jour le calendrier.', 'error');
+          showToast('Équipe déplacée. Équilibre les poules selon la formule sélectionnée avant de régénérer.', 'error');
           return;
         }
         if (matches.length && matches.every(m => m.status !== 'finished')) {
@@ -2268,8 +2497,8 @@
           let sizes;
           if (config.format === 'round_robin') sizes = [sourceTeams.length];
           else {
-            const autoSizes = getPoolSizes(sourceTeams.length);
-            if (!autoSizes) { showToast('Pour les poules de 4 ou 5, choisissez un nombre PAIR d’équipes entre 8 et 32.','error');return; }
+            const autoSizes = configuredPoolSizes(sourceTeams.length,config);
+            if (!autoSizes) { showToast(config.poolMode==='two_large'?'Pour 2 grandes poules, inscrivez un nombre PAIR de 12 à 32 équipes.':'Pour les poules de 4 ou 5, choisissez un nombre PAIR de 8 à 32 équipes.','error');return; }
             if (names.length !== autoSizes.length) {
               showToast(`Pour ${sourceTeams.length} équipes : ${autoSizes.length} poules obligatoires. Activez la répartition automatique.`, 'error');return;
             }
@@ -3041,8 +3270,8 @@
                         onChange={(e) => setConfig({ ...config, format: e.target.value })}
                         className="w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500"
                       >
-                        <option value="groups_knockout">Poules + phase finale (4 ou 5 équipes par poule)</option>
-                        <option value="multi_groups">Multiples poules de 4 ou 5 (8 à 32 équipes)</option>
+                        <option value="groups_knockout">Poules + phase finale (configurable)</option>
+                        <option value="multi_groups">Plusieurs poules (4/5 ou 2 grandes poules)</option>
                         <option value="round_robin">Championnat Unique (1 seule poule)</option>
                         <option value="knockout">Coupe directe (Élimination directe / Bracket)</option>
                       </select>
@@ -3054,14 +3283,30 @@
                           <input type="checkbox" checked={config.autoGroups === true}
                             onChange={e=>setConfig({...config,autoGroups:e.target.checked})}
                             className="accent-amber-500" />
-                          Répartition automatique en poules de 4 ou 5 équipes (8 à 32 équipes)
+                          Répartition automatique en poules adaptées à la formule
                         </label>
                         <p className="text-[11px] text-slate-400">
-                          {getPoolSizes(teams.length)
-                            ? `${teams.length} équipes → ${getPoolSizes(teams.length).length} poules : ${getPoolSizes(teams.length).join(' / ')} équipes. Les 2 premiers de chaque poule se qualifient.`
-                            : 'Inscrivez un nombre pair de 8 à 32 équipes pour activer cette formule.'}
+                          {configuredPoolSizes(teams.length,config)
+                            ? `${teams.length} équipes → ${configuredPoolSizes(teams.length,config).length} poules : ${configuredPoolSizes(teams.length,config).join(' / ')} équipes.`
+                            : config.poolMode==='two_large' ? 'Pour 2 grandes poules : 12 à 32 équipes, en nombre pair (6 à 16 par poule).' : 'Pour la formule habituelle : 8 à 32 équipes, en nombre pair.'}
                         </p>
-                        {!config.autoGroups && <p className="text-[11px] text-amber-400">Activez la répartition automatique pour obtenir le bon nombre de poules. Les affectations manuelles équilibrées seront conservées.</p>}
+                        <label className="flex items-center gap-2 mt-3 text-xs font-bold text-amber-200">
+                          <input type="checkbox" checked={config.poolMode==='two_large'}
+                            onChange={e=>setConfig({...config,poolMode:e.target.checked?'two_large':'standard',autoGroups:true,
+                              numberOfGroups:2,customGroups:['Poule A','Poule B']})}
+                            className="accent-amber-500" />
+                          2 grandes poules de 6 équipes ou plus (12 à 32 équipes au total)
+                        </label>
+                        {config.poolMode==='two_large' && <p className="text-[11px] text-amber-300">Les 2 poules doivent être de taille égale. Utilise « Répartir les équipes » pour repartir de la répartition actuelle sans conserver d'anciens matchs.</p>}
+                        {config.poolMode==='two_large' && userRole==='editor' && <button type="button" onClick={()=>{
+                          const sizes=configuredPoolSizes(teams.length,config);
+                          if(!sizes){showToast('Il faut 12 à 32 équipes en nombre pair.','error');return;}
+                          if(matches.length && !window.confirm('Répartir les équipes en 2 grandes poules nécessite de supprimer le calendrier existant et ses résultats. Continuer ?'))return;
+                          const next=teams.map((t,i)=>({...t,group:i<sizes[0]?'Poule A':'Poule B'}));
+                          setTeams(next);setMatches([]);broadcastUpdate(config,fields,next,[]);
+                          showToast('Deux grandes poules équilibrées : génère maintenant le calendrier.');
+                        }} className="rounded-lg border border-amber-600/60 bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-200">↔ Répartir les équipes en 2 poules</button>}
+                        {!config.autoGroups && <p className="text-[11px] text-amber-400">Active la répartition automatique pour obtenir le bon nombre de poules. Les affectations manuelles équilibrées seront conservées.</p>}
                       </div>
                     )}
 
