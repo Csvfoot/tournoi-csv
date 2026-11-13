@@ -486,6 +486,17 @@
     };
     const planningKey = entry => `${entry.eventId}::${entry.kind}::${entry.id}`;
     const planningOverlap = (a,b) => planningMinutes(a.startTime)<planningMinutes(b.endTime) && planningMinutes(b.startTime)<planningMinutes(a.endTime);
+    // Les deux horaires d'un terrain doivent inclure une rotation réelle.
+    // Important : 0 minute est une valeur valide, pas une valeur manquante.
+    const rotationMinutes = value => value === undefined || value === null || value === ''
+      ? 5 : (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 5);
+    const planningRotationConflict = (a,b,pauseForEvent) => {
+      if (a.kind !== 'match' || b.kind !== 'match' || !a.fieldId || a.fieldId !== b.fieldId ||
+          !a.startTime || !a.endTime || !b.startTime || !b.endTime) return false;
+      const pause = Math.max(pauseForEvent(a.eventId), pauseForEvent(b.eventId));
+      return planningMinutes(a.startTime) < planningMinutes(b.endTime) + pause &&
+        planningMinutes(b.startTime) < planningMinutes(a.endTime) + pause;
+    };
     const planningConflict = (a,b) => {
       if(!a.startTime || !a.endTime || !b.startTime || !b.endTime || !planningOverlap(a,b)) return false;
       const sameTeam=a.kind==='match' && b.kind==='match' && a.eventId===b.eventId &&
@@ -519,7 +530,7 @@
           String(r.fieldId??''),!!r.exclusive
         ]).sort((a,b)=>a[0].localeCompare(b[0])),
         settings:[String(c.startTime||'09:00'),Number(c.duration||15),
-          Number(c.breakDuration||0),!!c.hasLunchBreak,
+          rotationMinutes(c.breakDuration),!!c.hasLunchBreak,
           String(c.lunchStart||''),String(c.lunchEnd||'')]
       });
     };
@@ -616,7 +627,9 @@
       const ids=new Set(pair.map(p=>p.event.id));
       const phases=new Set(['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante']);
       const baseTime=p=>Math.max(0,planningMinutes(p.data.config?.startTime||'09:00'));
-      const pause=p=>Math.max(0,Number(p.data.config?.breakDuration)||0);
+      const pause=p=>rotationMinutes(p.data.config?.breakDuration);
+      const pauseByEvent = new Map(allEvents.map(p=>[p.event.id,rotationMinutes(p.data.config?.breakDuration)]));
+      const hasRotationConflict=(a,b)=>planningRotationConflict(a,b,id=>pauseByEvent.get(id)??5);
       const duration=(m,p)=>{
         const a=planningMinutes(m.startTime),b=planningMinutes(m.endTime);
         const n=b-a;
@@ -668,7 +681,7 @@
             startTime:planningTime(begin),endTime:planningTime(begin+duration(m,p))
           }));
           if(proposals.some(x=>lunchCollision(x,p)))continue;
-          if(proposals.some(x=>occupied.some(y=>planningConflict(x,y))))continue;
+          if(proposals.some(x=>occupied.some(y=>planningConflict(x,y)||hasRotationConflict(x,y))))continue;
           if(proposals.some((x,i)=>proposals.slice(0,i).some(y=>planningConflict(x,y))))continue;
           // Même catégorie : une équipe ne joue jamais deux matchs simultanément.
           if(proposals.some((x,i)=>proposals.slice(0,i).some(y=>
@@ -786,10 +799,12 @@
       const fieldCount=new Map(fields.map(f=>[f.id,0]));
       const lastCategory=new Map();
       const startOf=p=>Math.max(0,planningMinutes(p.data.config?.startTime||'09:00'));
-      const pauseOf=p=>Math.max(0,Number(p.data.config?.breakDuration)||0);
+      const pauseOf=p=>rotationMinutes(p.data.config?.breakDuration);
+      const pauseByEvent = new Map(allEvents.map(p=>[p.event.id,rotationMinutes(p.data.config?.breakDuration)]));
+      const hasRotationConflict=(a,b)=>planningRotationConflict(a,b,id=>pauseByEvent.get(id)??5);
       const earliestStart=Math.min(...pair.map(startOf));
       const ready=(candidate,p)=>{
-        if(occupied.some(x=>planningConflict(candidate,x)))return false;
+        if(occupied.some(x=>planningConflict(candidate,x)||hasRotationConflict(candidate,x)))return false;
         const pause=pauseOf(p);
         const overlapTeam=occupied.some(x=>x.kind==='match' && x.eventId===p.event.id &&
           [candidate.team1Id,candidate.team2Id].some(id=>id && (id===x.team1Id||id===x.team2Id)) &&
@@ -1770,6 +1785,8 @@
           plan.eventIds=selectedPair.map(p=>p.event.id);
           plan.date=first.date;
           plan.mode=alternateMode;
+          plan.rotations=selectedPair.map(p=>({category:p.event.category,
+            minutes:rotationMinutes(p.data.config?.breakDuration)}));
           plan.restAnalysis=selectedPair.map(p=>{
             const rows=plan.updatedById[p.event.id]||[];
             const allTeams=p.data.teams||[];
@@ -2155,6 +2172,7 @@
             {alternateNotice && <p role="status" className="text-xs text-amber-300">{alternateNotice}</p>}
             {alternatePreview && <div className="border-t border-amber-800/40 pt-3 space-y-2">
               <p className="text-xs text-slate-200">{alternatePreview.moves.length} rencontre(s) à repositionner. Aperçu :</p>
+              <p className="text-xs text-amber-200">⏱ Rotation incluse : {(alternatePreview.rotations||[]).map(r=>`${r.category} ${r.minutes} min`).join(' · ')}. La pause sépare les matchs successifs sur chaque terrain, même entre catégories.</p>
               {alternatePreview.restAnalysis && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {alternatePreview.restAnalysis.map(a=><div key={a.category} className="rounded-lg border border-amber-900/40 bg-[#100508] p-2 text-xs text-slate-200">
                   <strong className="text-amber-300">{a.category}</strong> · {a.quick} enchaînement(s) rapproché(s) · {a.long} attente(s) longues
@@ -2666,8 +2684,11 @@
 
       // Créneaux exclusifs : blocs vides et matchs seuls sur tous les terrains.
       // Matchs des autres catégories organisées à la même date.
+      const matchRotation = value => value === undefined || value === null || value === ''
+        ? 5 : (Number.isFinite(Number(value)) ? Math.max(0,Number(value)) : 5);
       const externalMatches = otherEvents.flatMap(e => (e.matches || []).map(m => ({
-        ...m, _eventId: e.id, _eventCategory: e.category
+        ...m, _eventId: e.id, _eventCategory: e.category,
+        _rotationMinutes:matchRotation(e.config?.breakDuration)
       })));
       const externalReservations = otherEvents.flatMap(e =>
         ((e.config && e.config.reservedSlots) || []).map(r => ({...r, _eventCategory:e.category}))
@@ -2713,7 +2734,13 @@
         const foreignConflict = externalMatches.some(other => other.startTime && other.endTime &&
           timesOverlap(candidate.startTime, candidate.endTime, other.startTime, other.endTime) &&
           (candidate.exclusive || other.exclusive || candidate.fieldId === other.fieldId));
-        return localConflict || foreignConflict;
+        const rotationConflict = [...scheduled.filter(m=>m.id!==candidate.id),...externalMatches]
+          .some(other => other.startTime && other.endTime && candidate.fieldId && candidate.fieldId===other.fieldId &&
+            timeToMinutes(candidate.startTime) < timeToMinutes(other.endTime) +
+              Math.max(matchRotation(config.breakDuration),matchRotation(other._rotationMinutes ?? config.breakDuration)) &&
+            timeToMinutes(other.startTime) < timeToMinutes(candidate.endTime) +
+              Math.max(matchRotation(config.breakDuration),matchRotation(other._rotationMinutes ?? config.breakDuration)));
+        return localConflict || foreignConflict || rotationConflict;
       };
       const changedMatchConflict = (scheduled, ids, slots = reservedSlots) =>
         ids.some(id => matchSlotConflict(scheduled.find(m => m.id === id), scheduled, slots));
@@ -2976,7 +3003,7 @@
           fieldId: field.id, fieldName: field.name
         } : m);
         if (changedMatchConflict(updated, [match.id])) {
-          showToast('Ce créneau est occupé par un match, une équipe ou une réservation.', 'error'); return;
+          showToast('Créneau indisponible : match, rotation insuffisante, équipe ou réservation.', 'error'); return;
         }
         if (hasTeamTimeConflict(updated, [match.id])) {
           showToast('Une des deux équipes joue déjà pendant ce créneau.', 'error');
@@ -3070,11 +3097,18 @@
             timesOverlap(a,b,slot.startTime,slot.endTime));
           if (reserved) return timeToMinutes(reserved.endTime);
           const keys = participantKeys(fixture);
-          const hit = occupied.find(other => other.startTime && other.endTime &&
-            timesOverlap(a,b,other.startTime,other.endTime) &&
-            (exclusive || other.exclusive || other.fieldId === fieldId ||
-              (!other._eventId && keys.some(key => participantKeys(other).includes(key)))));
-          return hit ? timeToMinutes(hit.endTime) : null;
+          const hit = occupied.find(other => {
+            if(!other.startTime || !other.endTime)return false;
+            const overlaps=timesOverlap(a,b,other.startTime,other.endTime);
+            const sameField=other.fieldId===fieldId;
+            const rotation=Math.max(pause,matchRotation(other._rotationMinutes ?? config.breakDuration));
+            const tooSoon=sameField && start<timeToMinutes(other.endTime)+rotation &&
+              timeToMinutes(other.startTime)<end+rotation;
+            return tooSoon || (overlaps && (exclusive || other.exclusive || sameField ||
+              (!other._eventId && keys.some(key=>participantKeys(other).includes(key)))));
+          });
+          return hit ? timeToMinutes(hit.endTime) +
+            (hit.fieldId===fieldId ? Math.max(pause,matchRotation(hit._rotationMinutes ?? config.breakDuration)):0) : null;
         };
         const put = (fixture, earliest = firstMinute, exclusive = false) => {
           // Préserver une réservation manuelle déjà existante lors de la réorganisation.
@@ -3343,11 +3377,19 @@
               }
               const reservation=busySlots.find(slot=>timesOverlap(startTime,endTime,slot.startTime,slot.endTime));
               if(reservation){t=Math.max(t+5,timeToMinutes(reservation.endTime));continue;}
-              const conflict=occupied.find(other=>other.startTime&&other.endTime&&
-                timesOverlap(startTime,endTime,other.startTime,other.endTime)&&
-                (other.exclusive || other.fieldId===field.id ||
-                 (!other._eventId && [match.team1Id,match.team2Id].some(id=>id&&(id===other.team1Id||id===other.team2Id)))));
-              if(conflict){t=Math.max(t+5,timeToMinutes(conflict.endTime));continue;}
+              const conflict=occupied.find(other=>{
+                if(!other.startTime||!other.endTime)return false;
+                const overlaps=timesOverlap(startTime,endTime,other.startTime,other.endTime);
+                const rotation=Math.max(pause,matchRotation(other._rotationMinutes ?? config.breakDuration));
+                const tooSoon=other.fieldId===field.id && t<timeToMinutes(other.endTime)+rotation &&
+                  timeToMinutes(other.startTime)<t+duration+rotation;
+                return tooSoon || (overlaps && (other.exclusive || other.fieldId===field.id ||
+                  (!other._eventId && [match.team1Id,match.team2Id].some(id=>id&&(id===other.team1Id||id===other.team2Id)))));
+              });
+              if(conflict){
+                const rotation=conflict.fieldId===field.id ? Math.max(pause,matchRotation(conflict._rotationMinutes ?? config.breakDuration)):0;
+                t=Math.max(t+5,timeToMinutes(conflict.endTime)+rotation);continue;
+              }
               // Favoriser la répartition, sans décaler exagérément les horaires.
               const score=t+(counts.get(field.id)||0)*Math.min(8,Math.max(3,duration/3));
               if(!chosen || score<chosen.score || (score===chosen.score&&t<chosen.t))
@@ -4110,13 +4152,25 @@
                         <span className="text-[11px] font-bold text-slate-400 block mb-1">Pause rotation (min)</span>
                         <select
                           value={config.breakDuration}
-                          onChange={(e) => setConfig({ ...config, breakDuration: parseInt(e.target.value, 10) || 5 })}
+                          onChange={(e) => {
+                            const requested = Number(e.target.value);
+                            const nextPause = Number.isFinite(requested) ? Math.max(0, requested) : 5;
+                            setConfig(old => ({...old, breakDuration: nextPause}));
+                            // Écriture ciblée : ne jamais renvoyer/écraser les scores et
+                            // les matchs enregistrés par un autre organisateur.
+                            if (dbRef.current && cloudStatus === 'online' && !isRemoteUpdate.current) {
+                              dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id))
+                                .set({config:{breakDuration:nextPause},updatedAt:new Date().toISOString()}, {merge:true})
+                                .catch(err => showToast('Pause modifiée localement, mais pas synchronisée : '+err.message,'error'));
+                            }
+                          }}
                           className="w-full bg-[#160608] border border-red-900/60 rounded-lg p-1.5 text-xs text-white font-mono font-bold"
                         >
                           {[0, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20].map(p => (
                             <option key={p} value={p}>{p} minutes</option>
                           ))}
                         </select>
+                        <p className="mt-1 text-[10px] text-slate-400">Incluse entre deux matchs sur un terrain. Pour un planning déjà créé, relance la prévisualisation de l'alternance puis confirme.</p>
                       </div>
 
                       <div className="bg-[#0b0304] p-3 rounded-xl border border-red-950">
