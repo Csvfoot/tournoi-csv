@@ -83,7 +83,7 @@
 
   <script type="text/babel">    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    const CSV_APP_VERSION = '5.7';
+    const CSV_APP_VERSION = '5.8';
     const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
     const CSV_BACKUP_VERSION = 1;
 
@@ -92,7 +92,7 @@
     function verifyCsvBackup(raw) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
           raw.format !== CSV_BACKUP_FORMAT || raw.version !== CSV_BACKUP_VERSION)
-        throw new Error('Ce fichier n’est pas une sauvegarde Tournoi CSV V5.7 reconnue.');
+        throw new Error('Ce fichier n’est pas une sauvegarde Tournoi CSV reconnue.');
       if (!Array.isArray(raw.catalog) || !raw.catalog.length || raw.catalog.length > 350 ||
           !Array.isArray(raw.fields) || !raw.fields.length || !raw.records ||
           typeof raw.records !== 'object' || Array.isArray(raw.records))
@@ -122,7 +122,8 @@
             !Array.isArray(data.teams) || !Array.isArray(data.matches) ||
             data.teams.length > 5000 || data.matches.length > 20000)
           throw new Error('Données incorrectes pour « '+event.category+' ».');
-        restored[event.id] = {config:data.config,teams:data.teams,matches:data.matches};
+        restored[event.id] = {config:data.config,teams:data.teams,matches:data.matches,
+          auditLog:Array.isArray(data.auditLog)?data.auditLog.slice(-150):[]};
       }
       return {format:CSV_BACKUP_FORMAT,version:CSV_BACKUP_VERSION,
         exportedAt:typeof raw.exportedAt==='string'?raw.exportedAt:'',
@@ -457,6 +458,17 @@
     };
 
 
+    // Attendre le chargement de la session Firebase avant d'en créer une anonyme.
+    // Sinon une reconnexion organisateur e-mail pourrait être écrasée au démarrage.
+    const csvEnsureFirebaseAuth=async()=>{
+      const auth=firebase.auth();
+      const user=await new Promise(resolve=>{
+        let unsubscribe=()=>{};
+        unsubscribe=auth.onAuthStateChanged(u=>{unsubscribe();resolve(u);},()=>resolve(null));
+      });
+      return user||await auth.signInAnonymously();
+    };
+
     // Outil de résolution du planning général : propose des créneaux sans
     // toucher aux scores, aux rencontres jouées, aux réservations ou aux finales.
     const planningMinutes = value => {
@@ -550,6 +562,69 @@
       return !!(a.kind==='réservation' || b.kind==='réservation' || a.exclusive || b.exclusive ||
         (a.fieldId && a.fieldId===b.fieldId) || sameTeam);
     };
+
+    // V5.8 : journal des modifications (ne stocke JAMAIS le code PIN).
+    const csvHistoryKey=id=>'cslv_history_v58_'+String(id);
+    const csvAuditFields=['score1','score2','pens1','pens2','status','mvp','mvpTeamId','events'];
+    const csvSnapshotScore=match=>Object.fromEntries(csvAuditFields.map(k=>[k,
+      JSON.parse(JSON.stringify(match?.[k] === undefined ? null : match[k]))]));
+    const csvSameScore=(a,b)=>JSON.stringify(csvSnapshotScore(a))===JSON.stringify(csvSnapshotScore(b));
+    const csvAuditActor=()=>{
+      try{
+        let value=localStorage.getItem('cslv_device_audit_id_v58');
+        if(!value){value='Poste-'+Math.random().toString(36).slice(2,7).toUpperCase();
+          localStorage.setItem('cslv_device_audit_id_v58',value);}
+        return value;
+      }catch(e){return 'Organisateur';}
+    };
+    const csvAuditEntry=(kind,eventId,details={})=>({
+      auditId:'audit-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9),
+      kind,eventId,at:new Date().toISOString(),actor:csvAuditActor(),...details
+    });
+    const csvRecordLocalAudit=(eventId,entry)=>{
+      try{
+        const key=csvHistoryKey(eventId);
+        const current=readLocalJson(key,[]);
+        if(!current.some(x=>x.auditId===entry.auditId))
+          localStorage.setItem(key,JSON.stringify([...current,entry].slice(-150)));
+      }catch(e){console.warn('Historique local',e);}
+    };
+    const csvMatchAudit=(eventId,previous,next,detail='Score / feuille de match')=>
+      previous && next && !csvSameScore(previous,next) ? csvAuditEntry('score',eventId,{
+        matchId:next.id,detail,before:csvSnapshotScore(previous),after:csvSnapshotScore(next),
+        matchLabel:String(next.stage||next.group||'Match')
+      }) : null;
+    // Cette proposition ne déplace pas les rencontres commencées, les
+    // réservations, la petite finale ni la grande finale.
+    const csvBuildDelayPlan=(entries,options,pauseForEvent=()=>5)=>{
+      const from=planningMinutes(options?.from),minutes=Number(options?.minutes),field=options?.field||'all';
+      if(from<0||from>=1440||!Number.isInteger(minutes)||minutes<1||minutes>90)
+        return {error:'Choisis une heure valide et un retard de 1 à 90 minutes.'};
+      const candidates=(entries||[]).filter(m=>m.kind==='match'&&!planningImmutable(m)&&
+        planningMinutes(m.startTime)>=from && (field==='all'||m.fieldId===field));
+      if(!candidates.length)return {error:'Aucune rencontre à venir à décaler après cet horaire sur le terrain choisi.'};
+      const movedKeys=new Set(candidates.map(planningKey));
+      const updated=(entries||[]).map(m=>{
+        if(!movedKeys.has(planningKey(m)))return m;
+        const start=planningMinutes(m.startTime)+minutes;
+        const end=planningMinutes(m.endTime)+minutes;
+        return {...m,startTime:planningTime(start),endTime:planningTime(end)};
+      });
+      if(updated.some(m=>movedKeys.has(planningKey(m))&&planningMinutes(m.endTime)>1440))
+        return {error:'Le décalage dépasse minuit pour au moins un match.'};
+      for(let i=0;i<updated.length;i++)for(let j=i+1;j<updated.length;j++){
+        const a=updated[i],b=updated[j];
+        if(!movedKeys.has(planningKey(a))&&!movedKeys.has(planningKey(b)))continue;
+        if(planningConflict(a,b)||planningRotationConflict(a,b,pauseForEvent))
+          return {error:`Conflit après décalage : ${a.category||'Tournoi'} ${a.startTime} / ${b.category||'Tournoi'} ${b.startTime}. Essaie « Tous les terrains » ou un autre horaire.`};
+      }
+      return {moves:updated.filter(m=>movedKeys.has(planningKey(m))).map(m=>({
+        eventId:m.eventId,id:m.id,fieldId:m.fieldId,category:m.category,
+        from:(entries||[]).find(x=>planningKey(x)===planningKey(m))?.startTime,
+        to:m.startTime,endTime:m.endTime
+      })),updated,signature:planningSignature(entries||[]),from,minutes,field};
+    };
+
     const planningImmutable = item => item.kind==='réservation' || item.exclusive ||
       ['finished','playing','live','started','in_progress'].includes(item.status) ||
       item.id==='ko-final' || item.id==='ko-bronze' || item.stage==='Grande Finale' ||
@@ -1441,6 +1516,13 @@
         setHubIsEditor(isEditor);
         if (isEditor) setOrganizerLinkPending(false);
         try {sessionStorage.setItem('cslv_editor_session_v1',isEditor?'1':'0');}catch(e){}
+        // Sur une tablette partagée, repasser spectateur retire aussi la
+        // session Firebase e-mail qui autorisait les écritures.
+        if(!isEditor && typeof firebase!=='undefined' && firebase.apps.length){
+          const auth=firebase.auth();
+          if(auth.currentUser && !auth.currentUser.isAnonymous)
+            auth.signOut().then(()=>auth.signInAnonymously()).catch(e=>console.warn('Déconnexion Firebase',e));
+        }
         // Important : un ancien ?role=viewer ne doit pas annuler le code PIN
         // quand on change de catégorie, passe au planning ou recharge la page.
         const nextParams=new URLSearchParams(window.location.search);
@@ -1458,7 +1540,7 @@
       const [records,setRecords] = useState(()=>({principal:{
         config:readLocalJson('cslv_config',{}),
         matches:readLocalJson('cslv_matches',[]),
-        teams:readLocalJson('cslv_teams',[])
+        teams:readLocalJson('cslv_teams',[]),auditLog:readLocalJson(csvHistoryKey('principal'),[])
       }}));
       const [hubStatus,setHubStatus] = useState('local');
       const [hubMessage,setHubMessage] = useState('');
@@ -1473,6 +1555,15 @@
       const [dateInput,setDateInput] = useState(()=>TODAY_LOCAL());
       const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
       const [repairPreview,setRepairPreview] = useState(null);
+      const [delayFrom,setDelayFrom]=useState('11:00');
+      const [delayMinutes,setDelayMinutes]=useState(15);
+      const [delayField,setDelayField]=useState('all');
+      const [delayPreview,setDelayPreview]=useState(null);
+      const [delayNotice,setDelayNotice]=useState('');
+      const [delayWorking,setDelayWorking]=useState(false);
+      const [historyNotice,setHistoryNotice]=useState('');
+      const [historyWorking,setHistoryWorking]=useState(false);
+      const [historyOpen,setHistoryOpen]=useState(false);
       const [alternateFirst,setAlternateFirst] = useState('');
       const [alternateMode,setAlternateMode] = useState('waves');
       const [alternateSecond,setAlternateSecond] = useState('');
@@ -1500,7 +1591,7 @@
             if(!firebase.apps.length) firebase.initializeApp(conf);
             const db=firebase.firestore();
             dbRef.current=db;
-            try {await firebase.auth().signInAnonymously();} catch(e) {}
+            try {await csvEnsureFirebaseAuth();} catch(e) {}
             if(cancelled) return;
             unsubscribe=db.collection('tournaments').doc('cslv_multi_catalog_v1').onSnapshot(doc=>{
               if(cancelled)return;
@@ -1535,12 +1626,15 @@
                 for(const [kind,value] of [['config',data.config||{}],['teams',data.teams||[]],['matches',data.matches||[]]])
                   localStorage.setItem(tournamentStorageKey(event.id,kind),JSON.stringify(value));
               } catch(e) { console.warn('Cache planning',e); }
-              setRecords(old=>({...old,[event.id]:{config:data.config||{},teams:data.teams||[],matches:data.matches||[]}}));
+              const auditLog=Array.isArray(data.auditLog)?data.auditLog:[];
+              try{localStorage.setItem(csvHistoryKey(event.id),JSON.stringify(auditLog.slice(-150)));}catch(e){}
+              setRecords(old=>({...old,[event.id]:{config:data.config||{},teams:data.teams||[],matches:data.matches||[],auditLog}}));
             } else {
               setRecords(old=>({...old,[event.id]:old[event.id]||{
                 config:readLocalJson(tournamentStorageKey(event.id,'config'),{}),
                 matches:readLocalJson(tournamentStorageKey(event.id,'matches'),[]),
-                teams:readLocalJson(tournamentStorageKey(event.id,'teams'),[])
+                teams:readLocalJson(tournamentStorageKey(event.id,'teams'),[]),
+                auditLog:readLocalJson(csvHistoryKey(event.id),[])
               }}));
             }
           },err=>{setHubMessage('Planning partiellement indisponible : '+err.message);setHubStatus('error');}));
@@ -1550,10 +1644,11 @@
       const localRecord=id=>({
         config:readLocalJson(tournamentStorageKey(id,'config'),{}),
         teams:readLocalJson(tournamentStorageKey(id,'teams'),[]),
-        matches:readLocalJson(tournamentStorageKey(id,'matches'),[])
+        matches:readLocalJson(tournamentStorageKey(id,'matches'),[]),
+        auditLog:readLocalJson(csvHistoryKey(id),[])
       });
       const updateRecord=useCallback((id,data)=>{
-        setRecords(old=>({...old,[id]:data}));
+        setRecords(old=>({...old,[id]:{...data,auditLog:data.auditLog||old[id]?.auditLog||readLocalJson(csvHistoryKey(id),[])}}));
       },[]);
       const persistCatalog=async(next,fieldsOverride=null)=>{
         setCatalog(next);
@@ -1584,7 +1679,8 @@
         const allRecords=Object.create(null);
         for(const event of catalog){
           const record=records[event.id]||localRecord(event.id);
-          allRecords[event.id]={config:record.config||{},teams:record.teams||[],matches:record.matches||[]};
+          allRecords[event.id]={config:record.config||{},teams:record.teams||[],matches:record.matches||[],
+            auditLog:record.auditLog||readLocalJson(csvHistoryKey(event.id),[])};
         }
         const doc={format:CSV_BACKUP_FORMAT,version:CSV_BACKUP_VERSION,
           appVersion:CSV_APP_VERSION,exportedAt:new Date().toISOString(),
@@ -1645,13 +1741,16 @@
           await batch.commit();
           // Le cache local n'est changé qu'après une écriture Firebase réussie.
           for(const previous of catalog){
-            if(!future.has(previous.id))for(const kind of ['config','teams','matches'])
-              localStorage.removeItem(tournamentStorageKey(previous.id,kind));
+            if(!future.has(previous.id)){
+              for(const kind of ['config','teams','matches'])localStorage.removeItem(tournamentStorageKey(previous.id,kind));
+              localStorage.removeItem(csvHistoryKey(previous.id));
+            }
           }
           for(const event of verified.catalog){
             for(const kind of ['config','teams','matches'])
               localStorage.setItem(tournamentStorageKey(event.id,kind),
                 JSON.stringify(verified.records[event.id][kind]));
+            localStorage.setItem(csvHistoryKey(event.id),JSON.stringify(verified.records[event.id].auditLog||[]));
           }
           localStorage.setItem('cslv_multi_catalog_v1',JSON.stringify(verified.catalog));
           localStorage.setItem('cslv_shared_fields_v1',JSON.stringify(verified.fields));
@@ -1841,7 +1940,7 @@
           const updated=refreshDayEntryKnockouts(stored.map(m=>m.id===latest.id?merged:m),teamList,rules);
           return {saved:updated.find(m=>m.id===latest.id),matches:updated};
         };
-        let result=null,finalData=null;
+        let result=null,finalData=null,auditEvent=null;
         if(dbRef.current&&hubStatus==='online'){
           const docRef=dbRef.current.collection('tournaments').doc(tournamentDocId(eventId));
           await dbRef.current.runTransaction(async tx=>{
@@ -1849,16 +1948,27 @@
             if(!snap.exists)throw new Error('Tournoi indisponible dans Firebase.');
             const data=snap.data()||{};
             result=apply(data.matches||[],data.teams||[],data.config||{});
-            finalData={config:data.config||{},teams:data.teams||[],matches:result.matches};
-            tx.set(docRef,{matches:result.matches,updatedAt:new Date().toISOString()},{merge:true});
+            const before=(data.matches||[]).find(m=>m.id===edited.id);
+            auditEvent=csvMatchAudit(eventId,before,result.saved,'Saisie de la journée');
+            finalData={config:data.config||{},teams:data.teams||[],matches:result.matches,
+              auditLog:data.auditLog||[]};
+            const patch={matches:result.matches,updatedAt:new Date().toISOString()};
+            if(auditEvent)patch.auditLog=firebase.firestore.FieldValue.arrayUnion(auditEvent);
+            tx.set(docRef,patch,{merge:true});
           });
         }else{
           const data=records[eventId]||localRecord(eventId);
           result=apply(data.matches||[],data.teams||[],data.config||{});
+          const before=(data.matches||[]).find(m=>m.id===edited.id);
+          auditEvent=csvMatchAudit(eventId,before,result.saved,'Saisie de la journée');
           finalData={...data,matches:result.matches};
         }
         try{localStorage.setItem(tournamentStorageKey(eventId,'matches'),JSON.stringify(finalData.matches));}catch(e){}
-        setRecords(old=>({...old,[eventId]:finalData}));
+        if(auditEvent)csvRecordLocalAudit(eventId,auditEvent);
+        setRecords(old=>({...old,[eventId]:{
+          ...finalData,auditLog:auditEvent?[...(finalData.auditLog||[]),auditEvent]:
+            (finalData.auditLog||readLocalJson(csvHistoryKey(eventId),[]))
+        }}));
         return result.saved;
       };
 
@@ -1881,8 +1991,137 @@
       const conflictPairs=planningConflictPairs(busyEvents);
       const cloudReady=hubStatus!=='loading' && hubStatus!=='error' &&
         (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
+      const historyOfDay=catalog.filter(e=>e.date===dateFilter).flatMap(e=>{
+        const stored=eventData(e);
+        const historyEntries=[...(Array.isArray(stored.auditLog)?stored.auditLog:[]),
+          ...readLocalJson(csvHistoryKey(e.id),[])];
+        const timeline=[...new Map(historyEntries.map(entry=>[entry.auditId,entry])).values()];
+        return timeline.map(entry=>({...entry,eventId:e.id,category:e.category}));
+      }).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,100);
+      const historyUndone=new Set(historyOfDay.filter(e=>e.kind==='undo_score').map(e=>e.undoOf));
+      const pauseForEvent=id=>rotationMinutes((eventData(catalog.find(e=>e.id===id)||{}).config||{}).breakDuration);
+
 
       const sameDayCategories=catalog.filter(e=>e.date===dateFilter);
+      const previewDelay=()=>{
+        setDelayNotice('');setDelayPreview(null);
+        if(!hubIsEditor||hubStatus!=='online'||!dbRef.current||sameDayCategories.some(e=>!loadedDocs[e.id])){
+          setDelayNotice('Connecte Firebase et attends le chargement de toutes les catégories pour éviter les conflits.');return;
+        }
+        const plan=csvBuildDelayPlan(busyEvents,{from:delayFrom,minutes:delayMinutes,field:delayField},pauseForEvent);
+        if(plan.error)setDelayNotice('Aucun changement : '+plan.error);
+        else setDelayPreview(plan);
+      };
+      const applyDelay=async()=>{
+        if(!hubIsEditor||!delayPreview||delayWorking)return;
+        if(hubStatus!=='online'||!dbRef.current){setDelayNotice('Connexion Firebase requise.');return;}
+        setDelayWorking(true);setDelayNotice('');
+        let newMatchesById={},auditsById={};
+        try{
+          const db=dbRef.current;
+          await db.runTransaction(async tx=>{
+            // Toutes les catégories du jour sont lues avant toute écriture.
+            const all=[];
+            for(const event of sameDayCategories){
+              const ref=db.collection('tournaments').doc(tournamentDocId(event.id));
+              all.push({event,ref,snap:await tx.get(ref)});
+            }
+            const freshEntries=all.flatMap(x=>{
+              const data=x.snap.exists?x.snap.data():{};
+              return [
+                ...(data.matches||[]).filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:x.event.id,category:x.event.category,kind:'match'})),
+                ...(data.config?.reservedSlots||[]).filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:x.event.id,category:x.event.category,kind:'réservation'}))
+              ];
+            }).sort((a,b)=>String(a.startTime).localeCompare(String(b.startTime))||String(a.fieldName||'').localeCompare(String(b.fieldName||'')));
+            if(planningSignature(freshEntries)!==delayPreview.signature)
+              throw new Error('Le calendrier a changé depuis la prévisualisation. Recalcule le retard.');
+            const freshConfigById=Object.fromEntries(all.map(x=>[x.event.id,x.snap.exists?x.snap.data().config||{}:{}]));
+            const freshPause=id=>rotationMinutes(freshConfigById[id]?.breakDuration);
+            const check=csvBuildDelayPlan(freshEntries,{from:delayPreview.from,minutes:delayPreview.minutes,field:delayPreview.field},freshPause);
+            if(check.error)throw new Error(check.error);
+            if(JSON.stringify(check.moves.map(m=>[m.eventId,m.id,m.to]))!==
+               JSON.stringify(delayPreview.moves.map(m=>[m.eventId,m.id,m.to])))
+              throw new Error('La proposition a changé, prévisualise à nouveau.');
+            const moved=Object.fromEntries(check.moves.map(x=>[x.eventId+'|'+x.id,x]));
+            for(const x of all){
+              if(!x.snap.exists)throw new Error('Catégorie absente dans Firebase.');
+              const data=x.snap.data();
+              const mine=check.moves.filter(m=>m.eventId===x.event.id);
+              if(!mine.length)continue;
+              const updated=(data.matches||[]).map(m=>{
+                const next=moved[x.event.id+'|'+m.id];
+                return next?{...m,startTime:next.to,endTime:next.endTime}:m;
+              });
+              const audit=csvAuditEntry('delay',x.event.id,{
+                detail:`Retard de ${delayPreview.minutes} min à partir de ${delayFrom}`,
+                moves:mine.map(m=>({id:m.id,from:m.from,to:m.to,fieldId:m.fieldId}))
+              });
+              tx.update(x.ref,{matches:updated,updatedAt:new Date().toISOString(),
+                auditLog:firebase.firestore.FieldValue.arrayUnion(audit)});
+              newMatchesById[x.event.id]=updated;auditsById[x.event.id]=audit;
+            }
+          });
+          for(const [id,updated] of Object.entries(newMatchesById)){
+            try{localStorage.setItem(tournamentStorageKey(id,'matches'),JSON.stringify(updated));}catch(e){}
+            csvRecordLocalAudit(id,auditsById[id]);
+          }
+          setRecords(old=>{
+            const next={...old};
+            for(const [id,updated] of Object.entries(newMatchesById)){
+              next[id]={...old[id],matches:updated,
+                auditLog:[...(old[id]?.auditLog||[]),auditsById[id]]};
+            }
+            return next;
+          });
+          setResetEpoch(v=>v+1);setDelayPreview(null);
+          setDelayNotice(`${delayPreview.moves.length} match(s) décalé(s) de ${delayPreview.minutes} minute(s), synchronisés dans Firebase.`);
+        }catch(err){setDelayNotice('Aucun changement appliqué : '+(err?.message||String(err)));setDelayPreview(null);}
+        finally{setDelayWorking(false);}
+      };
+      const undoScoreAudit=async entry=>{
+        if(!hubIsEditor||historyWorking||hubStatus!=='online'||!dbRef.current||entry.kind!=='score')return;
+        if(!window.confirm('Rétablir le score, statut, buteurs et MVP précédents pour ce match ?'))return;
+        setHistoryWorking(true);setHistoryNotice('');
+        try{
+          const db=dbRef.current;
+          const doc=db.collection('tournaments').doc(tournamentDocId(entry.eventId));
+          let finalMatches=null,audit=null;
+          await db.runTransaction(async tx=>{
+            const snap=await tx.get(doc);
+            if(!snap.exists)throw new Error('Tournoi indisponible dans Firebase.');
+            const data=snap.data()||{};
+            const list=data.matches||[];
+            const history=data.auditLog||[];
+            if(history.some(x=>x.kind==='undo_score'&&x.undoOf===entry.auditId))
+              throw new Error('Cette modification a déjà été annulée.');
+            const previous=list.find(m=>m.id===entry.matchId);
+            if(!previous)throw new Error('Match introuvable.');
+            if(JSON.stringify(csvSnapshotScore(previous))!==JSON.stringify(entry.after))
+              throw new Error('Le match a été modifié depuis. Annulation refusée pour éviter de perdre une nouvelle saisie.');
+            const restored={...previous,...entry.before};
+            const candidate=refreshDayEntryKnockouts(list.map(m=>m.id===previous.id?restored:m),data.teams||[],data.config||{});
+            // Ne jamais retirer un qualifié d'une finale déjà jouée.
+            const affected=candidate.find((m,i)=>m.id!=='dummy'&&
+              m.status==='finished'&&m.id!==entry.matchId &&
+              (m.team1Id!==list[i]?.team1Id||m.team2Id!==list[i]?.team2Id));
+            if(affected)throw new Error('Une rencontre suivante est déjà terminée : annulation automatique impossible.');
+            audit=csvAuditEntry('undo_score',entry.eventId,{
+              undoOf:entry.auditId,matchId:entry.matchId,detail:'Annulation : '+(entry.detail||'score'),
+              before:csvSnapshotScore(previous),after:csvSnapshotScore(restored)
+            });
+            finalMatches=candidate;
+            tx.update(doc,{matches:finalMatches,updatedAt:new Date().toISOString(),
+              auditLog:firebase.firestore.FieldValue.arrayUnion(audit)});
+          });
+          csvRecordLocalAudit(entry.eventId,audit);
+          try{localStorage.setItem(tournamentStorageKey(entry.eventId,'matches'),JSON.stringify(finalMatches));}catch(e){}
+          setRecords(old=>({...old,[entry.eventId]:{...old[entry.eventId],matches:finalMatches,
+            auditLog:[...(old[entry.eventId]?.auditLog||[]),audit]}}));
+          setResetEpoch(v=>v+1);
+          setHistoryNotice('Ancien résultat rétabli et synchronisé dans Firebase.');
+        }catch(err){setHistoryNotice('Annulation refusée : '+(err?.message||String(err)));}
+        finally{setHistoryWorking(false);}
+      };
       const [alternationBusy,setAlternationBusy] = useState(false);
       const previewAlternation=async()=>{
         if(alternationBusy)return;
@@ -2073,6 +2312,12 @@
         const nextData=isReservation?{...originalData,config:{...originalData.config,reservedSlots:nextList}}:
           {...originalData,matches:nextList};
         if(!window.confirm(`Déplacer ${editingSource.category} : ${editingSource.startTime} vers ${editingCandidate.startTime} sur ${editingCandidate.fieldName} ? Les scores seront conservés.`))return;
+        const manualAudit=csvAuditEntry('manual_planning',origin.id,{
+          detail:(isReservation?'Réservation':'Match')+' · '+editingSource.startTime+' → '+editingCandidate.startTime+
+            ' · '+editingCandidate.fieldName,
+          moves:[{id:manualPlanningEdit.id,from:editingSource.startTime,to:editingCandidate.startTime,
+            fieldId:editingCandidate.fieldId}]
+        });
         try {
           if(hubStatus==='online'){
             if(!dbRef.current)throw new Error('Firebase non disponible.');
@@ -2103,15 +2348,19 @@
               if(!changed || freshEvents.some(x=>planningKey(x)!==manualPlanningEdit.key && planningConflict(changed,x)))
                 throw new Error('Ce créneau entre encore en conflit avec une autre rencontre ou réservation.');
               if(isReservation){
-                tx.update(target.ref,{'config.reservedSlots':nextList,updatedAt:new Date().toISOString()});
+                tx.update(target.ref,{'config.reservedSlots':nextList,updatedAt:new Date().toISOString(),
+                  auditLog:firebase.firestore.FieldValue.arrayUnion(manualAudit)});
               }else{
-                tx.update(target.ref,{matches:nextList,updatedAt:new Date().toISOString()});
+                tx.update(target.ref,{matches:nextList,updatedAt:new Date().toISOString(),
+                  auditLog:firebase.firestore.FieldValue.arrayUnion(manualAudit)});
               }
             });
           }
           localStorage.setItem(tournamentStorageKey(origin.id,isReservation?'config':'matches'),
             JSON.stringify(isReservation?nextData.config:nextList));
-          setRecords(old=>({...old,[origin.id]:nextData}));
+          csvRecordLocalAudit(origin.id,manualAudit);
+          setRecords(old=>({...old,[origin.id]:{...nextData,
+            auditLog:[...(old[origin.id]?.auditLog||[]),manualAudit]}}));
           setResetEpoch(epoch=>epoch+1);
           setManualPlanningEdit(null);
           setRepairNotice('Créneau corrigé : '+editingSource.category+' · '+editingCandidate.startTime+'–'+editingCandidate.endTime+
@@ -2311,6 +2560,63 @@
             <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
               className="ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white"/></label>
           </div>
+          <section className="rounded-xl border border-amber-800/50 bg-[#1b090e] p-3 sm:p-4 space-y-3" aria-label="Gérer un retard de planning">
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div><h3 className="font-bold text-amber-300 text-sm">⏰ Gérer un retard — Jour J</h3>
+                <p className="text-xs text-slate-400">Décale les rencontres non commencées après une heure choisie. Les scores, réservations et finales isolées restent inchangés. Prévisualisation obligatoire.</p></div>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 items-end">
+              <label className="text-xs text-slate-300">À partir de
+                <input type="time" value={delayFrom} onChange={e=>{setDelayFrom(e.target.value);setDelayPreview(null);}} className="mt-1 block w-full min-h-[43px] rounded-lg border border-red-900 bg-black px-2 text-white"/>
+              </label>
+              <label className="text-xs text-slate-300">Retard
+                <select value={delayMinutes} onChange={e=>{setDelayMinutes(Number(e.target.value));setDelayPreview(null);}} className="mt-1 block w-full min-h-[43px] rounded-lg border border-red-900 bg-black px-2 text-white">
+                  {[5,10,15,20,25,30,45,60,90].map(m=><option key={m} value={m}>{m} min</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-slate-300">Terrains
+                <select value={delayField} onChange={e=>{setDelayField(e.target.value);setDelayPreview(null);}} className="mt-1 block w-full min-h-[43px] rounded-lg border border-red-900 bg-black px-2 text-white">
+                  <option value="all">Tous les terrains</option>{sharedFields.map(f=><option value={f.id} key={f.id}>{f.name}</option>)}
+                </select>
+              </label>
+              <button type="button" disabled={delayWorking||hubStatus!=='online'} onClick={previewDelay}
+                className="min-h-[43px] rounded-lg bg-amber-500 text-black font-black text-xs disabled:opacity-40">Prévisualiser le retard</button>
+            </div>
+            {delayNotice && <p className="text-xs font-semibold text-amber-200" role="status">{delayNotice}</p>}
+            {delayPreview && <div className="rounded-xl border border-emerald-800/70 bg-emerald-950/20 p-3 space-y-2">
+              <p className="text-sm text-emerald-300 font-bold">{delayPreview.moves.length} rencontre(s) à décaler de {delayPreview.minutes} min</p>
+              <div className="text-xs text-slate-200 max-h-44 overflow-y-auto space-y-1">
+                {delayPreview.moves.slice(0,18).map(m=><div key={m.eventId+'-'+m.id}>{m.category} · {m.from} → <strong className="text-emerald-300">{m.to}</strong> · {sharedFields.find(f=>f.id===m.fieldId)?.name||'Terrain'}</div>)}
+                {delayPreview.moves.length>18 && <p>… et {delayPreview.moves.length-18} autres matchs</p>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={delayWorking} onClick={applyDelay} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50">{delayWorking?'Enregistrement…':'Confirmer le décalage'}</button>
+                <button type="button" onClick={()=>setDelayPreview(null)} className="rounded-lg border border-slate-600 px-4 py-2 text-xs text-white">Annuler</button>
+              </div>
+            </div>}
+          </section>
+          <section className="rounded-xl border border-red-900/70 bg-[#190b10] p-3 sm:p-4 space-y-3" aria-label="Historique des modifications">
+            <button type="button" className="w-full flex items-center justify-between text-left min-h-[43px]" onClick={()=>setHistoryOpen(v=>!v)} aria-expanded={historyOpen}>
+              <span className="font-bold text-amber-300 text-sm">↩️ Historique des modifications · {historyOfDay.length} événement(s)</span><span className="text-xs text-slate-300">{historyOpen?'Réduire ▲':'Afficher ▼'}</span>
+            </button>
+            {historyOpen && <div className="space-y-2">
+              <p className="text-xs text-slate-400">Journal des scores saisis, des retards et des ajustements manuels depuis la V5.8. Le poste est identifié, mais le nom de la personne n'est pas vérifié. Annulation des scores possible si rien n'a changé depuis.</p>
+              {historyNotice && <p className="text-xs text-amber-200" role="status">{historyNotice}</p>}
+              {!historyOfDay.length?<p className="text-xs text-slate-400">Aucune modification enregistrée pour cette date.</p>:
+                <div className="max-h-80 overflow-y-auto space-y-2">
+                  {historyOfDay.map((a,i)=><div key={a.auditId||i} className="rounded-lg border border-red-900/50 bg-[#10080c] p-2 flex flex-wrap gap-2 items-center justify-between">
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="text-xs text-white font-semibold">{a.kind==='score'?'⚽ Résultat':a.kind==='undo_score'?'↩️ Annulation de score':a.kind==='delay'?'⏰ Décalage':'✏️ Modification'} · {a.category}</div>
+                      <div className="text-[11px] text-slate-300">{a.detail||a.matchLabel||'Modification'} · {a.actor||'Organisateur'} · {a.at?new Date(a.at).toLocaleString('fr-FR'):''}</div>
+                      {a.kind==='score' && <div className="text-[11px] text-amber-200">{a.before?.score1??'-'}–{a.before?.score2??'-'} → {a.after?.score1??'-'}–{a.after?.score2??'-'}</div>}
+                      {a.kind==='delay' && <div className="text-[11px] text-amber-200">{a.moves?.length||0} matchs déplacés</div>}
+                    </div>
+                    {a.kind==='score' && !historyUndone.has(a.auditId) && <button type="button" disabled={historyWorking||hubStatus!=='online'} onClick={()=>undoScoreAudit(a)}
+                      className="min-h-[39px] rounded-lg border border-amber-700 px-3 py-1 text-xs text-amber-200 disabled:opacity-40">Annuler ce score</button>}
+                  </div>)}
+                </div>}
+            </div>}
+          </section>
           {sameDayCategories.length>=2 && <section className="bg-[#1b090e] rounded-xl border border-amber-800/50 p-3 sm:p-4 space-y-3" aria-label="Alterner deux tournois">
             <h3 className="text-amber-300 font-bold text-sm">🔄 Alterner les matchs de deux catégories</h3>
             <p className="text-xs text-slate-400">Par vagues : tous les terrains servent une catégorie, puis l'autre au créneau suivant. Tu peux inverser l'ordre, choisir l'ancienne alternance match par match ou déplacer manuellement certains matchs après validation. Les matchs commencés ou terminés restent inchangés ; les réservations et finales exclusives restent protégées.</p>
@@ -2493,6 +2799,25 @@
       const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
+      const [secureLoginOpen,setSecureLoginOpen]=useState(false);
+      const [secureEmail,setSecureEmail]=useState('');
+      const [securePassword,setSecurePassword]=useState('');
+      const [secureBusy,setSecureBusy]=useState(false);
+      const secureFirebaseLogin=async()=>{
+        if(secureBusy)return;
+        setSecureBusy(true);setPinError('');
+        try{
+          if(!firebase.apps.length)firebase.initializeApp(loadCloudConfig());
+          const result=await firebase.auth().signInWithEmailAndPassword(secureEmail.trim(),securePassword);
+          await result.user.reload();
+          await result.user.getIdToken(true);
+          if(!firebase.auth().currentUser.emailVerified)
+            throw new Error('Adresse e-mail non vérifiée. Confirme l’e-mail du compte Firebase avant de réessayer.');
+          setUserRole('editor');setAdminPinModalOpen(false);setSecurePassword('');
+          showToast('Compte organisateur Firebase connecté.');
+        }catch(err){setPinError('Connexion Firebase : '+(err?.message||String(err)));}
+        finally{setSecureBusy(false);}
+      };
       // Lien partagé « Organisateur » : demander le PIN au premier affichage.
       // Un lien « Spectateur » ne déclenche jamais cette fenêtre.
       useEffect(() => {
@@ -2784,7 +3109,7 @@
             dbRef.current = db;
 
             try {
-              await firebase.auth().signInAnonymously();
+              await csvEnsureFirebaseAuth();
             } catch (authErr) {}
 
             const docRef = db.collection('tournaments').doc(tournamentDocId(tournament.id));
@@ -2817,17 +3142,24 @@
       }, [tournament.id]);
 
       // Émission des mises à jour vers le Cloud
-      const broadcastUpdate = (newConfig, newFields, newTeams, newMatches) => {
+      const broadcastUpdate = (newConfig, newFields, newTeams, newMatches, auditEvent=null) => {
+        if(auditEvent)csvRecordLocalAudit(tournament.id,auditEvent);
         if (dbRef.current && cloudStatus === 'online' && !isRemoteUpdate.current) {
           try {
             const clean = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
-            dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id)).set({
+            const payload={
               config: clean(newConfig || config),
               fields: clean(newFields || fields),
               teams: clean(newTeams || teams),
               matches: clean(newMatches || matches),
               updatedAt: new Date().toISOString()
-            }, { merge: true }).catch(e => console.error("Cloud push error:", e));
+            };
+            if(auditEvent)payload.auditLog=firebase.firestore.FieldValue.arrayUnion(auditEvent);
+            dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id)).set(
+              payload, { merge: true }).catch(e => {
+                console.error('Cloud push error:',e);
+                showToast('Enregistrement Firebase refusé. Vérifie ta connexion organisateur sécurisée.','error');
+              });
           } catch (err) {
             console.error("Clean error:", err);
           }
@@ -3800,8 +4132,9 @@
           });
         }
 
+        const auditEvent=csvMatchAudit(tournament.id,originalMatch,savedMatch,'Feuille de match — Calendrier & Scores');
         setMatches(updated);
-        broadcastUpdate(config, fields, teams, updated);
+        broadcastUpdate(config, fields, teams, updated, auditEvent);
         setEditingMatch(null);
         showToast('Score et match enregistrés !');
       };
@@ -4246,12 +4579,12 @@
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">Code PIN Organisateur (Sécurité)</label>
+                      <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">Code PIN organisateur (accès à l’interface)</label>
                       <input
-                        type="text"
+                        type="password"
                         value={config.adminPin || '1939'}
                         onChange={(e) => setConfig({ ...config, adminPin: e.target.value })}
-                        placeholder="1939"
+                        placeholder="Code PIN"
                         className="w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3.5 py-2 text-sm text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -5369,20 +5702,20 @@
           {/* MODALE DE VÉRIFICATION DU CODE PIN ORGANISATEUR */}
           {adminPinModalOpen && (
             <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3">
-              <div className="bg-[#150709] border border-amber-500/70 rounded-2xl max-w-xs w-full p-5 space-y-4 shadow-2xl text-center">
+              <div className="bg-[#150709] border border-amber-500/70 rounded-2xl max-w-sm w-full max-h-[92dvh] overflow-y-auto p-5 space-y-4 shadow-2xl text-center">
                 <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xl font-black mx-auto">
                   🔒
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-base">Accès Organisateur</h3>
-                  <p className="text-xs text-slate-400 mt-1">Veuillez saisir le code PIN club pour déverrouiller l'édition du tournoi :</p>
+                  <p className="text-xs text-slate-400 mt-1">Saisis le code PIN du club ou utilise ton compte organisateur Firebase.</p>
                 </div>
 
                 <div>
                   <input
                     type="password"
                     maxLength="8"
-                    placeholder="Code PIN (défaut : 1939)"
+                    placeholder="Code PIN organisateur"
                     value={pinInput}
                     onChange={(e) => {
                       setPinInput(e.target.value);
@@ -5428,6 +5761,31 @@
                   >
                     Valider
                   </button>
+                </div>
+                <div className="border-t border-amber-900/50 pt-3 text-left space-y-2">
+                  <button type="button" onClick={()=>{setSecureLoginOpen(v=>!v);setPinError('');}}
+                    className="w-full text-amber-300 text-xs underline text-center">🔐 Connexion sécurisée Firebase (compte organisateur)</button>
+                  {secureLoginOpen && <div className="space-y-2">
+                    <label className="block text-xs text-slate-300">E-mail du compte Firebase
+                      <input type="email" autoComplete="username" value={secureEmail} onChange={e=>setSecureEmail(e.target.value)}
+                        placeholder="organisateur@club.fr" className="mt-1 w-full rounded-lg border border-amber-800 bg-black/40 text-white p-2"/>
+                    </label>
+                    <label className="block text-xs text-slate-300">Mot de passe Firebase
+                      <input type="password" autoComplete="current-password" value={securePassword} onChange={e=>setSecurePassword(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-amber-800 bg-black/40 text-white p-2"/>
+                    </label>
+                    <button type="button" disabled={secureBusy||!secureEmail||!securePassword} onClick={secureFirebaseLogin}
+                      className="w-full min-h-[42px] rounded-lg bg-emerald-700 text-white text-xs font-black disabled:opacity-40">{secureBusy?'Connexion…':'Se connecter à Firebase'}</button>
+                    <button type="button" onClick={async()=>{
+                      try{
+                        if(!firebase.apps.length||!firebase.auth().currentUser||firebase.auth().currentUser.isAnonymous)
+                          throw new Error('Connecte d’abord ton compte Firebase.');
+                        await firebase.auth().currentUser.sendEmailVerification();
+                        setPinError('E-mail de vérification envoyé : ouvre-le puis reconnecte-toi.');
+                      }catch(err){setPinError('Vérification : '+(err?.message||String(err)));}
+                    }} className="w-full min-h-[36px] border border-amber-900 rounded-lg text-amber-200 text-[11px]">📩 Envoyer l’e-mail de vérification</button>
+                    <p className="text-[10px] text-slate-400">Ce mode nécessite un compte Firebase Authentication vérifié et des règles Firestore réservant l'écriture aux organisateurs. Le PIN seul ne sécurise pas Firebase.</p>
+                  </div>}
                 </div>
               </div>
             </div>
