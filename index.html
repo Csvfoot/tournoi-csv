@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Tournoi CS La Verpillière - 1939</title>
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=20261106b">
   <link rel="icon" type="image/png" href="./apple-touch-icon.png?v=20261106b">
@@ -55,6 +55,17 @@
       .csv-mobile-editor-actions button { min-height: 44px; }
       .csv-mobile-filter { white-space: nowrap; }
     }
+    /* iPhone et iPad : navigation tactile, saisie sans zoom et modales plus lisibles. */
+    @media (max-width: 1279px) {
+      .csv-mobile-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .csv-mobile-scroll table { min-width: 600px; }
+      .csv-mobile-filter { white-space: nowrap; }
+      .csv-mobile-editor-actions button { min-height: 44px; }
+    }
+    @media (min-width: 640px) and (max-width: 1279px) {
+      .csv-mobile-editor { width: min(96vw, 780px); max-width: 780px; }
+      input, select, textarea { font-size: 16px; }
+    }
     /* Sur les écrans larges, profiter de l'espace pour les tableaux du tournoi. */
     @media (min-width: 1440px) {
       .max-w-7xl { max-width: 90rem !important; }
@@ -70,8 +81,7 @@
 <body>
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+  <script type="text/babel">    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     const OFFICIAL_PUBLIC_URL = 'https://csvfoot.github.io/tournoi-csv/';
 
@@ -408,6 +418,72 @@
       return parts.length===2 && parts.every(Number.isFinite) ? parts[0]*60+parts[1] : -1;
     };
     const planningTime = value => `${String(Math.floor(value/60)).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;
+    // Le calendrier d'équipe doit TOUJOURS lire les horaires de matches,
+    // jamais l'ordre initial du tableau ou celui des journées.
+    const sortedMatchesForTeam = (allMatches, teamId) => (allMatches||[])
+      .filter(m=>teamId && (m.team1Id===teamId || m.team2Id===teamId))
+      .slice().sort((a,b)=>{
+        const aTime=planningMinutes(a.startTime), bTime=planningMinutes(b.startTime);
+        return (aTime<0?9999:aTime)-(bTime<0?9999:bTime) ||
+          String(a.endTime||'').localeCompare(String(b.endTime||'')) ||
+          String(a.id||'').localeCompare(String(b.id||''));
+      });
+    const teamScheduleDiagnostics = (teamMatches, quickRestMinutes=25, longWaitMinutes=85) => {
+      const rows=(teamMatches||[]).map((match,index)=>{
+        const previous=index?teamMatches[index-1]:null;
+        const start=planningMinutes(match.startTime);
+        const lastEnd=previous?planningMinutes(previous.endTime):-1;
+        const rest=previous&&start>=0&&lastEnd>=0 ? start-lastEnd : null;
+        return {match,rest,warning:rest===null ? null : rest<0?'overlap':rest<quickRestMinutes?'quick':rest>longWaitMinutes?'long':null};
+      });
+      return {rows,quick:rows.filter(r=>r.warning==='quick'||r.warning==='overlap').length,
+        long:rows.filter(r=>r.warning==='long').length};
+    };
+    // Sélection de rencontres pour une vague alternée, en tenant compte de
+    // l'équité entre équipes, de leur temps de repos et des tours précédents.
+    // Le critère reste souple : si le calendrier est serré on autorise le match.
+    const chooseBalancedWave = (queue,maxFields,history,cursor) => {
+      const roundOf=m=>{const r=/Journée\s+(\d+)/i.exec(String(m.stage||''));return r?Number(r[1]):null;};
+      const members=m=>[m.team1Id,m.team2Id].filter(Boolean);
+      const allowed=m=>{
+        const thisRound=roundOf(m);
+        if(thisRound===null)return true;
+        return !queue.some(other=>other!==m&&roundOf(other)!==null&&roundOf(other)<thisRound&&
+          members(m).some(id=>members(other).includes(id)));
+      };
+      const ranked=queue.map((m,index)=>{
+        let penalty=index*0.6;
+        for(const id of members(m)){
+          const state=history.get(id);
+          if(!state){penalty-=75;continue;}
+          const gap=cursor-state.end;
+          if(gap<20)penalty+=400;
+          else if(gap<30)penalty+=230;
+          else if(gap<45)penalty+=100;
+          else if(gap<60)penalty+=30;
+          if(gap>100)penalty-=Math.min(150,(gap-100)*2.2);
+          penalty+=Math.max(0,state.count-1)*14;
+        }
+        return {m,index,penalty};
+      }).filter(x=>allowed(x.m)).sort((a,b)=>a.penalty-b.penalty||a.index-b.index);
+      const options=ranked.slice(0,Math.min(36,ranked.length));
+      if(!options.length)return queue.length?[queue[0]]:[];
+      let best=null;
+      for(const first of options.slice(0,Math.min(22,options.length))){
+        const result=[first];const occupied=new Set(members(first.m));
+        if(!first.m.exclusive){
+          for(const option of options){
+            if(result.length>=maxFields)break;
+            if(result.some(p=>p.m===option.m)||option.m.exclusive||members(option.m).some(id=>occupied.has(id)))continue;
+            result.push(option);members(option.m).forEach(id=>occupied.add(id));
+          }
+        }
+        // Remplir les terrains est prioritaire, à qualité de repos comparable.
+        const fitness=result.reduce((sum,x)=>sum+x.penalty,0)-result.length*260;
+        if(!best||fitness<best.fitness)best={result,fitness};
+      }
+      return best.result.map(x=>x.m);
+    };
     const planningKey = entry => `${entry.eventId}::${entry.kind}::${entry.id}`;
     const planningOverlap = (a,b) => planningMinutes(a.startTime)<planningMinutes(b.endTime) && planningMinutes(b.startTime)<planningMinutes(a.endTime);
     const planningConflict = (a,b) => {
@@ -555,6 +631,16 @@
       });
       const occupied=[...fixed,...locked];
       const planned=new Map(pair.map(p=>[p.event.id,[]]));
+      const teamHistory=new Map(pair.map(p=>[p.event.id,new Map()]));
+      // Si des rencontres ont déjà commencé, elles comptent dans la rotation.
+      [...locked].sort((a,b)=>planningMinutes(a.startTime)-planningMinutes(b.startTime)).forEach(m=>{
+        const history=teamHistory.get(m.eventId);
+        if(!history)return;
+        [m.team1Id,m.team2Id].filter(Boolean).forEach(id=>{
+          const last=history.get(id);
+          history.set(id,{end:Math.max(planningMinutes(m.endTime),last?.end||0),count:(last?.count||0)+1});
+        });
+      });
       const firstTime=Math.max(...pair.map(baseTime));
       const lastLockedEnd=locked.length?Math.max(...locked.map(m=>planningMinutes(m.endTime))):0;
       let cursor=Math.ceil(Math.max(firstTime,lastLockedEnd+(locked.length?Math.max(...pair.map(pause)):0))/5)*5;
@@ -570,18 +656,8 @@
         // Une même équipe ne peut jouer deux rencontres dans une même vague.
         // On sélectionne les matchs compatibles, même s'ils ne sont pas contigus
         // dans le calendrier initial (cas fréquent avec 6+ équipes par poule).
-        const games=[];
-        const usedTeams=new Set();
-        const limit=(exclusive||list[0]?.exclusive)?1:fields.length;
-        for(const m of list){
-          if(games.length>=limit)break;
-          if(m.exclusive && games.length)continue;
-          const members=[m.team1Id,m.team2Id].filter(Boolean);
-          if(members.some(id=>usedTeams.has(id)))continue;
-          games.push(m);
-          members.forEach(id=>usedTeams.add(id));
-          if(m.exclusive)break;
-        }
+        const limit=exclusive?1:fields.length;
+        const games=exclusive?[list[0]]:chooseBalancedWave(list,limit,teamHistory.get(p.event.id),cursor);
         if(!games.length)return false;
         const maxDuration=Math.max(...games.map(m=>duration(m,p)));
         let begin=Math.ceil(Math.max(cursor,baseTime(p))/5)*5;
@@ -599,6 +675,11 @@
             [x.team1Id,x.team2Id].some(id=>id&&(id===y.team1Id||id===y.team2Id)))))continue;
           occupied.push(...proposals);
           planned.get(p.event.id).push(...proposals);
+          const history=teamHistory.get(p.event.id);
+          proposals.forEach(match=>[match.team1Id,match.team2Id].filter(Boolean).forEach(id=>{
+            const last=history.get(id);
+            history.set(id,{end:Math.max(planningMinutes(match.endTime),last?.end||0),count:(last?.count||0)+1});
+          }));
           const selected=new Set(games.map(m=>m.id));
           for(let i=list.length-1;i>=0;i--)if(selected.has(list[i].id))list.splice(i,1);
           cursor=begin+maxDuration+Math.max(...pair.map(pause));
@@ -1185,6 +1266,13 @@
           plan.eventIds=selectedPair.map(p=>p.event.id);
           plan.date=first.date;
           plan.mode=alternateMode;
+          plan.restAnalysis=selectedPair.map(p=>{
+            const rows=plan.updatedById[p.event.id]||[];
+            const allTeams=p.data.teams||[];
+            const summary=allTeams.map(t=>teamScheduleDiagnostics(sortedMatchesForTeam(rows,t.id)));
+            return {category:p.event.category,quick:summary.reduce((n,x)=>n+x.quick,0),
+              long:summary.reduce((n,x)=>n+x.long,0)};
+          });
           setAlternatePreview(plan);
           if(!plan.moves.length)setAlternateNotice('Ces calendriers respectent déjà l’alternance demandée.');
         }catch(err){
@@ -1265,6 +1353,8 @@
               updated[event.id]={...old[event.id],matches:updatedById[event.id]};
             return updated;
           });
+          // Remonter la fiche active avec le nouveau planning même hors ligne.
+          setResetEpoch(epoch=>epoch+1);
           setAlternateNotice(`Alternance appliquée : ${alternatePreview.moves.length} match(s) repositionné(s)`+
             (hubStatus==='online'?' et synchronisés avec Firebase.':' localement uniquement.'));
           setAlternatePreview(null);
@@ -1359,6 +1449,7 @@
           localStorage.setItem(tournamentStorageKey(origin.id,isReservation?'config':'matches'),
             JSON.stringify(isReservation?nextData.config:nextList));
           setRecords(old=>({...old,[origin.id]:nextData}));
+          setResetEpoch(epoch=>epoch+1);
           setManualPlanningEdit(null);
           setRepairNotice('Créneau corrigé : '+editingSource.category+' · '+editingCandidate.startTime+'–'+editingCandidate.endTime+
             ' sur '+editingCandidate.fieldName+(hubStatus==='online'?' (synchronisé).':' (local uniquement).'));
@@ -1426,6 +1517,7 @@
             }
             return next;
           });
+          setResetEpoch(epoch=>epoch+1);
           setRepairNotice(repairPreview.moves.length+' match(s) repositionné(s). '+
             (hubStatus==='online'?'Modifications enregistrées dans Firebase.':'Modifications locales uniquement : vérifie la synchronisation avant utilisation sur plusieurs appareils.'));
           setRepairPreview(null);
@@ -1545,6 +1637,12 @@
             {alternateNotice && <p role="status" className="text-xs text-amber-300">{alternateNotice}</p>}
             {alternatePreview && <div className="border-t border-amber-800/40 pt-3 space-y-2">
               <p className="text-xs text-slate-200">{alternatePreview.moves.length} rencontre(s) à repositionner. Aperçu :</p>
+              {alternatePreview.restAnalysis && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {alternatePreview.restAnalysis.map(a=><div key={a.category} className="rounded-lg border border-amber-900/40 bg-[#100508] p-2 text-xs text-slate-200">
+                  <strong className="text-amber-300">{a.category}</strong> · {a.quick} enchaînement(s) rapproché(s) · {a.long} attente(s) longues
+                </div>)}
+                <p className="sm:col-span-2 text-[11px] text-slate-400">Analyse indicative : repos entre deux matchs inférieur à 25 min ou supérieur à 85 min. L'alternance peut imposer quelques exceptions.</p>
+              </div>}
               <div className="text-xs space-y-1 max-h-48 overflow-auto">
                 {alternatePreview.moves.slice(0,12).map((m,i)=><p key={m.eventId+'-'+m.id+'-'+i} className="border-b border-red-950 pb-1">
                   <strong className="text-amber-200">{m.category}</strong> · {m.stage||'Match'} : {m.from} → <span className="text-emerald-300">{m.to}</span>
@@ -1672,7 +1770,8 @@
         return () => mq.removeListener(update);
       }, []);
       const [organizerMoreOpen, setOrganizerMoreOpen] = useState(false);
-      useEffect(() => { setOrganizerMoreOpen(false); }, [activeTab, userRole]);
+      const [viewerMoreOpen, setViewerMoreOpen] = useState(false);
+      useEffect(() => { setOrganizerMoreOpen(false);setViewerMoreOpen(false); }, [activeTab, userRole]);
       const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
@@ -1702,8 +1801,15 @@
       const [newTeamName, setNewTeamName] = useState('');
       const [selectedColor, setSelectedColor] = useState(TEAM_COLORS[0]);
       const [selectedTeamSchedule, setSelectedTeamSchedule] = useState(null);
+      const [viewerTeamId,setViewerTeamId] = useState(()=>{
+        try{return localStorage.getItem('cslv_viewer_team_'+tournament.id)||'';}catch(e){return '';}
+      });
+      const [teamPickerOpen,setTeamPickerOpen] = useState(false);
       const [newPlayerInputs, setNewPlayerInputs] = useState({});
 
+      useEffect(()=>{
+        try{localStorage.setItem('cslv_viewer_team_'+tournament.id,viewerTeamId);}catch(e){}
+      },[viewerTeamId,tournament.id]);
       // Liste des matchs
       const [matches, setMatches] = useState(() => {
         try {
@@ -3154,7 +3260,7 @@
             </div>
 
             {/* Barre de navigation des onglets */}
-            <div className={`max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25 ${userRole === 'viewer' ? 'hidden sm:flex' : ''}`}>
+            <div className={`max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25 hidden xl:flex`}>
               {userRole === 'editor' && (
                 <button
                   onClick={() => setActiveTab('config')}
@@ -3220,18 +3326,22 @@
 
           {/* Navigation tactile spectateur : accès immédiat sans défilement horizontal. */}
           {userRole === 'viewer' && (
-            <nav aria-label="Navigation spectateur" className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]"
+            <nav aria-label="Navigation spectateur" className="xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]"
               style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
               <div className="flex items-stretch justify-around gap-1 px-2 pt-2">
                 {[
                   {id:'matches',icon:'📅',text:'Matchs'},
+                  {id:'myTeam',icon:'👟',text:'Mon équipe'},
                   {id:'standings',icon:'📊',text:'Poules'},
                   ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Finales'}] : []),
-                  {id:'finalStandings',icon:'🥇',text:'Palmarès'},
-                  {id:'stats',icon:'⚽',text:'Stats'}
+                  {id:'more',icon:'☰',text:'Plus'}
                 ].map(tab => (
                   <button type="button" key={tab.id} aria-current={activeTab === tab.id ? 'page' : undefined}
-                    onClick={() => {setActiveTab(tab.id);window.scrollTo({top:0,behavior:'smooth'});}}
+                    onClick={() => {
+                      if(tab.id==='myTeam')setTeamPickerOpen(true);
+                      else if(tab.id==='more')setViewerMoreOpen(v=>!v);
+                      else {setActiveTab(tab.id);setViewerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}
+                    }}
                     className={`min-w-0 flex-1 flex flex-col items-center justify-center gap-1 px-1 py-1.5 rounded-xl text-[10px] font-bold touch-manipulation ${activeTab === tab.id ? 'bg-amber-500 text-[#180606]' : 'text-amber-100/80'}`}>
                     <span className="text-xl leading-none" aria-hidden="true">{tab.icon}</span>
                     <span className="truncate w-full text-center">{tab.text}</span>
@@ -3241,11 +3351,18 @@
             </nav>
           )}
 
+           {userRole === 'viewer' && viewerMoreOpen && <div className="xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2"
+             style={{bottom:'calc(85px + env(safe-area-inset-bottom, 0px))'}} role="region" aria-label="Autres vues spectateur">
+             {[{id:'finalStandings',label:'🥇 Classement final'},{id:'stats',label:'⚽ Statistiques'},{id:'teams',label:'👥 Liste des équipes'}].map(tab=><button type="button" key={tab.id}
+               onClick={()=>{setActiveTab(tab.id);setViewerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}}
+               className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs">{tab.label}</button>)}
+             <button type="button" onClick={()=>setViewerMoreOpen(false)} className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs">Fermer</button>
+           </div>}
            {/* Navigation organisateur mobile : 4 raccourcis + menu Plus, 44px minimum au toucher. */}
            {userRole === 'editor' && (
              <>
                {organizerMoreOpen && (
-                 <div className="sm:hidden fixed inset-x-2 z-[49] rounded-2xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3"
+                 <div className="xl:hidden fixed inset-x-2 z-[49] rounded-2xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3"
                    style={{ bottom: 'calc(84px + env(safe-area-inset-bottom, 0px))' }} role="region" aria-label="Options organisateur">
                    <div className="flex items-center justify-between mb-2 px-1">
                      <span className="text-sm font-bold text-amber-300">Autres commandes</span>
@@ -3269,7 +3386,7 @@
                    </div>
                  </div>
                )}
-               <nav aria-label="Navigation organisateur" className="sm:hidden fixed bottom-0 inset-x-0 z-50 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.4)]"
+               <nav aria-label="Navigation organisateur" className="xl:hidden fixed bottom-0 inset-x-0 z-50 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.4)]"
                  style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
                  <div className="grid grid-cols-5 gap-1 px-2 pt-2">
                    {[
@@ -3294,7 +3411,7 @@
            )}
 
           {/* Corps de l'application */}
-          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 sm:pb-6">
+          <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6">
 
             
             {/* ONGLET 1 : CONFIGURATION */}
@@ -3711,10 +3828,26 @@
               </div>
             )}
 
+            {/* Accès direct au calendrier de l'équipe depuis la navigation spectateur. */}
+            {userRole === 'viewer' && teamPickerOpen && <div className="fixed inset-0 z-[110] bg-black/90 flex items-center justify-center p-3 sm:p-6">
+              <div className="w-full max-w-lg rounded-2xl border border-amber-500/50 bg-[#16080b] p-4 sm:p-6 space-y-4 shadow-2xl" role="dialog" aria-modal="true" aria-label="Choisir son équipe">
+                <div className="flex items-center justify-between gap-2"><h2 className="text-lg font-bold text-amber-300">👟 Calendrier de mon équipe</h2>
+                  <button type="button" aria-label="Fermer" onClick={()=>setTeamPickerOpen(false)} className="min-w-[44px] min-h-[44px] text-slate-200 text-xl">✕</button></div>
+                <p className="text-xs text-slate-400">Sélectionne ton équipe pour voir ses horaires, terrains, adversaires et scores.</p>
+                <select value={viewerTeamId} onChange={e=>setViewerTeamId(e.target.value)} aria-label="Équipe"
+                  className="min-h-[50px] w-full rounded-xl border border-red-900 bg-[#0c0406] text-white px-3 py-2 text-sm">
+                  <option value="">Choisir une équipe…</option>{teams.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr')).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <button type="button" disabled={!teams.some(t=>t.id===viewerTeamId)}
+                  onClick={()=>{setTeamPickerOpen(false);setSelectedTeamSchedule(teams.find(t=>t.id===viewerTeamId));}}
+                  className="min-h-[50px] w-full rounded-xl bg-amber-500 text-[#150506] font-black text-sm disabled:opacity-40">📅 Voir mon calendrier</button>
+              </div>
+            </div>}
+
             {/* MODALE DU CALENDRIER DE L'ÉQUIPE */}
             {selectedTeamSchedule && (
-              <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
-                <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5">
+                <div className="bg-[#150709] border border-amber-500/60 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[94dvh] overflow-y-auto overscroll-contain">
                   <div className="flex items-center justify-between pb-3 border-b border-red-950">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs shadow-md" style={{ backgroundColor: selectedTeamSchedule.color }}>
@@ -3729,31 +3862,39 @@
                   </div>
 
                   {(() => {
-                    const teamMatches = matches.filter(m => m.team1Id === selectedTeamSchedule.id || m.team2Id === selectedTeamSchedule.id);
+                    const teamMatches = sortedMatchesForTeam(matches,selectedTeamSchedule.id);
+                    const analysis = teamScheduleDiagnostics(teamMatches);
                     if (teamMatches.length === 0) {
                       return <div className="text-center py-8 text-xs text-slate-400 italic">Aucun match programmé pour le moment.</div>;
                     }
                     return (
                       <div className="space-y-2.5">
-                        {teamMatches.map(m => {
+                        <p className="text-[11px] text-slate-400">{teamMatches.length} rencontre(s) · Tri chronologique d'après le planning actuel</p>
+                        {analysis.rows.map(({match:m,rest,warning},index) => {
                           const isT1 = m.team1Id === selectedTeamSchedule.id;
                           const opp = getTeam(isT1 ? m.team2Id : m.team1Id);
                           return (
                             <div key={m.id} className="bg-[#0b0304] border border-red-950 p-3 rounded-xl flex flex-col gap-1.5">
-                              <div className="flex justify-between items-center text-[11px] text-slate-400">
-                                <span className="font-mono text-amber-400 font-bold">{m.startTime || '--:--'} &bull; {m.fieldName || 'Terrain'}</span>
+                              <div className="flex justify-between items-start gap-2 text-[11px] text-slate-400">
+                                <span className="font-mono text-amber-400 font-bold">#{index+1} · {m.startTime || '--:--'}{m.endTime ? '–'+m.endTime : ''} · {m.fieldName || 'Terrain'}</span>
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-amber-300">
                                   {m.group ? `${m.group} • ` : ''}{m.stage || 'Match'}
                                 </span>
                               </div>
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
+                              <div className="flex justify-between items-center gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
                                   <span className="text-xs text-slate-400">vs</span>
-                                  <span className="font-bold text-white text-xs sm:text-sm">{opp.name}</span>
+                                  <span className="font-bold text-white text-xs sm:text-sm break-words">{opp.name}</span>
                                 </div>
-                                <div className="bg-[#18080a] px-2.5 py-1 rounded font-mono font-bold text-white text-xs border border-red-900">
-                                  {m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'À venir'}
+                                <div className="bg-[#18080a] px-2.5 py-1 rounded font-mono font-bold text-white text-xs border border-red-900 flex-shrink-0">
+                                  {m.score1 != null && m.score2 != null ? `${m.score1} - ${m.score2}` : 'VS'}
                                 </div>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                                <span className={m.status==='live'?'text-emerald-400 font-bold':m.status==='finished'?'text-amber-300':'text-cyan-300'}>{m.status==='live'?'● En direct':m.status==='finished'?'✓ Terminé':'À venir'}</span>
+                                {rest !== null && <span className={warning ? 'text-amber-300 font-semibold' : 'text-slate-400'}>
+                                  {warning==='overlap'?'⚠ Horaires qui se chevauchent':`Repos depuis le match précédent : ${rest} min`}{warning==='quick'?' ⚠':warning==='long'?' ⏳':''}
+                                </span>}
                               </div>
                             </div>
                           );
@@ -3802,6 +3943,23 @@
                     </button>
                   </div>
                 </div>
+
+                {userRole === 'viewer' && <div className="xl:hidden rounded-2xl border border-amber-600/40 bg-[#1b0b0e] p-3 sm:p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">👟</span>
+                    <div><p className="font-bold text-amber-300 text-sm">Le calendrier de mon équipe</p>
+                      <p className="text-[11px] text-slate-400">Tous ses matchs dans l'ordre, mis à jour après un changement d'horaire</p></div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select value={viewerTeamId} onChange={e=>setViewerTeamId(e.target.value)} aria-label="Choisir mon équipe"
+                      className="min-h-[46px] flex-1 min-w-0 rounded-lg border border-red-900 bg-[#0c0406] text-white px-3 py-2 text-sm">
+                      <option value="">Choisir une équipe…</option>{teams.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr')).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <button type="button" disabled={!teams.some(t=>t.id===viewerTeamId)}
+                      onClick={()=>setSelectedTeamSchedule(teams.find(t=>t.id===viewerTeamId))}
+                      className="min-h-[46px] px-5 rounded-lg bg-amber-500 text-[#1a0508] text-sm font-black disabled:opacity-40">📅 Voir les matchs</button>
+                  </div>
+                </div>}
 
                 {userRole === 'viewer' && (
                   <div className="xl:hidden grid grid-cols-3 gap-2" role="group" aria-label="Filtrer les matchs sur téléphone et tablette">
@@ -4490,7 +4648,7 @@
 
           {/* MODALE DE PARTAGE & QR CODE */}
           {isShareModalOpen && (
-            <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+            <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5">
               <div className="bg-[#150709] border border-red-900 rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center pb-3 border-b border-red-950">
                   <h3 className="font-bold text-white text-base">Partage du Tournoi</h3>
@@ -5047,6 +5205,7 @@
     }
 
     ReactDOM.render(<MultiTournamentShell />, document.getElementById('root'));
+  
   </script>
 </body>
 </html>
