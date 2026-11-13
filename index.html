@@ -234,7 +234,7 @@
       return {rows:ordered.map((r,i)=>({...r,position:i+1})),finished};
     };
 
-    const createTournamentPhases = (groupNames, poolSizes, playoffs, classification) => {
+    const createTournamentPhases = (groupNames, poolSizes, playoffs, classification, twoPoolMode = 'cross') => {
       const fixtures = [];
       const rank = (group, position) => ({ kind: 'rank', group, position });
       const winner = matchId => ({ kind: 'winner', matchId });
@@ -245,6 +245,20 @@
         placeholder2: source2?.kind === 'rank' ? `${source2.position+1}e ${source2.group}` : 'Vainqueur du tour précédent',
         score1: null, score2: null, pens1: null, pens2: null, status: 'pending', events: []
       });
+      if (playoffs && groupNames.length === 2 && twoPoolMode === 'same_rank') {
+        // Formule directe : 1er A contre 1er B pour le titre, 2e A contre 2e B
+        // pour les places 3-4, puis tous les autres rangs pour le classement.
+        const [a,b] = groupNames;
+        const places = Math.min(Number(poolSizes[0])||0, Number(poolSizes[1])||0);
+        if (places >= 1) fixtures.push(fixture('ko-final','Grande Finale','Phase Finale Principale',rank(a,0),rank(b,0)));
+        if (places >= 2) fixtures.push(fixture('ko-bronze','Match 3ème / 4ème place','Phase Finale Principale',rank(a,1),rank(b,1)));
+        for (let position=2; position<places; position++) {
+          fixtures.push(fixture(`rank-direct-${position+1}`,
+            `Classement ${position*2+1}ème / ${position*2+2}ème place`,
+            'Tournoi Classement',rank(a,position),rank(b,position)));
+        }
+        return fixtures;
+      }
       if (playoffs && groupNames.length === 2) {
         // Croisement officiel de deux poules : A1-B2 et B1-A2.
         // Le tableau est basé sur les rangs, pas sur l'ordre de saisie des équipes.
@@ -468,6 +482,162 @@
       };
     };
 
+    // Plan d'alternance pour DEUX catégories le même jour.
+    // Aucun match joué n'est déplacé. Les créneaux réservés et les autres
+    // catégories restent fixes ; les finales sont isolées sur tous les terrains.
+    const buildAlternatingSchedule = (pair, allEvents, fields) => {
+      if(pair.length !== 2 || !fields.length) return {error:'Choisis deux tournois et au moins un terrain.'};
+      if(pair.some(p=>!(p.data.matches||[]).length)) return {error:'Génère d’abord le calendrier des deux catégories.'};
+      if(pair.some(p=>(p.data.matches||[]).some(m=>m.status !== 'pending')))
+        return {error:'Alternance disponible avant le premier match. Des rencontres ont déjà commencé : utilise les ajustements manuels.'};
+      const pairIds = new Set(pair.map(p=>p.event.id));
+      const phases = new Set(['Phase Finale Principale','Phase Finale','Tournoi Classement','Tournoi Consolante']);
+      const duration = (match,p) => {
+        const from=planningMinutes(match.startTime),to=planningMinutes(match.endTime);
+        const diff=to-from;
+        const fallback=Number(p.data.config?.duration)||15;
+        return from>=0 && to>from && diff<=180 ? diff : fallback;
+      };
+      const others=allEvents.flatMap(p=>{
+        const source=(pairIds.has(p.event.id)? [] : (p.data.matches||[]));
+        const fixtures=source.filter(m=>m.startTime && m.endTime).map(m=>({...m,eventId:p.event.id,kind:'match'}));
+        const slots=(p.data.config?.reservedSlots||[]).filter(m=>m.startTime && m.endTime)
+          .map(m=>({...m,eventId:p.event.id,kind:'réservation'}));
+        return [...fixtures,...slots];
+      });
+      const occupied=[...others];
+      const byEvent=new Map(pair.map(p=>[p.event.id,[]]));
+      const afterField=new Map(fields.map(f=>[f.id,0]));
+      const fieldCount=new Map(fields.map(f=>[f.id,0]));
+      const lastCategory=new Map();
+      const startOf=p=>Math.max(0,planningMinutes(p.data.config?.startTime||'09:00'));
+      const pauseOf=p=>Math.max(0,Number(p.data.config?.breakDuration)||0);
+      const earliestStart=Math.min(...pair.map(startOf));
+      const ready=(candidate,p)=>{
+        if(occupied.some(x=>planningConflict(candidate,x)))return false;
+        const pause=pauseOf(p);
+        const overlapTeam=occupied.some(x=>x.kind==='match' && x.eventId===p.event.id &&
+          [candidate.team1Id,candidate.team2Id].some(id=>id && (id===x.team1Id||id===x.team2Id)) &&
+          planningMinutes(x.endTime)<=planningMinutes(candidate.startTime) &&
+          planningMinutes(candidate.startTime)-planningMinutes(x.endTime)<pause);
+        return !overlapTeam;
+      };
+      const place=(match,p,frontier=earliestStart,forceExclusive=false)=>{
+        const minutes=duration(match,p);
+        if(!Number.isFinite(minutes)||minutes<1||minutes>180)return null;
+        const exclusive=forceExclusive || !!match.exclusive;
+        const options=exclusive ? [fields.find(f=>f.id===match.fieldId)||fields[0]] : fields;
+        let best=null;
+        for(const field of options){
+          let begin=Math.max(startOf(p),frontier,afterField.get(field.id)||0);
+          begin=Math.ceil(begin/5)*5;
+          for(let count=0;count<400 && begin+minutes<=1440;count++,begin+=5){
+            const candidate={...match,eventId:p.event.id,kind:'match',exclusive,
+              startTime:planningTime(begin),endTime:planningTime(begin+minutes),
+              fieldId:field.id,fieldName:field.name};
+            const cfg=p.data.config||{};
+            if(cfg.hasLunchBreak && cfg.lunchStart && cfg.lunchEnd &&
+                planningOverlap(candidate,{startTime:cfg.lunchStart,endTime:cfg.lunchEnd}))continue;
+            if(!ready(candidate,p))continue;
+            const repeat=lastCategory.get(field.id)===p.event.id?1:0;
+            const score=[begin,repeat,fieldCount.get(field.id)||0];
+            if(!best || score[0]<best.score[0] ||
+              (score[0]===best.score[0] && (score[1]<best.score[1] ||
+              (score[1]===best.score[1] && score[2]<best.score[2])))) best={candidate,score};
+            break;
+          }
+        }
+        if(!best)return null;
+        const result=best.candidate;
+        occupied.push(result);
+        byEvent.get(p.event.id).push(result);
+        afterField.set(result.fieldId,planningMinutes(result.endTime)+pauseOf(p));
+        fieldCount.set(result.fieldId,(fieldCount.get(result.fieldId)||0)+1);
+        lastCategory.set(result.fieldId,p.event.id);
+        return result;
+      };
+      const groupBy=p=>[...(p.data.matches||[]).filter(m=>!phases.has(m.group))]
+        .sort((a,b)=>String(a.startTime||'').localeCompare(String(b.startTime||'')) || String(a.id).localeCompare(String(b.id)));
+      const groupQueue=pair.map(p=>({p,queue:groupBy(p)}));
+      while(groupQueue.some(g=>g.queue.length)){
+        for(const g of groupQueue){
+          if(!g.queue.length)continue;
+          const m=g.queue.shift();
+          if(!place(m,g.p))return {error:`Impossible de placer les matchs de poules de ${g.p.event.category} sans conflit.`};
+        }
+      }
+      const endOfMatches=()=>Math.max(earliestStart,...occupied.filter(x=>pairIds.has(x.eventId) && x.kind==='match')
+        .map(x=>planningMinutes(x.endTime)));
+      let frontier=endOfMatches()+Math.max(...pair.map(pauseOf));
+      const prelim=pair.map(p=>{
+        const list=(p.data.matches||[]).filter(m=>phases.has(m.group) &&
+          m.group!=='Tournoi Classement' && m.group!=='Tournoi Consolante' &&
+          m.id!=='ko-final' && m.id!=='ko-bronze' && m.stage!=='Grande Finale' &&
+          !/3(?:ème|e)\s*\/\s*4/.test(String(m.stage||'')));
+        const indexes=new Map((p.data.matches||[]).map(m=>[m.id,m]));
+        const depth=(m,seen=new Set())=>{
+          if(seen.has(m.id))return 0;
+          const deps=[m.source1,m.source2].filter(s=>s && (s.kind==='winner'||s.kind==='loser'))
+            .map(s=>indexes.get(s.matchId)).filter(Boolean);
+          if(deps.length)return Math.max(...deps.map(d=>1+depth(d,new Set([...seen,m.id]))));
+          if(/Demi-Finale/.test(m.stage||''))return 2;
+          if(/Quart/.test(m.stage||''))return 1;
+          return 0;
+        };
+        return {p,levels:list.map(m=>({m,depth:depth(m)}))};
+      });
+      const depthValues=[...new Set(prelim.flatMap(x=>x.levels.map(y=>y.depth)))].sort((a,b)=>a-b);
+      for(const depth of depthValues){
+        const wave=prelim.map(x=>({p:x.p,queue:x.levels.filter(y=>y.depth===depth).map(y=>y.m)}));
+        while(wave.some(x=>x.queue.length)){
+          for(const x of wave){
+            if(x.queue.length && !place(x.queue.shift(),x.p,frontier))
+              return {error:`Impossible de placer un tour de qualification de ${x.p.event.category}.`};
+          }
+        }
+        frontier=endOfMatches()+Math.max(...pair.map(pauseOf));
+      }
+      const ranks=pair.map(p=>({p,queue:(p.data.matches||[]).filter(m=>
+        m.group==='Tournoi Classement' || m.group==='Tournoi Consolante')}));
+      while(ranks.some(x=>x.queue.length)){
+        for(const x of ranks){
+          if(x.queue.length && !place(x.queue.shift(),x.p,frontier))
+            return {error:`Impossible de placer les matchs de classement de ${x.p.event.category}.`};
+        }
+      }
+      frontier=endOfMatches()+Math.max(...pair.map(pauseOf));
+      // Chaque catégorie finit par sa petite finale puis sa grande finale,
+      // chacune seule sur TOUS les terrains, y compris ceux de l'autre catégorie.
+      for(const p of pair){
+        const all=p.data.matches||[];
+        const bronze=all.find(m=>m.id==='ko-bronze' || /3(?:ème|e)\s*\/\s*4/.test(String(m.stage||'')));
+        const finale=all.find(m=>m.id==='ko-final' || m.stage==='Grande Finale');
+        for(const match of [bronze,finale].filter(Boolean)){
+          const placed=place(match,p,frontier,true);
+          if(!placed)return {error:`Impossible de réserver la finale de ${p.event.category} sur tous les terrains.`};
+          frontier=planningMinutes(placed.endTime)+pauseOf(p);
+        }
+      }
+      const updatedById={};
+      const moves=[];
+      for(const p of pair){
+        const planned=new Map(byEvent.get(p.event.id).map(m=>[m.id,m]));
+        updatedById[p.event.id]=(p.data.matches||[]).map(m=>{
+          const result=planned.get(m.id);
+          if(!result)return m;
+          const updated={...m,fieldId:result.fieldId,fieldName:result.fieldName,
+            startTime:result.startTime,endTime:result.endTime,exclusive:result.exclusive};
+          if(m.startTime!==updated.startTime || m.fieldId!==updated.fieldId || !!m.exclusive!==!!updated.exclusive){
+            moves.push({eventId:p.event.id,category:p.event.category,id:m.id,stage:m.stage,
+              from:(m.startTime||'--:--')+' · '+(m.fieldName||'Terrain'),
+              to:updated.startTime+' · '+updated.fieldName});
+          }
+          return updated;
+        });
+      }
+      return {updatedById,moves,signature:JSON.stringify(pair.map(p=>[p.event.id,p.data.matches]))};
+    };
+
     function MultiTournamentShell() {
       const params = new URLSearchParams(window.location.search);
       const urlTournament = params.get('tournament');
@@ -517,6 +687,11 @@
       const [dateInput,setDateInput] = useState(()=>TODAY_LOCAL());
       const [dateFilter,setDateFilter] = useState(()=>TODAY_LOCAL());
       const [repairPreview,setRepairPreview] = useState(null);
+      const [alternateFirst,setAlternateFirst] = useState('');
+      const [alternateSecond,setAlternateSecond] = useState('');
+      const [alternatePreview,setAlternatePreview] = useState(null);
+      const [alternateNotice,setAlternateNotice] = useState('');
+      const [resetEpoch,setResetEpoch] = useState(0);
       const [repairNotice,setRepairNotice] = useState('');
       const [manualPlanningEdit,setManualPlanningEdit] = useState(null);
       const dbRef=useRef(null);
@@ -653,6 +828,56 @@
         setDateFilter(date);
         setEditingEvent(null);
       };
+      // Supprimer une catégorie terminée et ses données Firebase en une seule
+      // opération. Le tournoi historique « principal » est vidé, puis recréé
+      // vide à sa place afin de conserver le fonctionnement de l'application.
+      const deleteFinishedTournament=async()=>{
+        if(isViewer || !editingEvent)return;
+        const event=catalog.find(x=>x.id===editingEvent.id);
+        if(!event)return;
+        const data=eventData(event);
+        if((data.matches||[]).some(m=>m.status!=='finished')){
+          setHubMessage('Suppression interdite : il reste des rencontres non terminées.');return;
+        }
+        if(hubStatus!=='online' || !dbRef.current || !loadedDocs[event.id]){
+          setHubMessage('Suppression disponible uniquement quand Firebase est synchronisé, pour éviter un tournoi qui réapparaît sur un autre appareil.');return;
+        }
+        const word=window.prompt(`Suppression définitive de « ${event.category} » (${event.date}).\nToutes les équipes, matchs, scores, poules, statistiques et réservations seront perdus.\nTape SUPPRIMER pour confirmer :`);
+        if(word!=='SUPPRIMER')return;
+        if(!window.confirm(event.id==='principal'
+          ?'Dernière confirmation : vider entièrement le tournoi principal terminé ? Un tournoi principal vide sera conservé.'
+          :'Dernière confirmation : supprimer définitivement ce tournoi terminé, y compris de Firebase ?'))return;
+        const principal=event.id==='principal';
+        const nextEvent={id:'principal',category:'Principal',title:'Nouveau tournoi',date:TODAY_LOCAL()};
+        const next=principal?catalog.map(x=>x.id==='principal'?nextEvent:x):catalog.filter(x=>x.id!==event.id);
+        const emptyData={config:{...data.config,name:'Nouveau tournoi CS La Verpillière',reservedSlots:[]},teams:[],matches:[]};
+        try{
+          const batch=dbRef.current.batch();
+          const ref=dbRef.current.collection('tournaments').doc(tournamentDocId(event.id));
+          if(principal)batch.set(ref,{...emptyData,fields:sharedFields,updatedAt:new Date().toISOString()});
+          else batch.delete(ref);
+          batch.set(dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1'),
+            {events:next,fields:sharedFields,updatedAt:new Date().toISOString()},{merge:true});
+          await batch.commit();
+          for(const kind of ['config','teams','matches']){
+            const key=tournamentStorageKey(event.id,kind);
+            if(principal)localStorage.setItem(key,JSON.stringify(emptyData[kind]));
+            else localStorage.removeItem(key);
+          }
+          setCatalog(next);
+          localStorage.setItem('cslv_multi_catalog_v1',JSON.stringify(next));
+          setRecords(old=>{
+            const updated={...old};
+            if(principal)updated.principal=emptyData;
+            else delete updated[event.id];
+            return updated;
+          });
+          setEditingEvent(null);
+          setResetEpoch(x=>x+1);
+          if(!principal)selectTournament(next[0]?.id||'principal');
+          setHubMessage(principal?'Tournoi principal terminé vidé. Le nouvel espace est prêt.':'Tournoi supprimé de cette application et de Firebase.');
+        }catch(err){setHubMessage('Suppression annulée : '+(err.message||String(err)));}
+      };
       const updateEventDate=(eventId,date)=>{
         if(isViewer||!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
         persistCatalog(catalog.map(e=>e.id===eventId?{...e,date}:e));
@@ -677,6 +902,86 @@
       const conflictPairs=planningConflictPairs(busyEvents);
       const cloudReady=hubStatus!=='loading' && hubStatus!=='error' &&
         (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
+
+      const sameDayCategories=catalog.filter(e=>e.date===dateFilter);
+      const previewAlternation=()=>{
+        setAlternateNotice('');setAlternatePreview(null);
+        if(isViewer)return;
+        if(!alternateFirst || !alternateSecond || alternateFirst===alternateSecond){
+          setAlternateNotice('Sélectionne deux catégories différentes du même jour.');return;
+        }
+        if(hubStatus==='loading'||hubStatus==='error'||
+          (hubStatus==='online' && sameDayCategories.some(e=>!loadedDocs[e.id]))){
+          setAlternateNotice('Attends la synchronisation du planning commun avant de calculer une alternance.');return;
+        }
+        const first=sameDayCategories.find(e=>e.id===alternateFirst);
+        const second=sameDayCategories.find(e=>e.id===alternateSecond);
+        if(!first||!second){setAlternateNotice('Les deux tournois doivent être programmés à la même date.');return;}
+        const plan=buildAlternatingSchedule(
+          [{event:first,data:eventData(first)},{event:second,data:eventData(second)}],
+          sameDayCategories.map(event=>({event,data:eventData(event)})),sharedFields);
+        if(plan.error){setAlternateNotice(plan.error);return;}
+        setAlternatePreview(plan);
+        if(!plan.moves.length)setAlternateNotice('Ces deux calendriers sont déjà compatibles avec cette alternance.');
+      };
+      const applyAlternation=async()=>{
+        if(isViewer||!alternatePreview||!alternatePreview.moves.length)return;
+        if(hubStatus==='loading'||hubStatus==='error'||
+          (hubStatus==='online' && sameDayCategories.some(e=>!loadedDocs[e.id]))){
+          setAlternateNotice('Synchronisation indisponible : aucun horaire modifié.');return;
+        }
+        const selected=[alternateFirst,alternateSecond].map(id=>sameDayCategories.find(e=>e.id===id));
+        if(selected.some(x=>!x)){setAlternatePreview(null);setAlternateNotice('La sélection a changé. Recalcule le planning.');return;}
+        const signature=JSON.stringify(selected.map(event=>[event.id,eventData(event).matches]));
+        if(signature!==alternatePreview.signature){
+          setAlternatePreview(null);setAlternateNotice('Les matchs ont changé. Recalcule la proposition.');return;
+        }
+        if(!window.confirm(`Appliquer l'alternance des matchs ${selected[0].category} / ${selected[1].category} ?\n${alternatePreview.moves.length} rencontre(s) seront repositionnées. Aucun score ne sera effacé.`))return;
+        try{
+          if(hubStatus==='online'){
+            const db=dbRef.current;
+            if(!db)throw new Error('Firebase indisponible.');
+            await db.runTransaction(async tx=>{
+              const snapshots=[];
+              for(const event of sameDayCategories){
+                const ref=db.collection('tournaments').doc(tournamentDocId(event.id));
+                snapshots.push({event,ref,snap:await tx.get(ref)});
+              }
+              for(const event of selected){
+                const found=snapshots.find(x=>x.event.id===event.id);
+                if(!found?.snap.exists || JSON.stringify(found.snap.data().matches||[])!==JSON.stringify(eventData(event).matches||[]))
+                  throw new Error('Un calendrier a changé depuis un autre appareil : recalcule la proposition.');
+              }
+              const freshEntries=snapshots.flatMap(item=>{
+                const data=item.snap.exists?item.snap.data():{};
+                const games=alternatePreview.updatedById[item.event.id] || data.matches || [];
+                return [
+                  ...games.filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:item.event.id,kind:'match'})),
+                  ...(data.config?.reservedSlots||[]).filter(x=>x.startTime&&x.endTime)
+                    .map(x=>({...x,eventId:item.event.id,kind:'réservation'}))
+                ];
+              });
+              const movedKeys=new Set(alternatePreview.moves.map(m=>`${m.eventId}::match::${m.id}`));
+              if(planningConflictPairs(freshEntries).some(([a,b])=>movedKeys.has(planningKey(a))||movedKeys.has(planningKey(b))))
+                throw new Error('Le planning vient de changer et contient un conflit : recalcule la proposition.');
+              for(const event of selected){
+                const found=snapshots.find(x=>x.event.id===event.id);
+                tx.update(found.ref,{matches:alternatePreview.updatedById[event.id],updatedAt:new Date().toISOString()});
+              }
+            });
+          }
+          for(const event of selected)
+            localStorage.setItem(tournamentStorageKey(event.id,'matches'),JSON.stringify(alternatePreview.updatedById[event.id]));
+          setRecords(old=>{
+            const updated={...old};
+            for(const event of selected)updated[event.id]={...eventData(event),matches:alternatePreview.updatedById[event.id]};
+            return updated;
+          });
+          setAlternateNotice(`Alternance appliquée : ${alternatePreview.moves.length} match(s) repositionné(s)`+
+            (hubStatus==='online'?' et synchronisés avec Firebase.':' localement uniquement.'));
+          setAlternatePreview(null);
+        }catch(err){setAlternateNotice('Aucun changement appliqué : '+(err.message||String(err)));}
+      };
 
       // Ajustement ciblé des rencontres et réservations en conflit.
       const canAdjustEntry=entry => entry.kind==='réservation' ||
@@ -836,7 +1141,8 @@
           setRepairPreview(null);
         }catch(err){setRepairNotice('Aucune modification appliquée : '+(err.message||String(err)));}
       };
-      useEffect(()=>{setRepairPreview(null);setManualPlanningEdit(null);setRepairNotice('');},[dateFilter]);
+      useEffect(()=>{setRepairPreview(null);setManualPlanningEdit(null);setRepairNotice('');
+        setAlternatePreview(null);setAlternateNotice('');setAlternateFirst('');setAlternateSecond('');},[dateFilter]);
 
       return <div className="min-h-screen bg-[#0e0708] text-slate-100">
         <section className="bg-[#22070c] border-b border-amber-900/30 px-3 sm:px-6 py-3 space-y-3">
@@ -884,9 +1190,13 @@
                 </label>
               </div>
               <p className="text-[11px] text-slate-400">La catégorie et sa date changent, mais ses équipes, ses scores et son identifiant Firebase restent inchangés. Le titre dans l'en-tête du match se règle dans Configuration.</p>
+              <p className="text-[11px] text-rose-200/80">La suppression est définitive et disponible uniquement lorsque tous les matchs sont terminés et que Firebase est connecté. Le tournoi « Principal » est vidé et reste disponible pour repartir de zéro.</p>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveEventMetadata} className="bg-amber-500 text-black font-black rounded-lg px-4 py-2 text-xs">Enregistrer</button>
                 <button type="button" onClick={()=>setEditingEvent(null)} className="bg-[#37151b] text-slate-200 rounded-lg px-4 py-2 text-xs">Annuler</button>
+                <button type="button" onClick={deleteFinishedTournament} disabled={(eventData(editingEvent).matches||[]).some(m=>m.status!=='finished') || hubStatus!=='online'}
+                  className="border border-rose-800/80 bg-rose-950/40 text-rose-200 rounded-lg px-4 py-2 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Supprime les données et le tournoi terminé après double confirmation">🗑 {editingEvent.id==='principal'?'Vider le tournoi terminé':'Supprimer le tournoi terminé'}</button>
               </div>
             </div>}
             {hubIsEditor && showCreate && <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#130508] p-3 border border-amber-900/40 rounded-xl">
@@ -906,6 +1216,37 @@
             <label className="text-xs text-slate-300">Jour <input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)}
               className="ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white"/></label>
           </div>
+          {sameDayCategories.length>=2 && <section className="bg-[#1b090e] rounded-xl border border-amber-800/50 p-3 sm:p-4 space-y-3" aria-label="Alterner deux tournois">
+            <h3 className="text-amber-300 font-bold text-sm">🔄 Alterner les matchs de deux catégories</h3>
+            <p className="text-xs text-slate-400">Choisis deux tournois du même jour. Prévisualise les nouveaux horaires avant de les appliquer. Un match déjà commencé ou terminé empêche cette redistribution automatique. Les réservations, autres catégories, petites finales et grandes finales exclusives sont respectées.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label className="text-xs text-slate-200">Premier tournoi
+                <select value={alternateFirst} onChange={e=>{setAlternateFirst(e.target.value);setAlternatePreview(null);}} className="mt-1 w-full rounded-lg bg-black border border-red-900 p-2 text-white">
+                  <option value="">Choisir…</option>{sameDayCategories.map(e=><option key={e.id} value={e.id}>{e.category} — {e.title}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-slate-200">Second tournoi
+                <select value={alternateSecond} onChange={e=>{setAlternateSecond(e.target.value);setAlternatePreview(null);}} className="mt-1 w-full rounded-lg bg-black border border-red-900 p-2 text-white">
+                  <option value="">Choisir…</option>{sameDayCategories.filter(e=>e.id!==alternateFirst).map(e=><option key={e.id} value={e.id}>{e.category} — {e.title}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={previewAlternation} className="sm:self-end px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-black">Prévisualiser l'alternance</button>
+            </div>
+            {alternateNotice && <p role="status" className="text-xs text-amber-300">{alternateNotice}</p>}
+            {alternatePreview && <div className="border-t border-amber-800/40 pt-3 space-y-2">
+              <p className="text-xs text-slate-200">{alternatePreview.moves.length} rencontre(s) à repositionner. Aperçu :</p>
+              <div className="text-xs space-y-1 max-h-48 overflow-auto">
+                {alternatePreview.moves.slice(0,12).map((m,i)=><p key={m.eventId+'-'+m.id+'-'+i} className="border-b border-red-950 pb-1">
+                  <strong className="text-amber-200">{m.category}</strong> · {m.stage||'Match'} : {m.from} → <span className="text-emerald-300">{m.to}</span>
+                </p>)}
+                {alternatePreview.moves.length>12 && <p className="text-slate-400">… et {alternatePreview.moves.length-12} autres rencontres</p>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {alternatePreview.moves.length>0 && <button type="button" onClick={applyAlternation} className="bg-emerald-700 text-white rounded-lg px-4 py-2 font-bold text-xs">Confirmer l'alternance</button>}
+                <button type="button" onClick={()=>setAlternatePreview(null)} className="bg-[#3b151d] text-white rounded-lg px-4 py-2 text-xs">Annuler</button>
+              </div>
+            </div>}
+          </section>}
           {conflictPairs.length>0 && <div role="alert" className="text-sm text-amber-200 bg-red-950/60 border border-amber-500/40 rounded-xl p-3 space-y-3">
             <p>⚠ {conflictPairs.length} conflit(s) de planning identifiés ({fieldConflicts.length} lignes concernées).</p>
             {!isViewer && <button type="button" onClick={previewPlanningRepair}
@@ -980,7 +1321,7 @@
             <label>📅 Date de cette catégorie <input type="date" value={current.date} onChange={e=>updateEventDate(current.id,e.target.value)}
               className="bg-[#1b080b] border border-red-950 rounded-md p-1.5 ml-2 text-white"/></label>
           </div>}
-          {current && <TournamentApp key={current.id} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
+          {current && <TournamentApp key={current.id+'-'+resetEpoch} tournament={current} sharedFields={sharedFields} onFieldsChange={updateSharedFields}
             otherEvents={otherEvents} onTournamentUpdate={updateRecord} hubReady={cloudReady}
             hubIsEditor={hubIsEditor} onRoleChange={onRoleChange}
             organizerLinkPending={organizerLinkPending && !hubIsEditor} onOrganizerLinkHandled={acknowledgeOrganizerLink}/>}
@@ -1959,7 +2300,7 @@
           const maxMatches = Math.max(...perPool.map(a=>a.length),0);
           for(let i=0;i<maxMatches;i++) perPool.forEach(a=>{if(a[i])rawMatches.push(a[i]);});
           if (config.format !== 'round_robin') {
-            rawMatches.push(...createTournamentPhases(names,sizes,config.hasPlayoffs !== false,config.hasConsolation !== false));
+            rawMatches.push(...createTournamentPhases(names,sizes,config.hasPlayoffs !== false,config.hasConsolation !== false,config.twoPoolFinalMode || 'cross'));
           }
         }
         const groupFixtures = rawMatches.filter(m =>
@@ -2721,6 +3062,24 @@
                             : 'Inscrivez un nombre pair de 8 à 32 équipes pour activer cette formule.'}
                         </p>
                         {!config.autoGroups && <p className="text-[11px] text-amber-400">Activez la répartition automatique pour obtenir le bon nombre de poules. Les affectations manuelles équilibrées seront conservées.</p>}
+                      </div>
+                    )}
+
+                    {(config.format === 'multi_groups' || config.format === 'groups_knockout') && activeGroupNames.length === 2 && (
+                      <div className="sm:col-span-2 bg-[#0b0304] border border-amber-900/40 rounded-xl p-3 space-y-2">
+                        <label className="block text-xs font-bold text-amber-300" htmlFor="csv-two-pool-mode">🏆 Formule de la phase finale — 2 poules</label>
+                        <select id="csv-two-pool-mode" value={config.twoPoolFinalMode || 'cross'}
+                          onChange={e=>setConfig({...config,twoPoolFinalMode:e.target.value,hasPlayoffs:true,hasConsolation:true})}
+                          className="w-full bg-[#160608] border border-red-900/70 rounded-lg p-3 text-sm text-white">
+                          <option value="cross">Demi-finales croisées : 1er A–2e B, 1er B–2e A</option>
+                          <option value="same_rank">Classement direct : 1er A–1er B, 2e A–2e B, etc.</option>
+                        </select>
+                        <p className="text-[11px] text-slate-400">
+                          {config.twoPoolFinalMode === 'same_rank'
+                            ? '1ers : titre (places 1-2) · 2es : places 3-4 · 3es : places 5-6 · 4es : places 7-8 · 5es : places 9-10 si besoin. Les matchs de rang sont isolés de la phase de poules.'
+                            : 'Les deux premiers de chaque poule disputent les demi-finales. Les autres équipes jouent leurs matchs de classement.'}
+                          {' '}Le choix s'applique lors de la génération du prochain calendrier : sauvegarde les résultats avant de régénérer.
+                        </p>
                       </div>
                     )}
 
