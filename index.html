@@ -424,6 +424,39 @@
     const planningSignature = items => JSON.stringify(items.map(x=>[
       planningKey(x),x.startTime,x.endTime,x.fieldId,x.exclusive||false,x.status||''
     ]));
+    // Signature métier stable du calendrier : ne dépend ni de l'ordre des matchs,
+    // ni des métadonnées Firebase, ni des champs absents devenus null.
+    // Elle protège bien les horaires, les équipes, les résultats et les statuts.
+    const matchPlanningSignature = matches => JSON.stringify((matches||[]).map(m=>[
+      String(m.id??''),String(m.startTime??''),String(m.endTime??''),
+      String(m.fieldId??''),!!m.exclusive,String(m.status||'pending'),
+      String(m.team1Id??''),String(m.team2Id??''),String(m.group??''),
+      m.score1==null?'':String(m.score1),m.score2==null?'':String(m.score2),
+      m.pens1==null?'':String(m.pens1),m.pens2==null?'':String(m.pens2)
+    ]).sort((a,b)=>a[0].localeCompare(b[0])));
+    const tournamentPlanningSignature = data => {
+      const c=data?.config||{};
+      return JSON.stringify({
+        matches:matchPlanningSignature(data?.matches),
+        reserved:(c.reservedSlots||[]).map(r=>[
+          String(r.id??''),String(r.startTime??''),String(r.endTime??''),
+          String(r.fieldId??''),!!r.exclusive
+        ]).sort((a,b)=>a[0].localeCompare(b[0])),
+        settings:[String(c.startTime||'09:00'),Number(c.duration||15),
+          Number(c.breakDuration||0),!!c.hasLunchBreak,
+          String(c.lunchStart||''),String(c.lunchEnd||'')]
+      });
+    };
+    const applyAlternationToFreshMatches = (fresh,planned) => {
+      // Partir de Firestore et ne remplacer que les champs de programmation.
+      // Cela protège les buteurs, les événements, les notes, les scores, etc.
+      const lookup=new Map((planned||[]).map(m=>[String(m.id),m]));
+      return (fresh||[]).map(m=>{
+        const next=lookup.get(String(m.id));
+        return next?{...m,startTime:next.startTime,endTime:next.endTime,
+          fieldId:next.fieldId,fieldName:next.fieldName,exclusive:!!next.exclusive}:m;
+      });
+    };
     const planningConflictPairs = items => {
       const pairs=[];
       for(let i=0;i<items.length;i++)for(let j=i+1;j<items.length;j++)
@@ -640,7 +673,7 @@
         });
       }
       return {updatedById,moves,waveCount,
-        signature:JSON.stringify(pair.map(p=>[p.event.id,p.data.matches]))};
+        signature:JSON.stringify(pair.map(p=>[p.event.id,tournamentPlanningSignature(p.data)]))};
     };
 
     // Plan d'alternance pour DEUX catégories le même jour.
@@ -796,7 +829,7 @@
           return updated;
         });
       }
-      return {updatedById,moves,signature:JSON.stringify(pair.map(p=>[p.event.id,p.data.matches]))};
+      return {updatedById,moves,signature:JSON.stringify(pair.map(p=>[p.event.id,tournamentPlanningSignature(p.data)]))};
     };
 
     function MultiTournamentShell() {
@@ -1108,7 +1141,9 @@
         (hubStatus!=='online'||catalog.filter(e=>e.date===selectedDate).every(e=>!!loadedDocs[e.id]));
 
       const sameDayCategories=catalog.filter(e=>e.date===dateFilter);
-      const previewAlternation=()=>{
+      const [alternationBusy,setAlternationBusy] = useState(false);
+      const previewAlternation=async()=>{
+        if(alternationBusy)return;
         setAlternateNotice('');setAlternatePreview(null);
         if(isViewer)return;
         const firstId=alternateFirst||sameDayCategories[0]?.id;
@@ -1124,32 +1159,62 @@
         const first=sameDayCategories.find(e=>e.id===firstId);
         const second=sameDayCategories.find(e=>e.id===secondId);
         if(!first||!second){setAlternateNotice('Les deux tournois doivent être programmés à la même date.');return;}
-        const selectedPair=[{event:first,data:eventData(first)},{event:second,data:eventData(second)}];
-        const allDay=sameDayCategories.map(event=>({event,data:eventData(event)}));
-        const plan=(alternateMode==='waves'?buildAlternatingWaves:buildAlternatingSchedule)(
-          selectedPair,allDay,sharedFields);
-        if(plan.error){setAlternateNotice(plan.error);return;}
-        setAlternatePreview(plan);
-        if(!plan.moves.length)setAlternateNotice('Ces calendriers respectent déjà l’alternance demandée.');
+        setAlternationBusy(true);
+        try{
+          // Toujours prévisualiser les données réellement enregistrées dans
+          // Firebase pour éviter un état React/localStorage légèrement décalé.
+          let allDay=sameDayCategories.map(event=>({event,data:eventData(event)}));
+          if(hubStatus==='online'){
+            if(!dbRef.current)throw new Error('Connexion Firebase indisponible.');
+            allDay=await Promise.all(sameDayCategories.map(async event=>{
+              const snap=await dbRef.current.collection('tournaments')
+                .doc(tournamentDocId(event.id)).get({source:'server'});
+              if(!snap.exists)throw new Error(`Le tournoi ${event.category} n'est pas encore synchronisé sur Firebase.`);
+              const doc=snap.data()||{};
+              return {event,data:{config:doc.config||{},teams:doc.teams||[],matches:doc.matches||[]}};
+            }));
+          }
+          const selectedPair=[first,second].map(event=>allDay.find(p=>p.event.id===event.id));
+          const plan=(alternateMode==='waves'?buildAlternatingWaves:buildAlternatingSchedule)(
+            selectedPair,allDay,sharedFields);
+          if(plan.error){setAlternateNotice(plan.error);return;}
+          // Empreintes de la prévisualisation serveur : le contrôle ne dépend
+          // plus de la représentation JSON exacte des objets Firebase.
+          plan.baselines=Object.fromEntries(selectedPair.map(p=>[
+            p.event.id,tournamentPlanningSignature(p.data)]));
+          plan.eventIds=selectedPair.map(p=>p.event.id);
+          plan.date=first.date;
+          plan.mode=alternateMode;
+          setAlternatePreview(plan);
+          if(!plan.moves.length)setAlternateNotice('Ces calendriers respectent déjà l’alternance demandée.');
+        }catch(err){
+          setAlternateNotice('Prévisualisation impossible : '+(err.message||String(err)));
+        }finally{setAlternationBusy(false);}
       };
       const applyAlternation=async()=>{
-        if(isViewer||!alternatePreview||!alternatePreview.moves.length)return;
+        if(isViewer||alternationBusy||!alternatePreview||!alternatePreview.moves.length)return;
         if(hubStatus==='loading'||hubStatus==='error'||
           (hubStatus==='online' && sameDayCategories.some(e=>!loadedDocs[e.id]))){
           setAlternateNotice('Synchronisation indisponible : aucun horaire modifié.');return;
         }
-        const selected=[alternateFirst,alternateSecond].map(id=>sameDayCategories.find(e=>e.id===id));
-        if(selected.some(x=>!x)){setAlternatePreview(null);setAlternateNotice('La sélection a changé. Recalcule le planning.');return;}
-        const signature=JSON.stringify(selected.map(event=>[event.id,eventData(event).matches]));
-        if(signature!==alternatePreview.signature){
-          setAlternatePreview(null);setAlternateNotice('Les matchs ont changé. Recalcule la proposition.');return;
+        const selected=(alternatePreview.eventIds||[]).map(id=>sameDayCategories.find(e=>e.id===id));
+        if(selected.length!==2||selected.some(x=>!x)||selected[0].date!==alternatePreview.date||
+          alternateMode!==alternatePreview.mode){
+          setAlternatePreview(null);setAlternateNotice('La sélection, la date ou la formule a changé. Prévisualise à nouveau.');return;
+        }
+        if(hubStatus!=='online' && selected.some(event=>
+          tournamentPlanningSignature(eventData(event))!==alternatePreview.baselines[event.id])){
+          setAlternatePreview(null);setAlternateNotice('Le calendrier local a réellement changé : prévisualise à nouveau.');return;
         }
         if(!window.confirm(`Appliquer l'alternance des matchs ${selected[0].category} / ${selected[1].category} ?\n${alternatePreview.moves.length} rencontre(s) seront repositionnées. Aucun score ne sera effacé.`))return;
+        setAlternationBusy(true);
         try{
+          let updatedById={};
           if(hubStatus==='online'){
             const db=dbRef.current;
             if(!db)throw new Error('Firebase indisponible.');
             await db.runTransaction(async tx=>{
+              // Toutes les lectures sont faites avant les écritures Firestore.
               const snapshots=[];
               for(const event of sameDayCategories){
                 const ref=db.collection('tournaments').doc(tournamentDocId(event.id));
@@ -1157,12 +1222,19 @@
               }
               for(const event of selected){
                 const found=snapshots.find(x=>x.event.id===event.id);
-                if(!found?.snap.exists || JSON.stringify(found.snap.data().matches||[])!==JSON.stringify(eventData(event).matches||[]))
-                  throw new Error('Un calendrier a changé depuis un autre appareil : recalcule la proposition.');
+                if(!found?.snap.exists)throw new Error(`Le tournoi ${event.category} n'existe plus sur Firebase.`);
+                if(tournamentPlanningSignature(found.snap.data())!==alternatePreview.baselines[event.id])
+                  throw new Error(`Le planning de ${event.category} a réellement changé. Prévisualise à nouveau.`);
+              }
+              const proposals={};
+              for(const event of selected){
+                const fresh=snapshots.find(x=>x.event.id===event.id).snap.data();
+                proposals[event.id]=applyAlternationToFreshMatches(fresh.matches||[],
+                  alternatePreview.updatedById[event.id]);
               }
               const freshEntries=snapshots.flatMap(item=>{
                 const data=item.snap.exists?item.snap.data():{};
-                const games=alternatePreview.updatedById[item.event.id] || data.matches || [];
+                const games=proposals[item.event.id]||data.matches||[];
                 return [
                   ...games.filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:item.event.id,kind:'match'})),
                   ...(data.config?.reservedSlots||[]).filter(x=>x.startTime&&x.endTime)
@@ -1171,24 +1243,34 @@
               });
               const movedKeys=new Set(alternatePreview.moves.map(m=>`${m.eventId}::match::${m.id}`));
               if(planningConflictPairs(freshEntries).some(([a,b])=>movedKeys.has(planningKey(a))||movedKeys.has(planningKey(b))))
-                throw new Error('Le planning vient de changer et contient un conflit : recalcule la proposition.');
+                throw new Error('Un créneau déplacé est réellement occupé : prévisualise à nouveau.');
+              const now=new Date().toISOString();
               for(const event of selected){
                 const found=snapshots.find(x=>x.event.id===event.id);
-                tx.update(found.ref,{matches:alternatePreview.updatedById[event.id],updatedAt:new Date().toISOString()});
+                tx.update(found.ref,{matches:proposals[event.id],updatedAt:now});
               }
+              updatedById=proposals;
             });
+          }else{
+            for(const event of selected){
+              updatedById[event.id]=applyAlternationToFreshMatches(eventData(event).matches||[],
+                alternatePreview.updatedById[event.id]);
+            }
           }
           for(const event of selected)
-            localStorage.setItem(tournamentStorageKey(event.id,'matches'),JSON.stringify(alternatePreview.updatedById[event.id]));
+            localStorage.setItem(tournamentStorageKey(event.id,'matches'),JSON.stringify(updatedById[event.id]));
           setRecords(old=>{
             const updated={...old};
-            for(const event of selected)updated[event.id]={...eventData(event),matches:alternatePreview.updatedById[event.id]};
+            for(const event of selected)
+              updated[event.id]={...old[event.id],matches:updatedById[event.id]};
             return updated;
           });
           setAlternateNotice(`Alternance appliquée : ${alternatePreview.moves.length} match(s) repositionné(s)`+
             (hubStatus==='online'?' et synchronisés avec Firebase.':' localement uniquement.'));
           setAlternatePreview(null);
-        }catch(err){setAlternateNotice('Aucun changement appliqué : '+(err.message||String(err)));}
+        }catch(err){
+          setAlternateNotice('Aucun changement appliqué : '+(err.message||String(err)));
+        }finally{setAlternationBusy(false);}
       };
 
       // Ajustement ciblé des rencontres et réservations en conflit.
@@ -1457,7 +1539,7 @@
                   const b=alternateSecond||sameDayCategories.find(x=>x.id!==a)?.id||'';
                   setAlternateFirst(b);setAlternateSecond(a);setAlternatePreview(null);setAlternateNotice('');
                 }} className="px-3 py-2 rounded-lg border border-amber-700/50 text-amber-200 text-xs">⇄ Inverser</button>
-                <button type="button" onClick={previewAlternation} className="flex-1 px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-black">Prévisualiser</button>
+                <button type="button" onClick={previewAlternation} disabled={alternationBusy} className="flex-1 px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-black disabled:opacity-50">{alternationBusy?"Synchronisation…":"Prévisualiser"}</button>
               </div>
             </div>
             {alternateNotice && <p role="status" className="text-xs text-amber-300">{alternateNotice}</p>}
@@ -1470,7 +1552,7 @@
                 {alternatePreview.moves.length>12 && <p className="text-slate-400">… et {alternatePreview.moves.length-12} autres rencontres</p>}
               </div>
               <div className="flex flex-wrap gap-2">
-                {alternatePreview.moves.length>0 && <button type="button" onClick={applyAlternation} className="bg-emerald-700 text-white rounded-lg px-4 py-2 font-bold text-xs">Confirmer l'alternance</button>}
+                {alternatePreview.moves.length>0 && <button type="button" onClick={applyAlternation} disabled={alternationBusy} className="bg-emerald-700 text-white rounded-lg px-4 py-2 font-bold text-xs disabled:opacity-50">Confirmer l'alternance</button>}
                 <button type="button" onClick={()=>setAlternatePreview(null)} className="bg-[#3b151d] text-white rounded-lg px-4 py-2 text-xs">Annuler</button>
               </div>
             </div>}
