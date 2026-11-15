@@ -2813,3 +2813,114 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
       .csv-mobile-scroll table { min-width: 580px; }
     }
   
+/* Tournoi CSV V6.5 — utilitaires des nouveaux menus organisateur */
+/*! tailwindcss v4.1.10 | MIT License | https://tailwindcss.com */
+:root, :host {
+  --spacing: .25rem;
+  --color-black: #000000;
+  --color-emerald-900: #064e3b;
+  --color-amber-500: #f59e0b;
+}
+.z-\[70\] {
+  z-index: 70;
+}
+.max-h-\[72dvh\] {
+  max-height: 72dvh;
+}
+.min-h-\[56px\] {
+  min-height: 56px;
+}
+.min-w-\[155px\] {
+  min-width: 155px;
+}
+.gap-0\.5 {
+  gap: calc(var(--spacing) * 0.5);
+}
+.gap-x-5 {
+  column-gap: calc(var(--spacing) * 5);
+}
+.gap-y-2 {
+  row-gap: calc(var(--spacing) * 2);
+}
+.border-transparent {
+  border-color: transparent;
+}
+.bg-\[\#1b0a10\] {
+  background-color: #1b0a10;
+}
+.bg-\[\#1b0b10\] {
+  background-color: #1b0b10;
+}
+.bg-\[\#2b1118\] {
+  background-color: #2b1118;
+}
+.bg-\[\#3a1720\] {
+  background-color: #3a1720;
+}
+.bg-\[\#260f15\] {
+  background-color: #260f15;
+}
+.bg-\[\#16090e\] {
+  background-color: #16090e;
+}
+.bg-\[\#32131b\] {
+  background-color: #32131b;
+}
+.bg-\[\#301018\] {
+  background-color: #301018;
+}
+.bg-black\/65 {
+  background-color: color-mix(in srgb, #000000 65%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    background-color: color-mix(in oklab, var(--color-black) 65%, transparent);
+  }
+}
+.bg-emerald-900\/50 {
+  background-color: color-mix(in srgb, #064e3b 50%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    background-color: color-mix(in oklab, var(--color-emerald-900) 50%, transparent);
+  }
+}
+.pb-24 {
+  padding-bottom: calc(var(--spacing) * 24);
+}
+.text-amber-500\/80 {
+  color: color-mix(in srgb, #f59e0b 80%, transparent);
+  @supports (color: color-mix(in lab, red, red)) {
+    color: color-mix(in oklab, var(--color-amber-500) 80%, transparent);
+  }
+}
+.hover\:bg-\[\#34131a\] {
+  &:hover {
+    @media (hover: hover) {
+      background-color: #34131a;
+    }
+  }
+}
+.hover\:bg-\[\#35131b\] {
+  &:hover {
+    @media (hover: hover) {
+      background-color: #35131b;
+    }
+  }
+}
+.sm\:flex-none {
+  @media (width >= 40rem) {
+    flex: none;
+  }
+}
+.xl\:block {
+  @media (width >= 80rem) {
+    display: block;
+  }
+}
+.xl\:grid {
+  @media (width >= 80rem) {
+    display: grid;
+  }
+}
+.xl\:pb-0 {
+  @media (width >= 80rem) {
+    padding-bottom: calc(var(--spacing) * 0);
+  }
+}

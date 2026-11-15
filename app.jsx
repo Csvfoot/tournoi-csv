@@ -1,6 +1,6 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    const CSV_APP_VERSION = '6.3';
+    const CSV_APP_VERSION = '6.5';
     const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
     const CSV_BACKUP_VERSION = 1;
 
@@ -1546,6 +1546,24 @@
         ? catalog.filter(e=>e.date===viewerDay && e.published!==false) : [];
       const accessibleEvents = hubIsEditor ? catalog : publicEvents;
       const [page,setPage] = useState('tournoi');
+      // Navigation organisateur commune aux écrans Tournoi, Saisie et Planning.
+      const [workspaceTab,setWorkspaceTab] = useState('dashboard');
+      const [adminToolsOpen,setAdminToolsOpen] = useState(false);
+      const [shellMoreOpen,setShellMoreOpen] = useState(false);
+      const openWorkspacePage = (nextPage) => {
+        setPage(nextPage);
+        setShellMoreOpen(false);
+        setAdminToolsOpen(false);
+        if(nextPage !== 'tournoi'){setShowCreate(false);setEditingEvent(null);}
+        if(nextPage !== 'tournoi')setDateFilter(current?.date || TODAY_LOCAL());
+        try{window.scrollTo({top:0,behavior:'smooth'});}catch(e){}
+      };
+      const openWorkspaceTab = tab => {
+        setWorkspaceTab(tab);
+        setPage('tournoi');
+        setShellMoreOpen(false);
+        try{window.scrollTo({top:0,behavior:'smooth'});}catch(e){}
+      };
       const [sharedFields,setSharedFields] = useState(()=>readLocalJson('cslv_shared_fields_v1',readLocalJson('cslv_fields',DEFAULT_FIELDS)));
       const [loadedDocs,setLoadedDocs] = useState({});
       const catalogHasFields=useRef(false);
@@ -1890,7 +1908,7 @@
       const selectTournament=id=>{
         const target=accessibleEvents.find(e=>e.id===id);
         if(!target)return; // un spectateur ne peut pas sortir de la journée publiée
-        setSelectedId(id);setPage('tournoi');
+        setSelectedId(id);setPage('tournoi');setShellMoreOpen(false);
         try{localStorage.setItem('cslv_last_tournament_v1',JSON.stringify(id));}catch(err){}
         const nextParams=new URLSearchParams(window.location.search);
         nextParams.set('tournament',id);
@@ -2675,43 +2693,97 @@
         catch(e){setHubMessage('Stockage local indisponible sur cet appareil.');}
       };
 
-      return <div className="min-h-screen bg-[#0e0708] text-slate-100">
+      return <div className={'min-h-screen bg-[#0e0708] text-slate-100 '+(hubIsEditor?'pb-24 xl:pb-0':'')}>
+        {hubIsEditor && <>
+          {shellMoreOpen && <div className="xl:hidden fixed inset-0 z-[70] bg-black/65" role="presentation" onClick={()=>setShellMoreOpen(false)}>
+            <section role="dialog" aria-modal="true" aria-label="Menu organisateur" onClick={e=>e.stopPropagation()}
+              style={{bottom:'calc(80px + env(safe-area-inset-bottom, 0px))'}} className="fixed inset-x-3 max-h-[72dvh] overflow-y-auto rounded-2xl border border-amber-600/50 bg-[#1b0a10] p-4 shadow-2xl space-y-3">
+              <div className="flex items-center justify-between"><h2 className="font-black text-amber-300">☰ Menu organisateur</h2>
+                <button type="button" onClick={()=>setShellMoreOpen(false)} className="min-h-[44px] px-3 text-sm text-slate-200" aria-label="Fermer le menu">✕</button></div>
+              <div className="text-[11px] font-black uppercase tracking-wide text-amber-400">Préparer le tournoi</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[{id:'config',label:'⚙ Réglages & terrains'},{id:'teams',label:'👥 Équipes'},{id:'standings',label:'📊 Poules'}].map(item=><button type="button" key={item.id} onClick={()=>openWorkspaceTab(item.id)}
+                  className="min-h-[48px] rounded-xl border border-red-900/60 bg-[#2b1118] px-3 text-left text-xs font-bold">{item.label}</button>)}
+              </div>
+              <div className="text-[11px] font-black uppercase tracking-wide text-amber-400">Résultats et suivi</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[...(current&&eventData(current)?.config?.format!=='round_robin'?[{id:'bracket',label:'🏆 Phases finales'}]:[]),
+                  {id:'finalStandings',label:'🥇 Classement final'},{id:'stats',label:'📈 Statistiques'}].map(item=><button type="button" key={item.id} onClick={()=>openWorkspaceTab(item.id)}
+                  className="min-h-[48px] rounded-xl border border-red-900/60 bg-[#2b1118] px-3 text-left text-xs font-bold">{item.label}</button>)}
+              </div>
+              <div className="text-[11px] font-black uppercase tracking-wide text-amber-400">Administration</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={()=>{setAdminToolsOpen(true);setShellMoreOpen(false);setPage('tournoi');window.scrollTo({top:0,behavior:'smooth'});}} className="min-h-[48px] rounded-xl border border-amber-700/60 bg-[#32131b] px-3 text-left text-xs font-bold">🗂 Gérer les tournois</button>
+                <button type="button" onClick={()=>{setAdminToolsOpen(true);setShowBackupPanel(true);setShellMoreOpen(false);setPage('tournoi');window.scrollTo({top:0,behavior:'smooth'});}} className="min-h-[48px] rounded-xl border border-emerald-800/60 bg-[#12302b] px-3 text-left text-xs font-bold">💾 Sauvegardes</button>
+                <button type="button" onClick={()=>{onRoleChange('viewer');setPage('tournoi');setShellMoreOpen(false);}} className="col-span-2 min-h-[46px] rounded-xl border border-amber-900/50 text-amber-200 text-xs font-bold">👁 Passer en spectateur</button>
+              </div>
+            </section>
+          </div>}
+          <nav aria-label="Navigation principale organisateur" className="xl:hidden fixed inset-x-0 bottom-0 z-40 border-t border-amber-800/50 bg-[#21090e]/95 backdrop-blur-lg shadow-2xl"
+            style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
+            <div className="grid grid-cols-5 gap-1 px-2 pt-2">
+              {[{id:'dashboard',icon:'🏠',label:'Accueil',active:page==='tournoi'&&workspaceTab==='dashboard',click:()=>openWorkspaceTab('dashboard')},
+                {id:'matches',icon:'📅',label:'Matchs',active:page==='tournoi'&&workspaceTab==='matches',click:()=>openWorkspaceTab('matches')},
+                {id:'dayEntry',icon:'📝',label:'Saisie',active:page==='dayEntry',click:()=>openWorkspacePage('dayEntry')},
+                {id:'planning',icon:'🗺',label:'Planning',active:page==='planning',click:()=>openWorkspacePage('planning')},
+                {id:'more',icon:'☰',label:'Plus',active:shellMoreOpen||(page==='tournoi'&&!['dashboard','matches'].includes(workspaceTab)),click:()=>setShellMoreOpen(v=>!v)}].map(item=><button type="button" key={item.id} onClick={item.click} aria-current={item.active?'page':undefined}
+                  aria-expanded={item.id==='more'?shellMoreOpen:undefined}
+                  className={'min-h-[56px] min-w-0 rounded-xl px-1 py-1.5 flex flex-col items-center justify-center gap-1 text-[10px] font-bold touch-manipulation '+(item.active?'bg-amber-500 text-black':'text-slate-200')}>
+                  <span className="text-xl leading-none">{item.icon}</span><span className="truncate w-full text-center">{item.label}</span>
+                </button>)}
+            </div>
+          </nav>
+        </>}
         <section className="bg-[#22070c] border-b border-amber-900/30 px-3 sm:px-6 py-3 space-y-3">
           <div className="max-w-7xl mx-auto space-y-2">
-            <div className="flex flex-wrap items-center gap-2 justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-black text-amber-300">{isViewer?'⚽ Tournoi CSV · '+csvReadableDay(viewerDay):'⚽ Tournois CSV · catégories'}</div>
-                <span className="text-[10px] border border-amber-700/40 rounded-full px-2 py-1 text-slate-300">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
+            {/* Espace de travail : 3 espaces seulement, la gestion dans un panneau unique. */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <h1 className="font-black text-sm sm:text-base text-amber-300">⚽ Tournoi CSV</h1>
+                <span className="rounded-full border border-amber-800/60 px-2 py-1 text-[10px] font-bold text-slate-200">{isViewer?'👁 Spectateur':'🔒 Organisateur'}</span>
+                {!isViewer && <span className={'rounded-full px-2 py-1 text-[10px] font-bold '+(hubStatus==='online'&&netOnline&&!cloudFromCache?'text-emerald-200':'text-amber-200')}>{hubStatus==='online'&&netOnline&&!cloudFromCache?'● En ligne':'⚠ Synchronisation à vérifier'}</span>}
+                {!isViewer && current && <span className="text-xs text-slate-300">📅 {csvReadableDay(current.date)}</span>}
               </div>
-              <div className="flex items-center gap-2">
-                {!isViewer && <button type="button" onClick={()=>{setDateFilter(selectedDate);setPage(page==='planning'?'tournoi':'planning');}}
-                  className="hidden xl:inline-flex items-center min-h-[42px] px-3 py-2 rounded-lg text-xs font-bold bg-[#39121a] border border-amber-700/40 text-white">
-                  {page==='planning'?'← Tournoi':'📅 Planning général'}
-                </button>}
-                {!isViewer && <button type="button" onClick={()=>{if(page==='tournoi')setDateFilter(selectedDate);setPage(page==='dayEntry'?'tournoi':'dayEntry');}}
-                  className={'hidden xl:inline-flex items-center min-h-[42px] px-3 py-2 rounded-lg text-xs font-black border '+(page==='dayEntry'?'bg-amber-500 text-black border-amber-400':'bg-[#39121a] text-amber-200 border-amber-700/50')}>
-                  {page==='dayEntry'?'← Tournoi':'📝 Saisie journée'}
-                </button>}
-                {!isViewer && page!=='tournoi' && <button type="button" onClick={()=>setPage('tournoi')}
-                  className="xl:hidden min-h-[42px] rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-black">← Retour au tournoi</button>}
-                {hubIsEditor && <button type="button" onClick={()=>{setShowBackupPanel(v=>!v);setBackupCandidate(null);setBackupNotice('');}}
-                  className="min-h-[42px] rounded-lg border border-emerald-800/60 bg-[#12302b] px-3 py-2 text-xs font-bold text-emerald-100"
-                  aria-expanded={showBackupPanel}>💾 <span className="hidden sm:inline">Sauvegarde</span></button>}
-                {hubIsEditor && <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(v=>!v);setEditingEvent(null);}}
-                  className="px-3 py-2 rounded-lg text-xs font-bold border border-amber-500/50 text-amber-300">+ Catégorie</button>}
-                {hubIsEditor && current && <button type="button" onClick={()=>{setEditingEvent({...current});setShowCreate(false);}}
-                  className="px-3 py-2 rounded-lg text-xs font-bold border border-red-900/70 bg-[#18090d] text-amber-200"
-                  title="Gérer ce tournoi : renommer, dupliquer, supprimer">✎ Gérer</button>}
-              </div>
+              {!isViewer && <button type="button" onClick={()=>{setAdminToolsOpen(v=>!v);setShellMoreOpen(false);}}
+                aria-expanded={adminToolsOpen} aria-controls="csv-admin-tools"
+                className={'hidden xl:inline-flex min-h-[42px] items-center px-4 py-2 rounded-xl border text-xs font-black '+(adminToolsOpen?'bg-amber-500 text-black border-amber-400':'bg-[#301018] text-amber-200 border-amber-700/50')}>
+                ⚙ Gérer les tournois {adminToolsOpen?'▲':'▼'}
+              </button>}
             </div>
-            {hubIsEditor && current && <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[#17090c] border border-amber-900/40 px-3 py-2">
-              <span className="text-xs text-slate-200">📅 {csvReadableDay(current.date)}</span>
-              <span className={'rounded-lg px-2 py-1 text-[11px] font-bold '+(csvDayIsPublished(catalog,current.date)?'bg-emerald-900/60 text-emerald-200':'bg-slate-800 text-amber-200')}>
-                {csvDayIsFullyPublished(catalog,current.date)?'● Journée publiée':csvDayIsPublished(catalog,current.date)?'◐ Journée partiellement publiée':'○ Journée masquée'}</span>
-              <button type="button" onClick={toggleDayPublication} disabled={hubStatus!=='online'}
-                className="ml-auto min-h-[38px] px-3 py-1.5 bg-[#39121a] border border-amber-600/50 rounded-lg text-xs font-bold text-amber-200 disabled:opacity-40">
-                {csvDayIsFullyPublished(catalog,current.date)?'🙈 Masquer la journée':'📣 Publier la journée'}</button>
+            {!isViewer && <nav aria-label="Espaces organisateur" className="hidden xl:grid grid-cols-3 gap-2 rounded-xl bg-[#16090e] border border-amber-900/40 p-1.5">
+              {[{id:'tournoi',icon:'🏠',label:'Tournoi',detail:'Préparation et résultats'},
+                {id:'dayEntry',icon:'📝',label:'Saisie journée',detail:'Scores de toutes les catégories'},
+                {id:'planning',icon:'🗺',label:'Planning général',detail:'Terrains et horaires'}].map(item=><button key={item.id} type="button"
+                  aria-current={page===item.id?'page':undefined} onClick={()=>openWorkspacePage(item.id)}
+                  className={'min-h-[50px] px-3 py-2 rounded-lg text-left flex items-center gap-3 border '+(page===item.id?'bg-amber-500 text-black border-amber-400':'border-transparent hover:bg-[#34131a] text-slate-200')}>
+                  <span className="text-xl">{item.icon}</span><span className="flex flex-col gap-0.5"><strong className="text-sm">{item.label}</strong><span className="text-[10px] opacity-75">{item.detail}</span></span>
+                </button>)}
+            </nav>}
+            {!isViewer && <div className="flex flex-wrap items-center gap-2 border border-amber-900/40 bg-[#17090c] px-3 py-2 rounded-xl">
+              <label htmlFor="csv-organizer-day" className="font-bold text-xs text-amber-200">📅 Journée</label>
+              <select id="csv-organizer-day" className="min-h-[42px] min-w-[155px] max-w-full flex-1 sm:flex-none rounded-lg bg-[#260f15] border border-amber-800/60 px-3 text-xs text-white"
+                value={current?.date||''} onChange={e=>{const next=catalog.find(t=>t.date===e.target.value);if(next)selectTournament(next.id);}}>
+                {[...new Set(catalog.map(e=>e.date))].sort().map(date=><option value={date} key={date}>{csvReadableDay(date)}</option>)}
+              </select>
+              {current && <span className={'rounded-lg px-2 py-1 text-[10px] font-bold '+(csvDayIsPublished(catalog,current.date)?'bg-emerald-900/50 text-emerald-200':'bg-[#3a1720] text-amber-200')}>
+                {csvDayIsFullyPublished(catalog,current.date)?'● Publiée':csvDayIsPublished(catalog,current.date)?'◐ Partielle':'○ Masquée'}</span>}
+              <span className="hidden sm:inline text-[11px] text-slate-400">Sélectionne une catégorie ci-dessous</span>
             </div>}
+            {hubIsEditor && adminToolsOpen && <section id="csv-admin-tools" className="rounded-xl border border-amber-700/50 bg-[#1b0b10] p-3 sm:p-4 space-y-3" aria-label="Gestion des tournois et journées">
+              <div className="flex items-center justify-between gap-2"><h2 className="font-black text-amber-300 text-sm">⚙ Gestion des tournois</h2>
+                <button type="button" onClick={()=>setAdminToolsOpen(false)} className="min-h-[38px] px-3 text-xs text-slate-300" aria-label="Fermer la gestion">✕ Fermer</button></div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button type="button" onClick={()=>{setDateInput(selectedDate);setShowCreate(true);setEditingEvent(null);}} className="min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200">＋ Nouvelle catégorie</button>
+                <button type="button" disabled={!current} onClick={()=>{if(current){setEditingEvent({...current});setShowCreate(false);}}} className="min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200 disabled:opacity-40">✎ Modifier / Dupliquer</button>
+                <button type="button" disabled={!current||hubStatus!=='online'} onClick={toggleDayPublication} className="min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200 disabled:opacity-40">{current&&csvDayIsFullyPublished(catalog,current.date)?'🙈 Masquer la journée':'📣 Publier la journée'}</button>
+                <button type="button" onClick={()=>{setShowBackupPanel(v=>!v);setBackupCandidate(null);setBackupNotice('');}} className="min-h-[46px] rounded-xl border border-emerald-800/60 bg-[#12302b] p-2 text-xs font-bold text-emerald-100">💾 Sauvegarder / Restaurer</button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-900/40 pt-2">
+                <p className="text-[11px] text-slate-400">Gestion des catégories, journées et sauvegardes.</p>
+                {!offlineReady && <button type="button" onClick={activateOffline} className="min-h-[38px] rounded-lg border border-amber-700/60 px-3 py-1.5 text-xs font-bold text-amber-200">📥 Cache hors ligne (appareil privé)</button>}
+                {offlineReady && <span className="text-[11px] text-emerald-200">✓ Consultation hors connexion préparée</span>}
+              </div>
+            </section>}
             {publicationNotice && hubIsEditor && <p role="status" className="text-xs text-amber-200">{publicationNotice}</p>}
             {isViewer && <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
@@ -2730,21 +2802,18 @@
               </select>
             </div>}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-              {accessibleEvents.map(e=><button type="button" key={e.id} onClick={()=>selectTournament(e.id)}
+              {accessibleEvents.filter(e=>isViewer||e.date===(current?.date||'')).map(e=><button type="button" key={e.id} onClick={()=>selectTournament(e.id)}
                 className={'whitespace-nowrap rounded-xl px-3 py-2 text-xs font-bold border '+
                   (e.id===current?.id&&page==='tournoi'?'bg-amber-500 text-black border-amber-500':'bg-[#17080b] text-slate-200 border-red-900/70')}>
-                {e.category} {hubIsEditor && <span className="opacity-70 ml-1">{e.date}</span>}
+                {e.category}
               </button>)}
             </div>
             {hubIsEditor && hubMessage && <div role="alert" className="text-xs text-amber-300">⚠ {hubMessage}</div>}
-            {hubIsEditor && <div className="flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs" role="status">
+            {hubIsEditor && (!netOnline||hubStatus!=='online'||cloudFromCache) && <div className="flex flex-wrap gap-2 items-center justify-between rounded-lg border border-amber-900/40 bg-[#170c0d] px-3 py-2 text-xs" role="status">
               <span className={netOnline&&hubStatus==='online'&&!cloudFromCache?'text-emerald-200':'text-amber-200'}>
                 {netOnline&&hubStatus==='online'&&!cloudFromCache?'🟢 Connecté — données synchronisées':!netOnline?'📴 Hors ligne — consultation du dernier programme chargé':hubStatus==='online'&&cloudFromCache?'🟡 Dernières données en cache — connexion Firebase à confirmer':
                   hubStatus==='loading'?'⏳ Connexion en cours':'⚠ Données potentiellement anciennes — Firebase indisponible'}
               </span>
-              {hubIsEditor&&netOnline&&!offlineReady && <button type="button" onClick={activateOffline}
-                className="min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold text-amber-200">📥 Activer le cache hors ligne (appareil privé)</button>}
-              {hubIsEditor&&offlineReady && <span className="text-[10px] text-slate-400">Cache autorisé sur cet appareil</span>}
               {netOnline&&hubStatus==='error' && <button type="button" onClick={()=>window.location.reload()}
                 className="min-h-[36px] rounded-lg border border-amber-700/60 px-3 py-1.5 font-bold">↻ Reconnecter</button>}
             </div>}
@@ -2782,7 +2851,7 @@
               </div>
               {backupNotice && <p className="text-xs font-semibold text-amber-200" role="status">{backupNotice}</p>}
             </section>}
-            {hubIsEditor && <div className="text-[11px] text-slate-400">{hubStatus==='online'?'☁ Catégories synchronisées avec Firebase':hubStatus==='loading'?'⏳ Chargement du planning commun…':'Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>}
+            {hubIsEditor && hubStatus!=='online' && <div className="text-[11px] text-amber-200">{hubStatus==='loading'?'⏳ Chargement du planning commun…':'⚠ Mode local : les autres appareils ne verront pas les catégories sans synchronisation Firebase.'}</div>}
             {hubIsEditor && editingEvent && <div className="bg-[#130508] p-3 sm:p-4 border border-amber-900/40 rounded-xl space-y-3" role="form" aria-label="Modifier l'onglet du tournoi">
               <h3 className="text-sm text-amber-300 font-bold">✏️ Modifier l'onglet {editingEvent.category}</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3097,10 +3166,6 @@
               <p className="text-[10px] text-slate-400">Le PIN est une protection d'interface ; seules des règles Firebase adaptées protègent les données.</p>
             </section>
           </div>}
-          {!isViewer && current && <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 flex items-center gap-3 text-xs text-slate-300">
-            <label>📅 Date de cette catégorie <input type="date" value={current.date} onChange={e=>updateEventDate(current.id,e.target.value)}
-              className="bg-[#1b080b] border border-red-950 rounded-md p-1.5 ml-2 text-white"/></label>
-          </div>}
           {isViewer && current && !netOnline && !csvCachedTournament(current.id) && <main role="alert" className="max-w-lg mx-auto text-center p-8 space-y-2">
             <p className="text-xl text-amber-300">📴 Calendrier non disponible hors connexion</p>
             <p className="text-sm text-slate-300">Ouvre une première fois cette journée avec Internet pour enregistrer ses matchs sur cet appareil.</p>
@@ -3114,7 +3179,7 @@
             onOpenDayEntry={()=>{setDateFilter(selectedDate);setPage('dayEntry');}}
             onOpenPlanning={()=>{setDateFilter(selectedDate);setPage('planning');}}
             onOpenBackup={()=>{setShowBackupPanel(true);setBackupCandidate(null);setBackupNotice('');window.scrollTo({top:0,behavior:'smooth'});}}
-            hubStatus={hubStatus} hubConflictsCount={catalog.filter(e=>e.date===selectedDate).flatMap(e=>{
+            hubStatus={hubStatus} requestedOrganizerTab={workspaceTab} onOrganizerTabChange={setWorkspaceTab} hubConflictsCount={catalog.filter(e=>e.date===selectedDate).flatMap(e=>{
               const data=eventData(e);return [...(data.matches||[]).filter(m=>m.startTime&&m.endTime).map(m=>({...m,eventId:e.id,kind:'match'})),
                 ...((data.config?.reservedSlots)||[]).map(m=>({...m,eventId:e.id,kind:'réservation'}))];
             }).reduce((sum,m,i,arr)=>sum+(arr.slice(i+1).some(o=>planningConflict(m,o))?1:0),0)}/>}
@@ -3122,8 +3187,10 @@
       </div>;
     }
 
-    function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount }) {
-      const [activeTab, setActiveTab] = useState(hubIsEditor ? 'dashboard' : 'matches');
+    function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
+      const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab||'dashboard') : 'matches');
+      useEffect(()=>{if(!hubIsEditor)setActiveTab('matches');else if(requestedOrganizerTab)setActiveTab(requestedOrganizerTab);},[requestedOrganizerTab,hubIsEditor]);
+      const chooseOrganizerTab = id => {setActiveTab(id);if(onOrganizerTabChange)onOrganizerTabChange(id);};
       // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
       const userRole = hubIsEditor ? 'editor' : 'viewer';
       const setUserRole = onRoleChange;
@@ -4171,7 +4238,7 @@
         setTeams(nextTeams);setMatches(scheduled);
         broadcastUpdate(config,fields,nextTeams,scheduled);
         showToast(`Calendrier : ${scheduled.length} matchs, ${config.format==='knockout'?0:config.format==='round_robin'?1:activeGroupNames.length} poules.`);
-        setActiveTab('matches');
+        chooseOrganizerTab('matches');
       };
 
 
@@ -4647,8 +4714,8 @@
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-amber-400 font-semibold">
                     <span className={userRole === 'viewer' ? 'hidden sm:inline' : ''}>CS La Verpillière 1939</span>
-                    {userRole === 'editor' && <span className="text-slate-400">•</span>}
-                    {userRole === 'editor' && <span className={cloudStatus === 'online' ? 'text-emerald-400 font-bold flex items-center gap-1' : 'text-slate-400'}>
+                    {userRole === 'editor' && cloudStatus !== 'online' && <span className="text-slate-400">•</span>}
+                    {userRole === 'editor' && cloudStatus !== 'online' && <span className="text-slate-400">
                       {cloudStatus === 'online' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
                       {cloudStatus === 'online' ? 'En direct (Cloud)' : (
                         userRole === 'viewer' ? <span>Hors ligne</span> :
@@ -4704,77 +4771,31 @@
 
                 <button
                   onClick={() => setIsShareModalOpen(true)}
-                  className={`${userRole === 'editor' ? 'hidden sm:inline-flex' : 'inline-flex'} px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs shadow-md transition flex-shrink-0`}
+                  className={`inline-flex px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs shadow-md transition flex-shrink-0`}
                 >
                   Partager
                 </button>
               </div>
             </div>
 
-            {/* Barre de navigation des onglets */}
-            <div className={`max-w-7xl mx-auto px-2 sm:px-6 flex space-x-1 sm:space-x-2 overflow-x-auto py-2 no-scrollbar border-t border-red-950 bg-black/25 hidden xl:flex`}>
-              {userRole === 'editor' && <button onClick={()=>setActiveTab('dashboard')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${activeTab==='dashboard'?'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow':'text-zinc-400 hover:text-white'}`}>🏠 Accueil</button>}
-              {userRole === 'editor' && (
-                <button
-                  onClick={() => setActiveTab('config')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                    activeTab === 'config' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  ⚙ Configuration & Terrains
-                </button>
-              )}
-              <button
-                onClick={() => setActiveTab('teams')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  activeTab === 'teams' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                👥 Équipes ({teams.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('matches')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  activeTab === 'matches' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                📅 Matchs ({matches.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('standings')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  activeTab === 'standings' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                📊 Classement
-              </button>
-              {config.format !== 'round_robin' && (
-                <button
-                  onClick={() => setActiveTab('bracket')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                    activeTab === 'bracket' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  🏆 Phase Finale
-                </button>
-              )}
-              <button
-                onClick={() => setActiveTab('finalStandings')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  activeTab === 'finalStandings' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                🥇 Classement final
-              </button>
-              <button
-                onClick={() => setActiveTab('stats')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  activeTab === 'stats' ? 'bg-gradient-to-r from-red-900 to-red-800 text-amber-300 border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                🔥 Statistiques
-              </button>
+            {/* Onglets propres au tournoi, regroupés par fonction sur Mac. */}
+            <div className="hidden xl:block border-t border-red-950 bg-black/25">
+              <div className="max-w-7xl mx-auto px-4 py-2">
+                {userRole==='editor' ? <nav aria-label="Rubriques du tournoi" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                  {[{label:'PILOTER',tabs:[{id:'dashboard',icon:'🏠',text:'Accueil'},{id:'matches',icon:'📅',text:'Matchs'}]},
+                    {label:'PRÉPARER',tabs:[{id:'config',icon:'⚙',text:'Réglages'},{id:'teams',icon:'👥',text:'Équipes'}]},
+                    {label:'SUIVRE',tabs:[{id:'standings',icon:'📊',text:'Poules'},...(config.format!=='round_robin'?[{id:'bracket',icon:'🏆',text:'Finales'}]:[]),{id:'finalStandings',icon:'🥇',text:'Palmarès'},{id:'stats',icon:'📈',text:'Stats'}]}].map(group=><div key={group.label} className="flex flex-wrap items-center gap-1.5">
+                      <span className="mr-1 text-[10px] font-black tracking-wider text-amber-500/80">{group.label}</span>
+                      {group.tabs.map(tab=><button type="button" key={tab.id} onClick={()=>chooseOrganizerTab(tab.id)}
+                        aria-current={activeTab===tab.id?'page':undefined}
+                        className={'min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition '+(activeTab===tab.id?'bg-amber-500 text-black':'text-slate-200 hover:bg-[#35131b]')}>{tab.icon} {tab.text}</button>)}
+                    </div>)}
+                  </nav> : <nav aria-label="Rubriques spectateur" className="flex flex-wrap gap-2">
+                    {[{id:'teams',icon:'👥',text:'Équipes'},{id:'matches',icon:'📅',text:'Matchs'},{id:'standings',icon:'📊',text:'Poules'},...(config.format!=='round_robin'?[{id:'bracket',icon:'🏆',text:'Finales'}]:[]),{id:'finalStandings',icon:'🥇',text:'Classement final'},{id:'stats',icon:'📈',text:'Statistiques'}].map(tab=><button type="button" key={tab.id} onClick={()=>setActiveTab(tab.id)}
+                      aria-current={activeTab===tab.id?'page':undefined}
+                      className={'min-h-[38px] px-3 rounded-lg text-xs font-bold '+(activeTab===tab.id?'bg-amber-500 text-black':'text-slate-200 hover:bg-[#35131b]')}>{tab.icon} {tab.text}</button>)}
+                  </nav>}
+              </div>
             </div>
           </header>
 
@@ -4812,59 +4833,7 @@
                className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs">{tab.label}</button>)}
              <button type="button" onClick={()=>setViewerMoreOpen(false)} className="min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs">Fermer</button>
            </div>}
-           {/* Navigation organisateur mobile : 4 raccourcis + menu Plus, 44px minimum au toucher. */}
-           {userRole === 'editor' && (
-             <>
-               {organizerMoreOpen && (
-                 <div className="xl:hidden fixed inset-x-2 z-[49] rounded-2xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3"
-                   style={{ bottom: 'calc(84px + env(safe-area-inset-bottom, 0px))' }} role="region" aria-label="Options organisateur">
-                   <div className="flex items-center justify-between mb-2 px-1">
-                     <span className="text-sm font-bold text-amber-300">Autres commandes</span>
-                     <button type="button" onClick={() => setOrganizerMoreOpen(false)} className="text-slate-200 px-3 py-2 text-sm" aria-label="Fermer le menu">✕</button>
-                   </div>
-                   <div className="grid grid-cols-2 gap-2">
-                     {[
-                       {id:'config',icon:'⚙️',text:'Réglages'},
-                       {id:'teams',icon:'👥',text:'Équipes'},
-                       {id:'standings',icon:'📊',text:'Poules'},
-                       {id:'finalStandings',icon:'🥇',text:'Classement final'},
-                       {id:'stats',icon:'📈',text:'Statistiques'}
-                     ].map(tab => (
-                       <button type="button" key={tab.id} onClick={() => { setActiveTab(tab.id); setOrganizerMoreOpen(false); window.scrollTo({top:0,behavior:'smooth'}); }}
-                         className={`min-h-[46px] rounded-xl px-2 py-2 text-left text-xs font-semibold border ${activeTab === tab.id ? 'bg-amber-500 text-black border-amber-400' : 'bg-[#2a1014] text-slate-100 border-red-900/50'}`}>
-                         {tab.icon} {tab.text}
-                       </button>
-                     ))}
-                     <button type="button" onClick={() => {onOpenPlanning();setOrganizerMoreOpen(false);}} className="min-h-[46px] rounded-xl border border-red-900/50 bg-[#2a1014] text-left px-2 text-xs font-semibold text-slate-100">📅 Planning général</button>
-                     <button type="button" onClick={() => {onOpenBackup();setOrganizerMoreOpen(false);}} className="min-h-[46px] rounded-xl border border-emerald-900/50 bg-[#12302b] text-left px-2 text-xs font-semibold text-emerald-100">💾 Sauvegarde</button>
-                     <button type="button" onClick={() => { setIsShareModalOpen(true); setOrganizerMoreOpen(false); }} className="min-h-[46px] rounded-xl border border-red-900/50 bg-[#2a1014] text-left px-2 text-xs font-semibold text-slate-100">🔗 Partager</button>
-                     <button type="button" onClick={() => { setUserRole('viewer'); setActiveTab('matches'); setOrganizerMoreOpen(false); }} className="col-span-2 min-h-[44px] rounded-xl border border-red-900/50 bg-[#2a1014] text-xs font-semibold text-amber-200">👁 Passer en vue spectateur</button>
-                   </div>
-                 </div>
-               )}
-               <nav aria-label="Navigation organisateur" className="xl:hidden fixed bottom-0 inset-x-0 z-50 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.4)]"
-                 style={{paddingBottom:'max(env(safe-area-inset-bottom), 6px)'}}>
-                 <div className="grid grid-cols-5 gap-1 px-2 pt-2">
-                   {[
-                     {id:'dashboard',icon:'🏠',text:'Accueil'},
-                     {id:'matches',icon:'📅',text:'Matchs'},
-                     {id:'dayEntry',icon:'📝',text:'Saisie'},
-                     ...(config.format !== 'round_robin' ? [{id:'bracket',icon:'🏆',text:'Finales'}] : [{id:'standings',icon:'📊',text:'Poules'}])
-                   ].map(tab=><button type="button" key={tab.id} aria-current={activeTab===tab.id?'page':undefined}
-                     onClick={()=>{if(tab.id==='dayEntry')onOpenDayEntry();else setActiveTab(tab.id);setOrganizerMoreOpen(false);window.scrollTo({top:0,behavior:'smooth'});}}
-                     className={`min-w-0 min-h-[54px] rounded-xl px-1 py-1.5 flex flex-col items-center justify-center gap-1 text-[10px] font-bold touch-manipulation ${activeTab===tab.id?'bg-amber-500 text-black':'text-slate-200'}`}>
-                     <span className="text-xl leading-none" aria-hidden="true">{tab.icon}</span>
-                     <span className="truncate w-full text-center">{tab.text}</span>
-                   </button>)}
-                   <button type="button" aria-expanded={organizerMoreOpen} aria-label="Autres commandes organisateur"
-                     onClick={() => setOrganizerMoreOpen(old => !old)}
-                     className={`min-w-0 min-h-[54px] rounded-xl px-1 py-1.5 flex flex-col items-center justify-center gap-1 text-[10px] font-bold touch-manipulation ${organizerMoreOpen || ['config','stats','finalStandings'].includes(activeTab) ? 'bg-amber-500 text-black' : 'text-slate-200'}`}>
-                     <span className="text-xl leading-none" aria-hidden="true">☰</span><span>Plus</span>
-                   </button>
-                 </div>
-               </nav>
-             </>
-           )}
+           {/* La navigation organisateur est désormais commune aux 3 espaces dans MultiTournamentShell. */}
 
           {/* Corps de l'application */}
           <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6">
@@ -4876,9 +4845,9 @@
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div><h2 className="text-xl font-black text-amber-300">🏠 Tableau de bord</h2>
                     <p className="text-xs text-slate-400 mt-1">{tournament.category} · {tournament.date} · Tournoi CSV V{CSV_APP_VERSION}</p></div>
-                  <span className={`rounded-full px-3 py-2 border text-xs font-bold ${hubStatus==='online'?'text-emerald-200 border-emerald-700 bg-emerald-950/50':'text-amber-200 border-amber-900 bg-amber-950/40'}`}>
-                    {hubStatus==='online'?'☁ Synchronisé':hubStatus==='loading'?'⏳ Synchronisation…':'⚠ Mode local / connexion à vérifier'}
-                  </span>
+                  {hubStatus!=='online' && <span className="rounded-full px-3 py-2 border text-xs font-bold text-amber-200 border-amber-900 bg-amber-950/40">
+                    {hubStatus==='loading'?'⏳ Synchronisation…':'⚠ Mode local / connexion à vérifier'}
+                  </span>}
                 </div>
                 <div className="grid grid-cols-3 gap-2 sm:gap-4">
                   {[
@@ -4894,11 +4863,13 @@
                   className="w-full text-left rounded-xl border border-rose-700/70 bg-rose-950/40 text-rose-100 text-xs font-semibold p-3">
                     ⚠ {hubConflictsCount} conflit(s) potentiel(s) sur les terrains communs — Voir le planning général
                 </button>}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button type="button" onClick={onOpenDayEntry} className="min-h-[48px] rounded-xl bg-amber-500 text-black text-xs sm:text-sm font-black p-3">📝 Saisie journée</button>
-                  <button type="button" onClick={()=>setActiveTab('matches')} className="min-h-[48px] rounded-xl bg-[#33121a] border border-amber-700/40 text-amber-200 text-xs sm:text-sm font-bold p-3">📅 Calendrier & scores</button>
-                  <button type="button" onClick={onOpenPlanning} className="min-h-[48px] rounded-xl bg-[#33121a] border border-amber-700/40 text-amber-200 text-xs sm:text-sm font-bold p-3">🗺 Planning général</button>
-                  <button type="button" onClick={onOpenBackup} className="min-h-[48px] rounded-xl bg-[#12302b] border border-emerald-800 text-emerald-100 text-xs sm:text-sm font-bold p-3">💾 Sauvegardes</button>
+                <div className="rounded-xl border border-amber-800/40 bg-[#1b0b10] p-3 space-y-2">
+                  <h3 className="text-xs font-black text-amber-300">⚡ Actions rapides du jour</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={onOpenDayEntry} className="min-h-[48px] rounded-xl bg-amber-500 text-black text-xs sm:text-sm font-black p-3">📝 Saisir les scores</button>
+                    <button type="button" onClick={()=>chooseOrganizerTab('matches')} className="min-h-[48px] rounded-xl bg-[#33121a] border border-amber-700/40 text-amber-200 text-xs sm:text-sm font-bold p-3">📅 Voir les matchs</button>
+                  </div>
+                  <p className="text-[11px] text-slate-400">Les terrains, la gestion des journées et les sauvegardes ont leurs propres espaces : aucun bouton en doublon ici.</p>
                 </div>
                 <div className="rounded-2xl border border-red-900/60 bg-[#150709] p-3 sm:p-5 space-y-3">
                   <h3 className="text-sm font-black text-amber-300">📍 Prochaines rencontres programmées</h3>

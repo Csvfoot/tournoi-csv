@@ -1,0 +1,55 @@
+TOURNOI CSV — V6.5 | ESPACE ORGANISATEUR RÉORGANISÉ
+
+OBJECTIF
+Simplifier l'organisation de l'interface PC, iPad et iPhone SANS modifier les données sportives et sans imposer de réinitialisation des tournois.
+
+NOUVELLE ORGANISATION
+- 3 espaces de travail : Tournoi, Saisie journée, Planning général.
+- Sur Mac : sous-menus du tournoi regroupés par PILOTER / PRÉPARER / SUIVRE.
+- Sur iPhone et iPad : navigation fixe en bas Accueil / Matchs / Saisie / Planning / Plus, même hors du tournoi.
+- Menu Plus : Réglages & terrains, Équipes, Poules, Finales, Classement final, Statistiques et Gestion.
+- Gestion des tournois : ajouter, renommer, dupliquer, publier/masquer, sauvegarder/restaurer.
+- Journées sélectionnées dans une liste déroulante, catégories affichées uniquement pour la date choisie.
+- Suppression des accès mobiles dupliqués et des bandeaux de synchronisation répétés lorsque tout fonctionne normalement.
+- La vue spectateur conserve son fonctionnement existant.
+
+INSTALLATION (GITHUB PAGES)
+1. Conserver une copie de la V6.4, et exporter une sauvegarde JSON des tournois si possible.
+2. Décompresser le ZIP.
+3. Dans le dépôt https://github.com/Csvfoot/tournoi-csv, remplacer à la racine les fichiers suivants :
+   index.html
+   app.js
+   styles.css
+   sw.js
+   manifest.webmanifest
+   imprimer.html
+   affiche-qr.html
+   apple-touch-icon.png
+   icon-192.png
+   icon-512.png
+4. Valider le commit et attendre un déploiement réussi.
+5. Vérifier https://csvfoot.github.io/tournoi-csv/ dans Safari/Chrome, puis depuis les raccourcis iPhone et iPad.
+
+FICHIERS FACULTATIFS
+- apercu_v65.html : démonstration indépendante des nouveaux menus (données fictives, ne lit pas Firebase).
+- app.jsx : code source React avant compilation, utile pour les futures modifications (non nécessaire au chargement de l'application).
+- LISEZ-MOI_V6.5.txt : ce guide.
+
+PARCOURS DE TEST
+A. Mac en organisateur : choisir une date, changer entre U11/U13, aller dans Saisie journée et revenir au tournoi.
+B. Mac : ouvrir Gestion des tournois ; contrôler modifier/dupliquer, publication et sauvegarde (sans supprimer de vraies données).
+C. iPhone/iPad : naviguer Accueil > Matchs > Saisie > Planning > Plus > Réglages > Matchs.
+D. Saisir un score sur un match fictif et vérifier qu'il apparaît au classement et dans les statistiques.
+E. Spectateur : vérifier que les autres dates masquées, le planning général et les outils d'édition restent inaccessibles dans l'interface.
+F. Répéter un test en connexion instable, et vérifier la sauvegarde avant tournoi officiel.
+
+VÉRIFICATIONS EFFECTUÉES
+- Compilation JSX -> JavaScript : aucune erreur de syntaxe.
+- Tests simulés des menus Mac et mobile : accès aux 3 espaces, menu Plus, gestion, navigation vers les réglages.
+- Vérification des contrôles visibles selon le rôle : la vue spectateur ne reçoit pas les nouveaux outils organisateur.
+- Contrôle des noms et chemins des fichiers dans le pack.
+
+LIMITES
+- Le fonctionnement avec la base Firebase réelle, l'affichage réel dans Safari et la saisie simultanée sur plusieurs appareils restent à tester.
+- Cette version est une amélioration d'ergonomie. Elle ne sécurise pas à elle seule les règles Firestore et ne corrige pas les risques de concurrence des anciens formulaires de scores identifiés dans l'audit V6.4.
+- Éviter la publication officielle sans validation des règles Firebase et des écritures multi-organisateurs.
