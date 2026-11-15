@@ -1,0 +1,45 @@
+TOURNOI CSV V6.6 — DEUX APPLICATIONS iPHONE & iPAD
+================================================
+
+OBJECTIF
+Deux icônes autonomes, avec le même programme et les mêmes résultats :
+  • CSV Spectateur : consultation publique, sans commandes administrateur.
+  • CSV Organisateur : ouvre le contrôle d’accès (PIN provisoire ou connexion Firebase) pour accéder aux outils d’organisation.
+
+PUBLIER
+1. Sauvegarder la V6.5 et exporter les données depuis l’application.
+2. Décompresser ce ZIP.
+3. Dans GitHub Csvfoot/tournoi-csv, téléverser ENSEMBLE à la racine :
+   index.html, spectateur.html, organisateur.html,
+   manifest.webmanifest, manifest-spectateur.webmanifest, manifest-organisateur.webmanifest,
+   app.js, styles.css, sw.js, les PNG et les autres pages HTML nécessaires.
+4. Valider le commit, attendre la fin du déploiement Pages.
+5. Ouvrir une fois chaque URL dans Safari pour mettre à jour le cache.
+
+SUR IPHONE ET IPAD (à faire sur chacun des deux appareils)
+A. Pour les spectateurs, dans Safari :
+   https://csvfoot.github.io/tournoi-csv/spectateur.html
+   Bouton Partager > Sur l’écran d’accueil > nom « CSV Spectateur » > Ajouter.
+B. Pour les organisateurs, dans Safari :
+   https://csvfoot.github.io/tournoi-csv/organisateur.html
+   Bouton Partager > Sur l’écran d’accueil > nom « CSV Organisateur » > Ajouter.
+   Au lancement, saisir le PIN provisoire ou se connecter au compte Firebase organisateur.
+C. Sur iOS/iPadOS récents, laisser activé « Ouvrir comme app » si proposé.
+D. Ne pas réutiliser l’ancienne icône générique : elle ouvre l’adresse publique.
+   Vérifier les nouvelles icônes avant d’effacer l’ancienne.
+
+TESTS AVANT VALIDATION
+• L’icône Spectateur ouvre uniquement les journées publiées.
+• L’icône Organisateur demande le PIN / compte Firebase et ouvre l’interface organisateur après validation.
+• Rester organisateur en changeant de date, de catégorie et en ouvrant le planning général.
+• Saisir un score fictif sur iPad, vérifier Mac + iPhone spectateur, puis sauvegarder.
+• Tester publication/masquage et actualisation du programme.
+• Tester une nouvelle connexion, un échec de PIN, un redémarrage et le mode avion.
+
+SÉCURITÉ : TRÈS IMPORTANT
+Ces deux icônes et le PIN séparent les INTERFACES, pas les autorisations côté serveur.
+Ne PAS utiliser les règles Firestore autorisant une écriture anonyme ou publique en tournoi officiel.
+Avant lancement : activer Firebase Authentication (comptes nominatifs), règles Firestore restrictives,
+retirer le PIN par défaut et les codes administrateurs conservés dans les documents publics,
+et tester les accès avec un compte spectateur et deux comptes organisateurs.
+Le fichier firestore.rules.EXEMPLE.txt est un exemple à adapter, pas un déploiement automatique.

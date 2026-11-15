@@ -1,5 +1,9 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.5';
+const CSV_APP_VERSION = '6.6';
+// Each installable home-screen app has an explicit entry-point.
+// Modes configure navigation ONLY: Firebase rules, not this constant, protect writes.
+const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
+    : window.CSV_LAUNCH_MODE === 'spectator' ? 'spectator' : 'general';
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
 // Protection des données importées : aucun script et aucune opération Firebase
@@ -1535,8 +1539,11 @@ function MultiTournamentShell() {
     const params = new URLSearchParams(window.location.search);
     const urlTournament = params.get('tournament');
     const [hubIsEditor, setHubIsEditor] = useState(() => {
-        // Une URL spectateur reste toujours spectateur, même sur un poste organisateur.
-        if (params.get('role') === 'viewer')
+        // The public home-screen app is always a viewer, regardless of another app's session.
+        if (CSV_HOME_MODE === 'spectator')
+            return false;
+        // A shared viewer URL in the generic site remains a viewer.
+        if (CSV_HOME_MODE !== 'organizer' && params.get('role') === 'viewer')
             return false;
         // Le lien ?role=editor ne déverrouille PAS l'édition :
         // seule une session ayant validé le code organisateur y donne accès.
@@ -1550,9 +1557,12 @@ function MultiTournamentShell() {
     const isViewer = !hubIsEditor;
     // Un lien organisateur ouvre la demande de code PIN, y compris sur iPhone.
     // L'URL seule ne confère jamais les droits d'édition.
-    const [organizerLinkPending, setOrganizerLinkPending] = useState(() => params.get('role') === 'editor');
+    const [organizerLinkPending, setOrganizerLinkPending] = useState(() => CSV_HOME_MODE !== 'spectator' && (CSV_HOME_MODE === 'organizer' || params.get('role') === 'editor'));
     const acknowledgeOrganizerLink = useCallback(() => setOrganizerLinkPending(false), []);
     const onRoleChange = useCallback(role => {
+        // Do not let a role toggle inside the public installed app switch its workspace.
+        if (CSV_HOME_MODE === 'spectator' && role === 'editor')
+            return;
         const isEditor = role === 'editor';
         setHubIsEditor(isEditor);
         if (isEditor)
@@ -3591,7 +3601,7 @@ function MultiTournamentShell() {
                     ? `La journée du ${csvReadableDay(viewerDay)} n'est pas encore publiée, ou ne comporte pas de tournoi accessible.`
                     : 'Aucune journée de tournoi n’est actuellement publiée.'),
                 React.createElement("p", { className: "text-xs text-slate-500" }, "Reviens lorsque les organisateurs auront publi\u00E9 le calendrier."),
-                React.createElement("button", { type: "button", onClick: () => { setShellLoginOpen(true); setShellLoginError(''); }, className: "min-h-[44px] rounded-lg border border-amber-900 px-4 py-2 text-xs text-amber-200" }, "\uD83D\uDD12 Acc\u00E8s organisateur")),
+                CSV_HOME_MODE !== 'spectator' && React.createElement("button", { type: "button", onClick: () => { setShellLoginOpen(true); setShellLoginError(''); }, className: "min-h-[44px] rounded-lg border border-amber-900 px-4 py-2 text-xs text-amber-200" }, "\uD83D\uDD12 Acc\u00E8s organisateur")),
             !hubIsEditor && !current && shellLoginOpen && React.createElement("div", { className: "fixed inset-0 z-[220] bg-black/90 flex items-center justify-center p-4" },
                 React.createElement("section", { role: "dialog", "aria-modal": "true", "aria-label": "Connexion organisateur", className: "w-full max-w-sm rounded-2xl border border-amber-600/70 bg-[#18080e] p-5 space-y-3 shadow-2xl max-h-[90dvh] overflow-y-auto" },
                     React.createElement("div", { className: "flex justify-between gap-2" },
@@ -5219,7 +5229,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     }, [matches, teams]);
     // Liens de partage complets
     const buildShareUrl = (role) => {
-        let base = OFFICIAL_PUBLIC_URL;
+        // Dedicated entry points avoid re-opening a spectator-only installed shortcut
+        // when a club organizer copies an organizer invitation (and vice versa).
+        let base = OFFICIAL_PUBLIC_URL + (role === 'editor' ? 'organisateur.html' : 'spectateur.html');
         let query = `?role=${role}&tournament=${encodeURIComponent(tournament.id)}`;
         if (role === 'viewer')
             query += `&day=${encodeURIComponent(tournament.date)}`;
@@ -5285,11 +5297,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             if (activeTab === 'config')
                                 setActiveTab('matches');
                             showToast('Mode Spectateur activé');
-                        }, className: "hidden sm:inline-flex px-2.5 py-1.5 rounded-lg border border-red-900/60 bg-[#1f080c] hover:bg-[#2d0c12] text-xs font-bold text-amber-300 transition", title: "Basculer vers la vue publique spectateur" }, "\uD83D\uDC41 Vue Spectateur")) : (React.createElement("button", { onClick: () => {
+                        }, className: "hidden sm:inline-flex px-2.5 py-1.5 rounded-lg border border-red-900/60 bg-[#1f080c] hover:bg-[#2d0c12] text-xs font-bold text-amber-300 transition", title: "Basculer vers la vue publique spectateur" }, "\uD83D\uDC41 Vue Spectateur")) : (CSV_HOME_MODE !== 'spectator' ? React.createElement("button", { onClick: () => {
                             setPinInput('');
                             setPinError('');
                             setAdminPinModalOpen(true);
-                        }, className: "hidden sm:flex px-2.5 py-1.5 rounded-lg border border-amber-600/50 bg-[#1f080c] hover:bg-[#2d0c12] text-xs font-bold text-amber-400 transition items-center gap-1", title: "D\u00E9verrouiller le mode organisateur avec le code PIN" }, "\uD83D\uDD12 Acc\u00E8s Organisateur")),
+                        }, className: "hidden sm:flex px-2.5 py-1.5 rounded-lg border border-amber-600/50 bg-[#1f080c] hover:bg-[#2d0c12] text-xs font-bold text-amber-400 transition items-center gap-1", title: "D\u00E9verrouiller le mode organisateur avec le code PIN" }, "\uD83D\uDD12 Acc\u00E8s Organisateur") : null),
                     React.createElement("button", { onClick: () => setIsShareModalOpen(true), className: `inline-flex px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs shadow-md transition flex-shrink-0` }, "Partager"))),
             React.createElement("div", { className: "hidden xl:block border-t border-red-950 bg-black/25" },
                 React.createElement("div", { className: "max-w-7xl mx-auto px-4 py-2" }, userRole === 'editor' ? React.createElement("nav", { "aria-label": "Rubriques du tournoi", className: "flex flex-wrap items-center gap-x-5 gap-y-2" }, [{ label: 'PILOTER', tabs: [{ id: 'dashboard', icon: '🏠', text: 'Accueil' }, { id: 'matches', icon: '📅', text: 'Matchs' }] },
