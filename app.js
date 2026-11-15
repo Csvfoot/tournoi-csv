@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.7';
+const CSV_APP_VERSION = '6.8';
 // Each installable home-screen app has an explicit entry-point.
 // Modes configure navigation ONLY: Firebase rules, not this constant, protect writes.
 const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
@@ -1534,6 +1534,46 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
             React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4 items-start" }, fixtures.map(({ event, match, teams }) => React.createElement(DayEntryMatchCard, { key: event.id + '|' + match.id, event: event, match: match, teams: teams, fields: fields, onOpen: openMatch }))),
         editingMatch && React.createElement(MatchDetailModal, { editingMatch: editingMatch, setEditingMatch: setEditingMatch, getTeam: getModalTeam, fields: fields, goalTeamId: goalTeamId, setGoalTeamId: setGoalTeamId, goalScorerName: goalScorerName, setGoalScorerName: setGoalScorerName, onSave: saveMatch, onClose: closeMatch, categoryLabel: (activeEntry === null || activeEntry === void 0 ? void 0 : activeEntry.event.category) || '', readOnlySchedule: true, requireKnownTeams: true, saving: saving, saveError: saveError }));
 }
+// V6.8 — La page de garde utilise le catalogue PUBLIC existant, jamais une copie de données.
+// Elle est réservée au raccourci spectateur : les liens QR datés gardent l'accès direct.
+function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline, onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing }) {
+    const canEnter = events.length > 0;
+    return React.createElement("main", { className: "csv-welcome", role: "main", "aria-label": "Accueil CSV Spectateur" },
+        React.createElement("div", { className: "csv-welcome-glow", "aria-hidden": "true" }),
+        React.createElement("section", { className: "csv-welcome-content" },
+            React.createElement("header", { className: "csv-welcome-header" },
+                React.createElement("div", { className: "csv-welcome-logo" }, React.createElement(ClubLogo, { className: "csv-welcome-blason" })),
+                React.createElement("span", { className: "csv-welcome-eyebrow" }, "CS LA VERPILLIÈRE"),
+                React.createElement("h1", { className: "csv-welcome-title" }, "Bienvenue au", React.createElement("span", null, " Tournoi CSV")),
+                React.createElement("p", { className: "csv-welcome-subtitle" }, "Suivez les rencontres et les résultats de votre journée, simplement.")),
+            React.createElement("div", { className: "csv-welcome-program" },
+                React.createElement("div", { className: "csv-welcome-date-caption" }, "📅 JOURNÉE DU TOURNOI"),
+                dates.length > 1 ? React.createElement("label", { className: "csv-welcome-date-select-wrap" },
+                    React.createElement("span", { className: "sr-only" }, "Choisir une journée publiée"),
+                    React.createElement("select", { className: "csv-welcome-date-select", value: day || '', onChange: e => onChooseDay(e.target.value), "aria-label": "Journée publiée" }, dates.map(date => React.createElement("option", { value: date, key: date }, csvReadableDay(date))))) :
+                    React.createElement("div", { className: "csv-welcome-date-text" }, day ? csvReadableDay(day) : "Programme à venir"),
+                canEnter ? React.createElement("div", { className: "csv-welcome-categories", role: "group", "aria-label": "Catégorie du tournoi" },
+                    events.map(event => React.createElement("button", { type: "button", key: event.id, onClick: () => onChooseCategory(event.id),
+                        "aria-pressed": event.id === activeId, className: "csv-welcome-category" + (event.id === activeId ? " csv-welcome-category-selected" : "") }, event.category))) :
+                    React.createElement("p", { className: "csv-welcome-empty", role: "status" }, isLoading ? "⏳ Récupération des journées publiées…" : "Aucune journée publiée disponible pour le moment.")),
+            React.createElement("nav", { className: "csv-welcome-actions", "aria-label": "Accès rapides spectateur" },
+                React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-primary", disabled: !canEnter || isLoading, onClick: () => onOpen('program') },
+                    React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "📅"),
+                    React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Voir le programme"), React.createElement("small", null, "Horaires et terrains")),
+                    React.createElement("span", { className: "csv-welcome-button-arrow", "aria-hidden": "true" }, "›")),
+                React.createElement("div", { className: "csv-welcome-secondary-grid" },
+                    React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-secondary", disabled: !canEnter || isLoading, onClick: () => onOpen('team') },
+                        React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "👟"),
+                        React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Mon équipe"), React.createElement("small", null, "Tous ses matchs"))),
+                    React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-secondary", disabled: !canEnter || isLoading, onClick: () => onOpen('results') },
+                        React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "🏆"),
+                        React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Résultats"), React.createElement("small", null, "Scores et classements"))))),
+            React.createElement("footer", { className: "csv-welcome-footer" },
+                React.createElement("span", null, "⚽ Bonne journée à toutes les équipes !"),
+                !isLoading && !canEnter && React.createElement("button", { type: "button", className: "csv-welcome-refresh", disabled: refreshing, onClick: onRefresh }, refreshing ? "Actualisation…" : "↻ Actualiser le programme"),
+                offline && React.createElement("span", { className: "csv-welcome-offline" }, "Dernier programme enregistré sur cet appareil"))));
+}
+
 function MultiTournamentShell() {
     var _a, _b, _c, _d;
     const params = new URLSearchParams(window.location.search);
@@ -1593,6 +1633,10 @@ function MultiTournamentShell() {
     // Les QR spectateurs portant ?day= restent verrouillés sur cette seule date.
     // L'adresse générale du site, elle, laisse choisir une journée PUBLIÉE.
     const [viewerDayChoice, setViewerDayChoice] = useState(null);
+    // Afficher l'accueil au lancement de l'icône Spectateur uniquement.
+    // Les liens directs ?day= et ?tournament= accèdent immédiatement au calendrier.
+    const [spectatorWelcome, setSpectatorWelcome] = useState(() => CSV_HOME_MODE === 'spectator' && !params.has('day') && !params.has('tournament'));
+    const [requestedViewerAction, setRequestedViewerAction] = useState(null);
     const lockedViewerDay = csvValidDay(params.get('day')) ? params.get('day') : null;
     const publishedDays = [...new Set(catalog.filter(e => csvDayIsPublished(catalog, e.date)).map(e => e.date))].sort();
     const loginTargetDay = organizerLinkPending && !hubIsEditor
@@ -3081,6 +3125,28 @@ function MultiTournamentShell() {
             setHubMessage('Stockage local indisponible sur cet appareil.');
         }
     };
+    // Les actions de l'accueil réutilisent les vues existantes (aucun second calendrier).
+    const openWelcomeDestination = type => {
+        if (!current || !publicEvents.length) return;
+        setRequestedViewerAction({ type, seq: Date.now() });
+        setSpectatorWelcome(false);
+        setPage('tournoi');
+        setShellMoreOpen(false);
+        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) { }
+    };
+    if (CSV_HOME_MODE === 'spectator' && !hubIsEditor && spectatorWelcome) {
+        const welcomeLoading = netOnline && !catalogSynced && hubStatus !== 'error';
+        return React.createElement(CsvSpectatorWelcome, {
+            day: viewerDay, dates: publishedDays, events: publicEvents,
+            activeId: current ? current.id : '',
+            isLoading: welcomeLoading, offline: !netOnline || hubStatus === 'error',
+            onChooseDay: selectPublicDay,
+            onChooseCategory: selectTournament,
+            onOpen: openWelcomeDestination,
+            refreshing: catalogRefreshing,
+            onRefresh: () => void refreshServerCatalog({ manual: true })
+        });
+    }
     // V6.7 : entrée Organisateur indépendante. Ne monte JAMAIS le tableau spectateur
     // avant la vérification, même lorsque les données Firebase sont encore en chargement.
     // Le PIN historique ne constitue pas une authentification Firebase : les droits
@@ -3192,6 +3258,7 @@ function MultiTournamentShell() {
                         !offlineReady && React.createElement("button", { type: "button", onClick: activateOffline, className: "min-h-[38px] rounded-lg border border-amber-700/60 px-3 py-1.5 text-xs font-bold text-amber-200" }, "\uD83D\uDCE5 Cache hors ligne (appareil priv\u00E9)"),
                         offlineReady && React.createElement("span", { className: "text-[11px] text-emerald-200" }, "\u2713 Consultation hors connexion pr\u00E9par\u00E9e"))),
                 publicationNotice && hubIsEditor && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, publicationNotice),
+                isViewer && CSV_HOME_MODE === 'spectator' && React.createElement("button", { type: "button", onClick: () => { setSpectatorWelcome(true); setRequestedViewerAction(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[40px] self-start rounded-xl border border-amber-800/50 px-3 py-2 text-xs font-black text-amber-200" }, "🏠 Accueil"),
                 isViewer && React.createElement("div", { className: "space-y-2" },
                     React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
                         React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Aucun programme publié pour cette date'),
@@ -3668,14 +3735,14 @@ function MultiTournamentShell() {
                 React.createElement("p", { className: "text-sm text-slate-300" }, "Ouvre une premi\u00E8re fois cette journ\u00E9e avec Internet pour enregistrer ses matchs sur cet appareil.")),
             isViewer && current && !((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id)) && (hubStatus === 'loading' || (hubStatus === 'online' && !loadedDocs[current.id])) && React.createElement("div", { role: "status", className: "max-w-lg mx-auto text-center text-amber-200 text-sm p-8" }, "\u23F3 Chargement du calendrier de cette journ\u00E9e\u2026"),
             isViewer && current && hubStatus === 'error' && !csvCachedTournament(current.id) && React.createElement("div", { role: "alert", className: "max-w-lg mx-auto text-center text-rose-200 text-sm p-8" }, "Connexion aux r\u00E9sultats indisponible. V\u00E9rifie ta connexion Internet et actualise la page."),
-            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
+            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
                     var _a;
                     const data = eventData(e);
                     return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
                         ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
-function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
+function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
     var _a, _b, _c, _d;
     const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : 'matches');
     useEffect(() => { if (!hubIsEditor)
@@ -3786,6 +3853,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         }
     });
     const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+    // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
+    useEffect(() => {
+        if (hubIsEditor || !requestedViewerAction) return;
+        setActiveTab('matches');
+        setViewerMoreOpen(false);
+        setScheduleViewMode('chrono');
+        setMobileMatchFilter(requestedViewerAction.type === 'results' ? 'finished' : 'upcoming');
+        if (requestedViewerAction.type === 'team') setTeamPickerOpen(true);
+    }, [requestedViewerAction, hubIsEditor]);
     const [newPlayerInputs, setNewPlayerInputs] = useState({});
     useEffect(() => {
         try {

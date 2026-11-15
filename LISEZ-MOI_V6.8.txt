@@ -1,0 +1,17 @@
+TOURNOI CSV V6.8 — NOUVEL ACCUEIL SPECTATEUR
+
+1. Décompresser le pack ZIP.
+2. Télécharger une sauvegarde JSON de vos tournois depuis l'espace organisateur.
+3. Sur GitHub, remplacer TOUS les fichiers applicatifs de la racine du dépôt : app.js, styles.css, sw.js, index.html, spectateur.html, organisateur.html, manifest*.webmanifest et les images.
+4. Commit changes ; attendre le déploiement GitHub Pages puis ouvrir :
+   https://csvfoot.github.io/tournoi-csv/spectateur.html
+   https://csvfoot.github.io/tournoi-csv/organisateur.html
+5. Sur iPhone / iPad, fermer entièrement l'application puis rouvrir.
+
+Spectateur : au lancement de l'icône dédiée (sans paramètres URL), la page de garde présente les journées publiées, les catégories et les accès Programme, Mon équipe, Résultats.
+Les liens QR pointant sur une journée précise restent directs, sans page d'accueil intermédiaire.
+Le bouton Accueil permet de revenir à la page de garde depuis le calendrier.
+Organisateur : aucun changement de l'authentification V6.7 ni des outils de saisie.
+
+Cette version modifie l'interface, pas les données Firebase. Les règles de sécurité Firebase nécessitent toujours leur validation avant une utilisation officielle.
+Tester les boutons sur Mac, iPhone et iPad ainsi que l'accès par QR code avant le tournoi.

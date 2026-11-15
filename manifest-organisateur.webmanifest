@@ -1,7 +1,7 @@
 {
   "name": "Tournoi CSV — Organisateur",
   "short_name": "CSV Organisateur",
-  "description": "Application organisateur des tournois du CSV — V6.7",
+  "description": "Application organisateur des tournois du CSV — V6.8",
   "start_url": "./organisateur.html",
   "scope": "./",
   "display": "standalone",
