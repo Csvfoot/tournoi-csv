@@ -1,0 +1,42 @@
+TOURNOI CSV — V6.7 : INSTALLATION ET SÉCURITÉ
+
+CE QUI EST CORRIGÉ
+- L’icône CSV Organisateur affiche un écran de connexion autonome dès son lancement.
+- Aucun écran spectateur ne s’affiche avant cette connexion.
+- La connexion Firebase e-mail/mot de passe est privilégiée.
+- L’ancien PIN reste disponible uniquement pendant la transition.
+- CSV Spectateur garde son point d’entrée séparé.
+
+PUBLIER LA V6.7
+1. Sauvegarder les résultats et conserver une copie de la V6.6.
+2. Décompresser le pack et envoyer TOUS les fichiers applicatifs à la racine GitHub Pages,
+   notamment organisateur.html, spectateur.html, index.html, app.js, styles.css, sw.js,
+   les manifests et les icônes. Ne pas remplacer seulement index.html.
+3. Attendre la publication, puis ouvrir organisateur.html dans Safari sur iPhone/iPad.
+4. Fermer et rouvrir les deux icônes et contrôler leurs modes de démarrage.
+
+SECURISER FIREBASE — ÉTAPE À FAIRE DANS FIREBASE, PAS SUR GITHUB PAGES
+ATTENTION : n’installe pas de nouvelles règles sans avoir créé et testé ton compte.
+1. Dans la console Firebase, active Authentication > Email/Password.
+2. Crée un compte organisateur avec e-mail vérifié, puis repère son UID dans Authentication.
+3. Copie tes règles Firestore ACTUELLES dans un endroit sûr.
+4. Ouvre EXEMPLE_REGLES_FIRESTORE_A_CONFIGURER.rules.
+   Remplace REMPlACER_PAR_UID_COMPTE_ORGANISATEUR (avec l'orthographe exacte du fichier)
+   par le vrai UID. Ajoute les UID des autres organisateurs que tu autorises.
+5. Dans Firestore > Règles, adapte et teste les règles à l’aide du simulateur :
+   - lecture des documents tournois depuis un spectateur anonyme : autorisée ;
+   - écriture anonyme : refusée ;
+   - écriture depuis le compte organisateur autorisé et e-mail vérifié : autorisée ;
+   - écriture depuis un autre compte authentifié : refusée.
+6. Active les règles seulement lorsque ces tests passent. Depuis l’icône CSV
+   Organisateur, utilise alors le formulaire Firebase, plus le PIN provisoire.
+7. Teste une saisie de résultat fictif puis consulte-la dans CSV Spectateur.
+
+LIMITES IMPORTANTES
+- L’authentification locale par PIN n’est PAS une protection des écritures.
+- La règle d’exemple sécurise les écritures mais laisse les lectures publiques,
+  puisque les documents existants mêlent informations publiques et privées.
+  Pour restreindre l’accès aux joueurs/PIN et aux tournois masqués, il faudra
+  SÉPARER les données publiques et les données organisateur dans Firestore.
+- N’utilise pas la V6.7 pour le jour J avant un vrai essai à plusieurs appareils.
+- Les opérations de sauvegarde/restauration méritent aussi un test sur données fictives.

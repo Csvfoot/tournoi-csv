@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.6';
+const CSV_APP_VERSION = '6.7';
 // Each installable home-screen app has an explicit entry-point.
 // Modes configure navigation ONLY: Firebase rules, not this constant, protect writes.
 const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
@@ -3081,6 +3081,49 @@ function MultiTournamentShell() {
             setHubMessage('Stockage local indisponible sur cet appareil.');
         }
     };
+    // V6.7 : entrée Organisateur indépendante. Ne monte JAMAIS le tableau spectateur
+    // avant la vérification, même lorsque les données Firebase sont encore en chargement.
+    // Le PIN historique ne constitue pas une authentification Firebase : les droits
+    // d'écriture réels doivent impérativement être limités par les règles Firestore.
+    if (CSV_HOME_MODE === 'organizer' && !hubIsEditor) {
+        return React.createElement("main", {
+            className: "min-h-screen flex items-center justify-center bg-[#0e0708] text-slate-100 p-4 sm:p-8",
+            style: { minHeight: '100dvh' }
+        }, React.createElement("section", {
+            role: "region", "aria-label": "Connexion CSV Organisateur",
+            className: "w-full max-w-sm rounded-2xl border border-amber-600/60 bg-[#210a11] p-5 sm:p-7 shadow-2xl space-y-4"
+        },
+            React.createElement("div", { className: "flex items-center gap-3 border-b border-amber-900/50 pb-4" },
+                React.createElement(ClubLogo, { className: "w-14 h-14 shrink-0" }),
+                React.createElement("div", null,
+                    React.createElement("div", { className: "text-[11px] uppercase tracking-widest text-amber-400 font-bold" }, "Tournoi CSV"),
+                    React.createElement("h1", { className: "text-xl font-black text-amber-200" }, "Espace organisateur"),
+                    React.createElement("p", { className: "text-xs text-slate-300" }, "Identifie-toi pour accéder à la gestion des tournois."))),
+            React.createElement("form", { className: "space-y-3", onSubmit: e => { e.preventDefault(); verifyShellOrganizer('firebase'); } },
+                React.createElement("p", { className: "text-xs font-bold text-emerald-200" }, "Connexion sécurisée Firebase (recommandée)"),
+                React.createElement("label", { className: "block text-xs text-slate-200" }, "Adresse e-mail",
+                    React.createElement("input", { type: "email", required: true, autoComplete: "username", inputMode: "email", value: shellEmail,
+                        onChange: e => setShellEmail(e.target.value), placeholder: "compte organisateur",
+                        className: "mt-1 block w-full min-h-[48px] rounded-lg bg-[#0e0708] border border-amber-900/70 px-3 text-white" })),
+                React.createElement("label", { className: "block text-xs text-slate-200" }, "Mot de passe",
+                    React.createElement("input", { type: "password", required: true, autoComplete: "current-password", value: shellPassword,
+                        onChange: e => setShellPassword(e.target.value),
+                        className: "mt-1 block w-full min-h-[48px] rounded-lg bg-[#0e0708] border border-amber-900/70 px-3 text-white" })),
+                React.createElement("button", { type: "submit", disabled: shellLoginBusy, className: "w-full min-h-[48px] rounded-xl bg-emerald-700 text-white font-black disabled:opacity-50" },
+                    shellLoginBusy ? "Vérification…" : "Se connecter")),
+            React.createElement("details", { className: "rounded-xl border border-amber-900/60 bg-black/20 p-3 text-xs" },
+                React.createElement("summary", { className: "text-amber-300 font-semibold cursor-pointer py-1" }, "Ancien accès par code PIN (transition)"),
+                React.createElement("form", { className: "mt-3 space-y-2", onSubmit: e => { e.preventDefault(); verifyShellOrganizer('pin'); } },
+                    React.createElement("label", { className: "block text-slate-200" }, "Code PIN",
+                        React.createElement("input", { type: "password", required: true, autoComplete: "off", maxLength: 8, value: shellPin,
+                            onChange: e => setShellPin(e.target.value),
+                            className: "mt-1 block w-full min-h-[46px] rounded-lg bg-[#0e0708] border border-amber-900/70 px-3 text-white" })),
+                    React.createElement("button", { type: "submit", disabled: shellLoginBusy, className: "w-full min-h-[44px] rounded-lg bg-amber-500 text-black font-bold disabled:opacity-50" }, "Valider le PIN"),
+                    React.createElement("p", { className: "text-[11px] text-slate-400" }, "Le PIN ne donne pas de droits d'écriture sur une base Firebase protégée. Utilise un compte organisateur autorisé."))),
+            shellLoginError && React.createElement("p", { role: "alert", className: "rounded-lg border border-rose-700/60 bg-rose-950/40 p-3 text-xs text-rose-200" }, shellLoginError),
+            React.createElement("a", { href: "./spectateur.html", className: "block text-center text-xs text-slate-300 underline py-2" }, "Ouvrir plutôt CSV Spectateur")
+        ));
+    }
     return React.createElement("div", { className: 'min-h-screen bg-[#0e0708] text-slate-100 ' + (hubIsEditor ? 'pb-24 xl:pb-0' : '') },
         hubIsEditor && React.createElement(React.Fragment, null,
             shellMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-0 z-[70] bg-black/65", role: "presentation", onClick: () => setShellMoreOpen(false) },
