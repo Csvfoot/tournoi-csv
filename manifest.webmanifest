@@ -1,7 +1,7 @@
 {
   "name": "Tournoi CSV — CS La Verpillière",
   "short_name": "Tournoi CSV",
-  "description": "Calendriers et résultats des tournois du CSV — V6.8",
+  "description": "Calendriers et résultats des tournois du CSV — V7.1",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

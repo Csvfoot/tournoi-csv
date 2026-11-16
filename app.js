@@ -1,11 +1,64 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '6.8';
+const CSV_APP_VERSION = '7.1';
+// V7.1 sécurité calendrier : données saisies à ne jamais écraser.
+// Fonction pure, également utilisée pour les changements de poules.
+function csvMatchHasProtectedData(m) {
+    if (!m || typeof m !== 'object') return false;
+    const entered = x => x !== null && x !== undefined && x !== '';
+    return m.status === 'finished' || m.status === 'live' ||
+        m.status === 'in_progress' || m.status === 'in-progress' ||
+        entered(m.score1) || entered(m.score2) ||
+        entered(m.pens1) || entered(m.pens2) ||
+        (Array.isArray(m.events) && m.events.length > 0) ||
+        (typeof m.mvp === 'string' && m.mvp.trim().length > 0) ||
+        entered(m.mvpTeamId);
+}
+
+// Empêche de supprimer une équipe encore référencée dans une rencontre.
+function csvMatchReferencesTeam(m, teamId) {
+    if (!m || !teamId) return false;
+    return m.team1Id === teamId || m.team2Id === teamId ||
+        m.winnerId === teamId || m.winnerTeamId === teamId ||
+        m.loserId === teamId || m.loserTeamId === teamId;
+}
+
+// Confirmation renforcée pour toute remise à zéro potentiellement destructive.
+// Le code demandé évite un clic accidentel, mais ne remplace PAS une sauvegarde.
+function csvConfirmDestructiveReset(kind, protectedCount) {
+    const isWhole = kind === 'whole';
+    const description = isWhole
+        ? 'TOUT le tournoi (équipes, matchs, résultats, buteurs et MVP)'
+        : 'le calendrier (matchs, résultats, buteurs et MVP)';
+    const warning = `ATTENTION : tu vas effacer ${description}.` +
+        (protectedCount > 0 ? `\n${protectedCount} match(s) contiennent déjà des données.` : '') +
+        '\nCette action ne peut pas être annulée sans une sauvegarde antérieure.';
+    if (!window.confirm(warning)) return false;
+    if (!isWhole && protectedCount === 0) return true;
+    const answer = window.prompt('Pour confirmer la suppression, écris exactement EFFACER :', '');
+    return answer === 'EFFACER';
+}
+
 // Each installable home-screen app has an explicit entry-point.
 // Modes configure navigation ONLY: Firebase rules, not this constant, protect writes.
 const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
     : window.CSV_LAUNCH_MODE === 'spectator' ? 'spectator' : 'general';
+// L'UID autorisé est injecté LOCALEMENT depuis les règles sauvegardées.
+// Il n'est pas un mot de passe : seule la règle Firebase côté serveur
+// détermine les droits réels d'écriture.
+const CSV_APPROVED_ORGANIZER_UID = 'ewjuchE1caWjm9SVWesg3JIkgQ02';
+function csvIsApprovedOrganizer(user) {
+    return Boolean(user && !user.isAnonymous && user.emailVerified === true &&
+        typeof user.uid === 'string' && user.uid === CSV_APPROVED_ORGANIZER_UID);
+}
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
+// Ancien PIN supprimé des nouvelles écritures et sauvegardes.
+// Une migration contrôlée sera nécessaire pour les documents Firestore EXISTANTS.
+const csvCleanPublicConfig = input => {
+    const copy = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : {}) };
+    delete copy.adminPin;
+    return copy;
+};
 // Protection des données importées : aucun script et aucune opération Firebase
 // ne sont déclenchés pendant la lecture ou la validation d'un fichier.
 function verifyCsvBackup(raw) {
@@ -42,7 +95,7 @@ function verifyCsvBackup(raw) {
             !Array.isArray(data.teams) || !Array.isArray(data.matches) ||
             data.teams.length > 5000 || data.matches.length > 20000)
             throw new Error('Données incorrectes pour « ' + event.category + ' ».');
-        restored[event.id] = { config: data.config, teams: data.teams, matches: data.matches,
+        restored[event.id] = { config: csvCleanPublicConfig(data.config), teams: data.teams, matches: data.matches,
             auditLog: Array.isArray(data.auditLog) ? data.auditLog.slice(-150) : [] };
     }
     return { format: CSV_BACKUP_FORMAT, version: CSV_BACKUP_VERSION,
@@ -436,29 +489,21 @@ const csvReadableDay = date => {
 // Configuration publique Firebase déjà utilisée dans le lien de partage CSV.
 // Cette clé de projet client n'est pas un secret ; les règles Firestore
 // doivent toujours protéger l'écriture des données.
+// V7.1 : configuration Firebase officielle extraite du site déjà publié.
 const DEFAULT_CLOUD_CONFIG = {
-    apiKey: 'AIzaSyBYFQkkpiDs-7dkiTHZOIgKgh8cqonuYTk',
-    projectId: 'tournoi-cs-la-verpilliere',
-    authDomain: 'tournoi-cs-la-verpilliere.firebaseapp.com'
+  "apiKey": "AIzaSyBYFQkkpiDs-7dkiTHZOIgKgh8cqonuYTk",
+  "projectId": "tournoi-cs-la-verpilliere",
+  "authDomain": "tournoi-cs-la-verpilliere.firebaseapp.com"
 };
-const loadCloudConfig = () => {
-    try {
-        const params = new URLSearchParams(window.location.search);
-        const encoded = params.get('cloud');
-        if (encoded) {
-            const obj = JSON.parse(atob(encoded));
-            const value = { apiKey: obj.k, projectId: obj.p, authDomain: obj.p + '.firebaseapp.com' };
-            if (value.apiKey && value.projectId) {
-                localStorage.setItem('cslv_firebase_config', JSON.stringify(value));
-                return value;
-            }
-        }
-    }
-    catch (e) { }
-    return readLocalJson('cslv_firebase_config', DEFAULT_CLOUD_CONFIG);
+const loadCloudConfig = () => ({ ...DEFAULT_CLOUD_CONFIG });
+// Production : aucune connexion aux émulateurs n'est autorisée.
+const csvConnectLocalEmulators = () => {
+  if (!firebase.apps.length || firebase.app().options.projectId !== 'tournoi-cs-la-verpilliere')
+    throw new Error('Projet Firebase officiel non reconnu');
+  return firebase.firestore();
 };
-// Attendre le chargement de la session Firebase avant d'en créer une anonyme.
-// Sinon une reconnexion organisateur e-mail pourrait être écrasée au démarrage.
+csvConnectLocalEmulators.connected = true;
+
 const csvEnsureFirebaseAuth = async () => {
     const auth = firebase.auth();
     const user = await new Promise(resolve => {
@@ -1534,7 +1579,7 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
             React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4 items-start" }, fixtures.map(({ event, match, teams }) => React.createElement(DayEntryMatchCard, { key: event.id + '|' + match.id, event: event, match: match, teams: teams, fields: fields, onOpen: openMatch }))),
         editingMatch && React.createElement(MatchDetailModal, { editingMatch: editingMatch, setEditingMatch: setEditingMatch, getTeam: getModalTeam, fields: fields, goalTeamId: goalTeamId, setGoalTeamId: setGoalTeamId, goalScorerName: goalScorerName, setGoalScorerName: setGoalScorerName, onSave: saveMatch, onClose: closeMatch, categoryLabel: (activeEntry === null || activeEntry === void 0 ? void 0 : activeEntry.event.category) || '', readOnlySchedule: true, requireKnownTeams: true, saving: saving, saveError: saveError }));
 }
-// V6.8 — La page de garde utilise le catalogue PUBLIC existant, jamais une copie de données.
+// V6.9 — La page de garde utilise le catalogue PUBLIC existant, jamais une copie de données.
 // Elle est réservée au raccourci spectateur : les liens QR datés gardent l'accès direct.
 function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline, onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing }) {
     const canEnter = events.length > 0;
@@ -1578,22 +1623,9 @@ function MultiTournamentShell() {
     var _a, _b, _c, _d;
     const params = new URLSearchParams(window.location.search);
     const urlTournament = params.get('tournament');
-    const [hubIsEditor, setHubIsEditor] = useState(() => {
-        // The public home-screen app is always a viewer, regardless of another app's session.
-        if (CSV_HOME_MODE === 'spectator')
-            return false;
-        // A shared viewer URL in the generic site remains a viewer.
-        if (CSV_HOME_MODE !== 'organizer' && params.get('role') === 'viewer')
-            return false;
-        // Le lien ?role=editor ne déverrouille PAS l'édition :
-        // seule une session ayant validé le code organisateur y donne accès.
-        try {
-            return sessionStorage.getItem('cslv_editor_session_v1') === '1';
-        }
-        catch (e) {
-            return false;
-        }
-    });
+    // V6.9 : aucune session PIN locale ne peut ouvrir l'espace organisateur.
+    // Firebase Authentication (compte e-mail vérifié) est obligatoire.
+    const [hubIsEditor, setHubIsEditor] = useState(false);
     const isViewer = !hubIsEditor;
     // Un lien organisateur ouvre la demande de code PIN, y compris sur iPhone.
     // L'URL seule ne confère jamais les droits d'édition.
@@ -1604,9 +1636,18 @@ function MultiTournamentShell() {
         if (CSV_HOME_MODE === 'spectator' && role === 'editor')
             return;
         const isEditor = role === 'editor';
+        if (isEditor) {
+            const account = typeof firebase !== 'undefined' && firebase.apps.length ? firebase.auth().currentUser : null;
+            if (!csvIsApprovedOrganizer(account)) {
+                // Aucun PIN, URL ou sessionStorage ne peut donner le rôle éditable.
+                setHubMessage('Compte Firebase organisateur non autorisé. Vérifie la connexion et les droits.');
+                return;
+            }
+        }
         setHubIsEditor(isEditor);
         if (isEditor)
             setOrganizerLinkPending(false);
+        // Le stockage de session ne constitue jamais une autorisation Firebase.
         try {
             sessionStorage.setItem('cslv_editor_session_v1', isEditor ? '1' : '0');
         }
@@ -1628,6 +1669,26 @@ function MultiTournamentShell() {
         const search = nextParams.toString();
         window.history.replaceState({}, '', window.location.pathname + (search ? '?' + search : '') + window.location.hash);
     }, []);
+    useEffect(() => {
+        if (CSV_HOME_MODE === 'spectator' || typeof firebase === 'undefined') return;
+        // Initialiser explicitement l'app pour détecter une session Firebase déjà présente.
+        // L'effet de synchronisation du catalogue peut démarrer après cet observateur.
+        if (!firebase.apps.length) {
+            try { firebase.initializeApp(loadCloudConfig()); csvConnectLocalEmulators(); } catch (e) { console.warn('Initialisation Firebase', e); }
+        }
+        if (!firebase.apps.length) return;
+        csvConnectLocalEmulators();
+      const unsubscribe = firebase.auth().onAuthStateChanged(async user => {
+            if (!user || user.isAnonymous) { setHubIsEditor(false); return; }
+            try {
+                await user.reload();
+                if (firebase.auth().currentUser === user && csvIsApprovedOrganizer(user))
+                    onRoleChange('editor');
+                else if (firebase.auth().currentUser === user) setHubIsEditor(false);
+            } catch (e) { console.warn('Session organisateur à revalider', e); }
+        });
+        return () => unsubscribe();
+    }, [onRoleChange]);
     const [catalog, setCatalog] = useState(() => cleanCategories(readLocalJson('cslv_multi_catalog_v1', initialTournaments())));
     const [selectedId, setSelectedId] = useState(() => urlTournament || readLocalJson('cslv_last_tournament_v1', 'principal'));
     // Les QR spectateurs portant ?day= restent verrouillés sur cette seule date.
@@ -1756,8 +1817,10 @@ function MultiTournamentShell() {
         setHubStatus('loading');
         (async () => {
             try {
-                if (!firebase.apps.length)
+                if (!firebase.apps.length) {
                     firebase.initializeApp(conf);
+                }
+                csvConnectLocalEmulators();
                 const db = firebase.firestore();
                 dbRef.current = db;
                 if (csvTrustedOffline()) {
@@ -1836,9 +1899,11 @@ function MultiTournamentShell() {
                 const conf = loadCloudConfig();
                 if (!(conf === null || conf === void 0 ? void 0 : conf.apiKey) || !(conf === null || conf === void 0 ? void 0 : conf.projectId))
                     throw new Error('Configuration Firebase absente.');
-                if (!firebase.apps.length)
-                    firebase.initializeApp(conf);
-                db = firebase.firestore();
+                if (!firebase.apps.length) {
+            firebase.initializeApp(conf);
+          }
+          csvConnectLocalEmulators();
+          db = firebase.firestore();
                 dbRef.current = db;
                 await csvEnsureFirebaseAuth();
             }
@@ -1923,7 +1988,7 @@ function MultiTournamentShell() {
                 // Les vues « Mon équipe » et « Matchs » relisent le stockage local au montage.
                 // Écrire aussi le snapshot évite d'afficher un ancien calendrier après la saisie du jour.
                 try {
-                    for (const [kind, value] of [['config', data.config || {}], ['teams', data.teams || []], ['matches', data.matches || []]])
+                    for (const [kind, value] of [['config', csvCleanPublicConfig(data.config)], ['teams', data.teams || []], ['matches', data.matches || []]])
                         localStorage.setItem(tournamentStorageKey(event.id, kind), JSON.stringify(value));
                 }
                 catch (e) {
@@ -1934,11 +1999,11 @@ function MultiTournamentShell() {
                     localStorage.setItem(csvHistoryKey(event.id), JSON.stringify(auditLog.slice(-150)));
                 }
                 catch (e) { }
-                setRecords(old => ({ ...old, [event.id]: { config: data.config || {}, teams: data.teams || [], matches: data.matches || [], auditLog } }));
+                setRecords(old => ({ ...old, [event.id]: { config: csvCleanPublicConfig(data.config), teams: data.teams || [], matches: data.matches || [], auditLog } }));
             }
             else {
                 setRecords(old => ({ ...old, [event.id]: old[event.id] || {
-                        config: readLocalJson(tournamentStorageKey(event.id, 'config'), {}),
+                        config: csvCleanPublicConfig(readLocalJson(tournamentStorageKey(event.id, 'config'), {})),
                         matches: readLocalJson(tournamentStorageKey(event.id, 'matches'), []),
                         teams: readLocalJson(tournamentStorageKey(event.id, 'teams'), []),
                         auditLog: readLocalJson(csvHistoryKey(event.id), [])
@@ -1948,7 +2013,7 @@ function MultiTournamentShell() {
         return () => { cancelled = true; unsubs.forEach(u => u()); };
     }, [hubStatus, hubIsEditor, viewerDay, catalog.map(e => e.id + ':' + e.date + ':' + e.published).join('|')]);
     const localRecord = id => ({
-        config: readLocalJson(tournamentStorageKey(id, 'config'), {}),
+        config: csvCleanPublicConfig(readLocalJson(tournamentStorageKey(id, 'config'), {})),
         teams: readLocalJson(tournamentStorageKey(id, 'teams'), []),
         matches: readLocalJson(tournamentStorageKey(id, 'matches'), []),
         auditLog: readLocalJson(csvHistoryKey(id), [])
@@ -1956,7 +2021,7 @@ function MultiTournamentShell() {
     const updateRecord = useCallback((id, data) => {
         // Ces événements viennent des actions locales du tournoi. Les snapshots
         // Firebase restent la référence pour toutes les écritures à distance.
-        setRecords(old => { var _a; return ({ ...old, [id]: { ...data, auditLog: data.auditLog || ((_a = old[id]) === null || _a === void 0 ? void 0 : _a.auditLog) || readLocalJson(csvHistoryKey(id), []) } }); });
+        setRecords(old => { var _a; return ({ ...old, [id]: { ...data, config: csvCleanPublicConfig(data.config), auditLog: data.auditLog || ((_a = old[id]) === null || _a === void 0 ? void 0 : _a.auditLog) || readLocalJson(csvHistoryKey(id), []) } }); });
     }, []);
     const persistCatalog = async (next, fieldsOverride = null) => {
         setCatalog(next);
@@ -1993,7 +2058,7 @@ function MultiTournamentShell() {
         const allRecords = Object.create(null);
         for (const event of catalog) {
             const record = records[event.id] || localRecord(event.id);
-            allRecords[event.id] = { config: record.config || {}, teams: record.teams || [], matches: record.matches || [],
+            allRecords[event.id] = { config: csvCleanPublicConfig(record.config), teams: record.teams || [], matches: record.matches || [],
                 auditLog: record.auditLog || readLocalJson(csvHistoryKey(event.id), []) };
         }
         const doc = { format: CSV_BACKUP_FORMAT, version: CSV_BACKUP_VERSION,
@@ -2010,7 +2075,7 @@ function MultiTournamentShell() {
             a.click();
             a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1500);
-            setBackupNotice('Fichier de sauvegarde préparé : conserve-le dans un lieu sûr. Il contient les codes organisateur.' + (hubStatus === 'local' ? ' ATTENTION : sans Firebase, seuls les fichiers présents dans cet appareil ont pu être exportés.' : ''));
+            setBackupNotice('Fichier de sauvegarde préparé : conserve-le dans un lieu sûr. Protège ce fichier : il peut contenir des données personnelles.' + (hubStatus === 'local' ? ' ATTENTION : sans Firebase, seuls les fichiers présents dans cet appareil ont pu être exportés.' : ''));
         }
         catch (err) {
             setBackupNotice('Sauvegarde impossible : ' + (err.message || String(err)));
@@ -2047,7 +2112,7 @@ function MultiTournamentShell() {
             return;
         }
         const verified = verifyCsvBackup(backupCandidate);
-        if (window.prompt('Cette opération REMPLACE les catégories, terrains, équipes, résultats et codes PIN actuels.\nTape RESTAURER pour confirmer :') !== 'RESTAURER')
+        if (window.prompt('Cette opération REMPLACE les catégories, terrains, équipes et résultats.\nTape RESTAURER pour confirmer :') !== 'RESTAURER')
             return;
         if (!window.confirm('Dernière confirmation : remplacer toutes les données de tous les tournois sur Firebase ?'))
             return;
@@ -2179,27 +2244,17 @@ function MultiTournamentShell() {
                 if (!shellEmail.trim() || !shellPassword)
                     throw new Error('Indique l’e-mail et le mot de passe Firebase.');
                 if (!firebase.apps.length)
-                    firebase.initializeApp(loadCloudConfig());
+                    firebase.initializeApp(loadCloudConfig()); csvConnectLocalEmulators();
                 const result = await firebase.auth().signInWithEmailAndPassword(shellEmail.trim(), shellPassword);
                 await result.user.reload();
                 await result.user.getIdToken(true);
                 if (!((_a = firebase.auth().currentUser) === null || _a === void 0 ? void 0 : _a.emailVerified))
                     throw new Error('Adresse e-mail Firebase non vérifiée.');
+                if (!csvIsApprovedOrganizer(firebase.auth().currentUser))
+                    throw new Error('Ce compte Firebase n’est pas autorisé à organiser les tournois.');
             }
             else {
-                if (!shellPin.trim())
-                    throw new Error('Saisis ton code PIN organisateur.');
-                const event = catalog.find(e => e.id === selectedId) || catalog.find(e => e.id === 'principal') || catalog[0];
-                if (!event)
-                    throw new Error('Aucune catégorie disponible pour vérifier le code.');
-                let config = localRecord(event.id).config || {};
-                if (dbRef.current && hubStatus === 'online') {
-                    const doc = await dbRef.current.collection('tournaments').doc(tournamentDocId(event.id)).get();
-                    if (doc.exists)
-                        config = ((_b = doc.data()) === null || _b === void 0 ? void 0 : _b.config) || config;
-                }
-                if (shellPin !== (config.adminPin || '1939'))
-                    throw new Error('Code PIN incorrect.');
+                throw new Error('L’accès par PIN est désactivé. Utilise ton compte Firebase organisateur.');
             }
             onRoleChange('editor');
             setShellLoginOpen(false);
@@ -2250,16 +2305,16 @@ function MultiTournamentShell() {
         const event = { id, category: cat.slice(0, 60), title: (titleInput.trim() || 'Tournoi ' + cat).slice(0, 120), date: dateInput,
             published: csvNewDayPublication(catalog, dateInput) };
         const defaultConfig = { name: event.title, format: 'groups_knockout', numberOfGroups: 2, customGroups: ['Poule A', 'Poule B'], autoGroups: true, hasPlayoffs: true, hasConsolation: true,
-            adminPin: '1939', duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
+            duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
         localStorage.setItem(tournamentStorageKey(id, 'config'), JSON.stringify(defaultConfig));
         localStorage.setItem(tournamentStorageKey(id, 'teams'), '[]');
         localStorage.setItem(tournamentStorageKey(id, 'matches'), '[]');
-        setRecords(old => ({ ...old, [id]: { config: defaultConfig, teams: [], matches: [] } }));
+        setRecords(old => ({ ...old, [id]: { config: csvCleanPublicConfig(defaultConfig), teams: [], matches: [] } }));
         const next = [...catalog, event];
         if (dbRef.current && hubStatus === 'online') {
             try {
                 const batch = dbRef.current.batch();
-                batch.set(dbRef.current.collection('tournaments').doc(tournamentDocId(id)), { config: defaultConfig, teams: [], matches: [], fields: sharedFields, updatedAt: new Date().toISOString() });
+                batch.set(dbRef.current.collection('tournaments').doc(tournamentDocId(id)), { config: csvCleanPublicConfig(defaultConfig), teams: [], matches: [], fields: sharedFields, updatedAt: new Date().toISOString() });
                 batch.set(dbRef.current.collection('tournaments').doc('cslv_multi_catalog_v1'), { events: next, fields: sharedFields, updatedAt: new Date().toISOString() }, { merge: true });
                 await batch.commit();
             }
@@ -2302,7 +2357,7 @@ function MultiTournamentShell() {
         const source = eventData(original);
         // Jamais de scores ni calendrier copiés : évite les conflits de terrains
         // et donne un nouveau départ à la catégorie dupliquée.
-        const config = JSON.parse(JSON.stringify(source.config || {}));
+        const config = csvCleanPublicConfig(JSON.parse(JSON.stringify(source.config || {})));
         config.name = title;
         config.reservedSlots = [];
         const teams = JSON.parse(JSON.stringify(source.teams || [])).map((t, i) => ({
@@ -3166,7 +3221,7 @@ function MultiTournamentShell() {
                     React.createElement("h1", { className: "text-xl font-black text-amber-200" }, "Espace organisateur"),
                     React.createElement("p", { className: "text-xs text-slate-300" }, "Identifie-toi pour accéder à la gestion des tournois."))),
             React.createElement("form", { className: "space-y-3", onSubmit: e => { e.preventDefault(); verifyShellOrganizer('firebase'); } },
-                React.createElement("p", { className: "text-xs font-bold text-emerald-200" }, "Connexion sécurisée Firebase (recommandée)"),
+                React.createElement("p", { className: "text-xs font-bold text-emerald-200" }, "Connexion Firebase organisateur obligatoire"),
                 React.createElement("label", { className: "block text-xs text-slate-200" }, "Adresse e-mail",
                     React.createElement("input", { type: "email", required: true, autoComplete: "username", inputMode: "email", value: shellEmail,
                         onChange: e => setShellEmail(e.target.value), placeholder: "compte organisateur",
@@ -3177,7 +3232,7 @@ function MultiTournamentShell() {
                         className: "mt-1 block w-full min-h-[48px] rounded-lg bg-[#0e0708] border border-amber-900/70 px-3 text-white" })),
                 React.createElement("button", { type: "submit", disabled: shellLoginBusy, className: "w-full min-h-[48px] rounded-xl bg-emerald-700 text-white font-black disabled:opacity-50" },
                     shellLoginBusy ? "Vérification…" : "Se connecter")),
-            React.createElement("details", { className: "rounded-xl border border-amber-900/60 bg-black/20 p-3 text-xs" },
+            false && React.createElement("details", { className: "rounded-xl border border-amber-900/60 bg-black/20 p-3 text-xs" },
                 React.createElement("summary", { className: "text-amber-300 font-semibold cursor-pointer py-1" }, "Ancien accès par code PIN (transition)"),
                 React.createElement("form", { className: "mt-3 space-y-2", onSubmit: e => { e.preventDefault(); verifyShellOrganizer('pin'); } },
                     React.createElement("label", { className: "block text-slate-200" }, "Code PIN",
@@ -3796,13 +3851,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         setSecureBusy(true);
         setPinError('');
         try {
-            if (!firebase.apps.length)
+            if (!firebase.apps.length) {
                 firebase.initializeApp(loadCloudConfig());
+            }
+            csvConnectLocalEmulators();
             const result = await firebase.auth().signInWithEmailAndPassword(secureEmail.trim(), securePassword);
             await result.user.reload();
             await result.user.getIdToken(true);
             if (!firebase.auth().currentUser.emailVerified)
                 throw new Error('Adresse e-mail non vérifiée. Confirme l’e-mail du compte Firebase avant de réessayer.');
+            if (!csvIsApprovedOrganizer(firebase.auth().currentUser))
+                throw new Error('Ce compte Firebase n’est pas autorisé à organiser les tournois.');
             setUserRole('editor');
             setAdminPinModalOpen(false);
             setSecurePassword('');
@@ -3920,12 +3979,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [editTeamNameInput, setEditTeamNameInput] = useState('');
     const [config, setConfig] = useState(() => {
         if (tournamentRecord && tournamentRecord.config && Object.keys(tournamentRecord.config).length)
-            return tournamentRecord.config;
+            return csvCleanPublicConfig(tournamentRecord.config);
         try {
             const s = localStorage.getItem(tournamentStorageKey(tournament.id, 'config'));
-            return s ? JSON.parse(s) : {
+            return s ? csvCleanPublicConfig(JSON.parse(s)) : {
                 name: tournament.id === 'principal' ? 'Tournoi du CS La Verpillière' : (tournament.title || ('Tournoi ' + tournament.category)),
-                adminPin: '1939',
                 format: 'groups_knockout',
                 numberOfGroups: 2,
                 customGroups: ['Poule A', 'Poule B'],
@@ -3944,7 +4002,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             };
         }
         catch {
-            return { name: tournament.id === 'principal' ? 'Tournoi du CS La Verpillière' : (tournament.title || ('Tournoi ' + tournament.category)), adminPin: '1939', format: 'groups_knockout', numberOfGroups: 2, customGroups: ['Poule A', 'Poule B'], hasPlayoffs: true, hasConsolation: true, duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
+            return { name: tournament.id === 'principal' ? 'Tournoi du CS La Verpillière' : (tournament.title || ('Tournoi ' + tournament.category)), format: 'groups_knockout', numberOfGroups: 2, customGroups: ['Poule A', 'Poule B'], hasPlayoffs: true, hasConsolation: true, duration: 15, breakDuration: 5, startTime: '09:00', hasLunchBreak: true, lunchStart: '12:30', lunchEnd: '13:30', pointsWin: 3, pointsDraw: 1, pointsLoss: 0, qualifiersPerGroup: 2 };
         }
     });
     // État pour l'ajout d'une nouvelle poule personnalisée
@@ -3971,11 +4029,19 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const getTeam = (id) => teams.find(t => t.id === id) || { name: 'En attente', color: '#64748B', players: [] };
     // Assigner ou changer librement une équipe de poule
     const handleAssignTeamToGroup = (teamId, targetGroup) => {
+        // Le calendrier général doit être connu avant toute modification.
+        if (!requireHub()) return;
         if (!activeGroupNames.includes(targetGroup) || !teams.some(t => t.id === teamId))
             return;
         const oldTeam = teams.find(t => t.id === teamId);
         if (oldTeam.group === targetGroup)
             return;
+        // Une nouvelle poule ne doit pas être enregistrée avec un ancien calendrier
+        // qui contient déjà des résultats : il deviendrait incohérent.
+        if (matches.some(csvMatchHasProtectedData)) {
+            showToast('Déplacement bloqué : le tournoi possède des résultats ou événements. Conserve les poules et corrige le planning match par match.', 'error');
+            return;
+        }
         // Compléter les affectations encore absentes sans déplacer les choix existants.
         // Les premiers calendriers peuvent ne pas enregistrer le champ group.
         const capacities = configuredPoolSizes(teams.length, config);
@@ -3988,8 +4054,6 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             return { ...t, group: selected };
         });
         const nextTeams = withGroups.map(t => t.id === teamId ? { ...t, group: targetGroup } : t);
-        setTeams(nextTeams);
-        broadcastUpdate(config, fields, nextTeams, matches);
         // Une répartition manuelle peut provisoirement avoir 3/5 équipes.
         // On n'efface ni ne remplace jamais les choix de l'organisateur.
         const sizes = configuredPoolSizes(nextTeams.length, config);
@@ -3997,27 +4061,32 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             activeGroupNames.length === sizes.length &&
             activeGroupNames.every((g, i) => nextTeams.filter(t => t.group === g).length === sizes[i]));
         if (!balanced) {
-            showToast('Équipe déplacée. Équilibre les poules selon la formule sélectionnée avant de régénérer.', 'error');
+            // Répartition provisoire autorisée, sans toucher au calendrier existant.
+            setTeams(nextTeams);
+            broadcastUpdate(config, fields, nextTeams, matches);
+            showToast('Équipe déplacée. Équilibre les poules avant de régénérer.', 'error');
             return;
         }
-        if (matches.length && matches.every(m => m.status !== 'finished')) {
-            // Régénère les rencontres uniquement si aucun résultat n'est saisi.
-            // Permet d'afficher immédiatement les nouvelles équipes adverses.
+        if (matches.length) {
+            // Une SEULE écriture, après validation et génération du nouveau calendrier.
+            // Si la génération échoue, l'ancien état reste intact.
             generateSchedule(nextTeams, true);
+            return;
         }
-        else if (matches.some(m => m.status === 'finished')) {
-            showToast('Poule mise à jour. Les matchs joués sont conservés : le calendrier existant doit être vérifié avant toute régénération.');
-        }
-        else {
-            showToast('Équipe déplacée : la répartition sera utilisée pour générer le calendrier.');
-        }
+        setTeams(nextTeams);
+        broadcastUpdate(config, fields, nextTeams, matches);
+        showToast('Équipe déplacée : tu peux générer le calendrier.');
     };
     // Ajouter une nouvelle poule libre
     const handleAddCustomGroup = () => {
+        if (matches.length) {
+            showToast('Poule non ajoutée : un calendrier existe déjà. Réinitialise-le d’abord si nécessaire.', 'error');
+            return;
+        }
         if (!newCustomGroupName.trim())
             return;
         const grp = newCustomGroupName.trim();
-        if (activeGroupNames.includes(grp)) {
+        if (activeGroupNames.some(g => g.toLocaleLowerCase('fr') === grp.toLocaleLowerCase('fr'))) {
             showToast('Cette poule existe déjà', 'error');
             return;
         }
@@ -4030,6 +4099,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     };
     // Supprimer une poule
     const handleRemoveCustomGroup = (groupToRemove) => {
+        if (matches.length) {
+            showToast('Suppression bloquée : un calendrier existe. Les rencontres seraient incohérentes.', 'error');
+            return;
+        }
         if (activeGroupNames.length <= 1) {
             showToast('Conservez au moins 1 poule', 'error');
             return;
@@ -4048,6 +4121,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (!newName || !newName.trim() || oldName === newName.trim())
             return;
         const fresh = newName.trim();
+        if (activeGroupNames.some(g => g !== oldName && g.toLocaleLowerCase('fr') === fresh.toLocaleLowerCase('fr'))) {
+            showToast('Ce nom de poule existe déjà.', 'error');
+            return;
+        }
         const updatedGroups = activeGroupNames.map(g => g === oldName ? fresh : g);
         const updatedTeams = teams.map(t => t.group === oldName ? { ...t, group: fresh } : t);
         const updatedMatches = matches.map(m => m.group === oldName ? { ...m, group: fresh } : m);
@@ -4095,10 +4172,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (isRemoteUpdate.current)
             return;
         try {
-            localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(config));
+            localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(csvCleanPublicConfig(config)));
             localStorage.setItem(tournamentStorageKey(tournament.id, 'teams'), JSON.stringify(teams));
             localStorage.setItem(tournamentStorageKey(tournament.id, 'matches'), JSON.stringify(matches));
-            onTournamentUpdate(tournament.id, { config, teams, matches });
+            onTournamentUpdate(tournament.id, { config: csvCleanPublicConfig(config), teams, matches });
         }
         catch (e) {
             console.warn('Sauvegarde locale', e);
@@ -4108,31 +4185,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     useEffect(() => {
         let unsubscribe = null;
         async function setupCloud() {
-            let fbConfig = null;
-            try {
-                const params = new URLSearchParams(window.location.search);
-                const cloudParam = params.get('cloud');
-                if (cloudParam) {
-                    const decoded = JSON.parse(atob(cloudParam));
-                    fbConfig = {
-                        apiKey: decoded.k,
-                        projectId: decoded.p,
-                        authDomain: decoded.p + '.firebaseapp.com'
-                    };
-                    localStorage.setItem('cslv_firebase_config', JSON.stringify(fbConfig));
-                }
-                else {
-                    const saved = localStorage.getItem('cslv_firebase_config');
-                    if (saved)
-                        fbConfig = JSON.parse(saved);
-                }
-            }
-            catch (e) { }
-            // Visit site ouvre l'URL simple, sans paramètre cloud : appliquer
-            // la même configuration publique que les liens spectateurs partagés.
-            if (!fbConfig)
-                fbConfig = loadCloudConfig();
-            if (!fbConfig || !fbConfig.apiKey || !fbConfig.projectId) {
+            // TEST LOCAL : ignorer les liens cloud et la configuration Chrome.
+      const fbConfig = loadCloudConfig();
+      if (!fbConfig || !fbConfig.apiKey || !fbConfig.projectId) {
                 setCloudStatus('offline');
                 return;
             }
@@ -4140,6 +4195,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 if (!firebase.apps.length) {
                     firebase.initializeApp(fbConfig);
                 }
+                csvConnectLocalEmulators();
                 const db = firebase.firestore();
                 dbRef.current = db;
                 try {
@@ -4152,7 +4208,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         const data = docSnap.data();
                         isRemoteUpdate.current = true;
                         if (data.config)
-                            setConfig(data.config);
+                            setConfig(csvCleanPublicConfig(data.config));
                         // Les terrains sont gérés dans le catalogue commun.
                         if (data.teams)
                             setTeams(data.teams);
@@ -4160,7 +4216,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             setMatches(data.matches);
                         try {
                             if (data.config)
-                                localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(data.config));
+                                localStorage.setItem(tournamentStorageKey(tournament.id, 'config'), JSON.stringify(csvCleanPublicConfig(data.config)));
                             if (data.teams)
                                 localStorage.setItem(tournamentStorageKey(tournament.id, 'teams'), JSON.stringify(data.teams));
                             if (data.matches)
@@ -4190,13 +4246,22 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     }, [tournament.id]);
     // Émission des mises à jour vers le Cloud
     const broadcastUpdate = (newConfig, newFields, newTeams, newMatches, auditEvent = null) => {
+        // Garde-fou ergonomique : le contrôle véritable reste dans les règles Firestore.
+        if (userRole !== 'editor' || !csvIsApprovedOrganizer(firebase.apps.length ? firebase.auth().currentUser : null)) {
+            showToast('Écriture refusée : connexion organisateur autorisée requise.', 'error');
+            return;
+        }
         if (auditEvent)
             csvRecordLocalAudit(tournament.id, auditEvent);
-        if (dbRef.current && cloudStatus === 'online' && !isRemoteUpdate.current) {
+        if (!dbRef.current || cloudStatus !== 'online') {
+            showToast('Sauvegarde locale uniquement : Firebase est indisponible. Ne ferme pas la page avant vérification.', 'error');
+            return;
+        }
+        if (!isRemoteUpdate.current) {
             try {
                 const clean = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
                 const payload = {
-                    config: clean(newConfig || config),
+                    config: clean(csvCleanPublicConfig(newConfig || config)),
                     fields: clean(newFields || fields),
                     teams: clean(newTeams || teams),
                     matches: clean(newMatches || matches),
@@ -4228,20 +4293,31 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     };
     // Réinitialiser le calendrier (scores & matchs uniquement)
     const handleResetScheduleOnly = () => {
-        if (!window.confirm("Êtes-vous sûr de vouloir réinitialiser le calendrier et effacer tous les matchs et scores ? Les équipes seront conservées."))
+        if (!requireHub()) return;
+        // Pas de remise à zéro si la session organisateur ne permet pas l'écriture.
+        if (userRole !== 'editor' || !csvIsApprovedOrganizer(firebase.apps.length ? firebase.auth().currentUser : null)) {
+            showToast('Réinitialisation refusée : connexion organisateur requise.', 'error');
             return;
+        }
+        const protectedCount = matches.filter(csvMatchHasProtectedData).length;
+        if (!csvConfirmDestructiveReset('schedule', protectedCount)) return;
         setMatches([]);
         broadcastUpdate(config, fields, teams, []);
-        showToast("Calendrier des matchs réinitialisé !");
+        showToast('Calendrier réinitialisé. Vérifie la synchronisation Firebase.');
     };
     // Réinitialiser l'ensemble du tournoi (Équipes + Matchs)
     const handleResetWholeTournament = () => {
-        if (!window.confirm("ATTENTION : Cette action supprimera TOUTES les équipes, tous les matchs, buteurs et classements. Continuer ?"))
+        if (!requireHub()) return;
+        if (userRole !== 'editor' || !csvIsApprovedOrganizer(firebase.apps.length ? firebase.auth().currentUser : null)) {
+            showToast('Réinitialisation refusée : connexion organisateur requise.', 'error');
             return;
+        }
+        const protectedCount = matches.filter(csvMatchHasProtectedData).length;
+        if (!csvConfirmDestructiveReset('whole', protectedCount)) return;
         setMatches([]);
         setTeams([]);
         broadcastUpdate(config, fields, [], []);
-        showToast("Le tournoi a été entièrement remis à zéro !");
+        showToast('Tournoi réinitialisé. Vérifie la synchronisation Firebase.');
     };
     // Créneaux exclusifs : blocs vides et matchs seuls sur tous les terrains.
     // Matchs des autres catégories organisées à la même date.
@@ -4812,7 +4888,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             showToast('Pas de finale dans ce calendrier. Génère d’abord les phases finales.', 'error');
             return;
         }
-        if (phaseMatches.some(m => m.status !== 'pending')) {
+        if (phaseMatches.some(m => m.status !== 'pending' || csvMatchHasProtectedData(m))) {
             showToast('Des matchs de phase finale ont déjà commencé : leurs horaires sont conservés. Réorganisation automatique désactivée.', 'error');
             return;
         }
@@ -4838,8 +4914,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             showToast('Il faut au moins 2 équipes et un terrain.', 'error');
             return;
         }
-        if (!automatic && matches.some(m => m.status === 'finished') && !window.confirm('ATTENTION : générer un nouveau calendrier efface les résultats enregistrés. Continuer ?'))
+        // Interdit d'écraser des scores, événements ou MVP, même après confirmation.
+        if (matches.some(csvMatchHasProtectedData)) {
+            showToast('Calendrier protégé : des résultats ou événements sont saisis. Corrige les rencontres individuellement.', 'error');
             return;
+        }
+        // Sans score, une régénération manuelle peut quand même déplacer des créneaux.
+        if (!automatic && matches.length && !window.confirm(
+            'Remplacer les rencontres non jouées et leurs créneaux ? Les équipes et réservations seront conservées, mais les changements manuels du calendrier pourront être perdus.'
+        )) return;
         let rawMatches = [];
         let nextTeams = sourceTeams;
         if (config.format === 'knockout')
@@ -4968,7 +5051,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (!availableFields.length)
             return { error: 'Aucun terrain disponible.' };
         const phaseGroups = new Set(['Phase Finale Principale', 'Phase Finale', 'Tournoi Classement', 'Tournoi Consolante']);
-        const movable = matches.filter(m => m.status === 'pending' && !m.exclusive && !phaseGroups.has(m.group));
+        const movable = matches.filter(m => m.status === 'pending' && !csvMatchHasProtectedData(m) && !m.exclusive && !phaseGroups.has(m.group));
         if (!movable.length)
             return { error: 'Aucun match de poule non commencé à rééquilibrer.' };
         const movableIds = new Set(movable.map(m => m.id));
@@ -5065,7 +5148,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         const newFields = [...fields, { id: `f-${Date.now()}`, name }];
         // Tant qu'aucun match n'a commencé, rééquilibrer automatiquement.
         // En cours de tournoi, ne jamais modifier des horaires sans confirmation.
-        const canAuto = hubReady && matches.length > 0 && matches.every(m => m.status === 'pending');
+        const canAuto = hubReady && matches.length > 0 && matches.every(m => m.status === 'pending' && !csvMatchHasProtectedData(m));
         const result = canAuto ? buildBalancedFieldPlan(newFields) : null;
         setFields(newFields);
         setNewFieldName('');
@@ -5111,6 +5194,14 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         showToast(`Équipe "${newTeam.name}" inscrite !`);
     };
     const handleRemoveTeam = (id) => {
+        if (!teams.some(t => t.id === id)) return;
+        // Même un match sans score conserve une référence à cette équipe.
+        // Sa suppression rendrait calendrier et classements incohérents.
+        if (matches.some(m => csvMatchReferencesTeam(m, id))) {
+            showToast('Suppression bloquée : cette équipe figure dans le calendrier. Réinitialise d’abord le calendrier si nécessaire.', 'error');
+            return;
+        }
+        if (!window.confirm('Retirer cette équipe du tournoi ?')) return;
         const updated = teams.filter(t => t.id !== id);
         setTeams(updated);
         broadcastUpdate(config, fields, updated, matches);
@@ -5182,15 +5273,16 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         const originalMatch = matches.find(m => m.id === editingMatch.id);
         const selectedField = fields.find(f => f.id === editingMatch.fieldId);
         const savedMatch = selectedField ? { ...editingMatch, fieldName: selectedField.name } : editingMatch;
-        if (originalMatch && savedMatch.fieldId !== originalMatch.fieldId) {
-            if (!requireHub())
-                return;
+        const planningChanged = originalMatch && (savedMatch.fieldId !== originalMatch.fieldId ||
+            savedMatch.startTime !== originalMatch.startTime || savedMatch.endTime !== originalMatch.endTime);
+        if (planningChanged) {
+            if (!requireHub()) return;
             if (matchSlotConflict(savedMatch, matches)) {
-                showToast('Terrain occupé à cet horaire. Utilise ↔ pour choisir aussi une autre heure.', 'error');
+                showToast('Créneau ou terrain occupé : choisis un horaire et un terrain disponibles.', 'error');
                 return;
             }
             if (originalMatch.status !== 'pending' &&
-                !window.confirm('Ce match a déjà commencé ou s’est terminé. Changer son terrain sans modifier le résultat ?'))
+                !window.confirm('Ce match a déjà commencé ou s’est terminé. Modifier son horaire ou terrain sans effacer le résultat ?'))
                 return;
         }
         let updated = matches.map(m => m.id === savedMatch.id ? savedMatch : m);
@@ -5521,9 +5613,6 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         React.createElement("div", null,
                             React.createElement("label", { className: "block text-xs font-bold text-slate-300 uppercase mb-1.5" }, "Nom du Tournoi"),
                             React.createElement("input", { type: "text", value: config.name, onChange: (e) => setConfig({ ...config, name: e.target.value }), className: "w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500" })),
-                        React.createElement("div", null,
-                            React.createElement("label", { className: "block text-xs font-bold text-slate-300 uppercase mb-1.5" }, "Code PIN organisateur (acc\u00E8s \u00E0 l\u2019interface)"),
-                            React.createElement("input", { type: "password", value: config.adminPin || '1939', onChange: (e) => setConfig({ ...config, adminPin: e.target.value }), placeholder: "Code PIN", className: "w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3.5 py-2 text-sm text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-500" })),
                         React.createElement("div", { className: "sm:col-span-2" },
                             React.createElement("label", { className: "block text-xs font-bold text-slate-300 uppercase mb-1.5" }, "Formule sportive"),
                             React.createElement("select", { value: config.format, onChange: (e) => setConfig({ ...config, format: e.target.value }), className: "w-full bg-[#0b0304] border border-red-900/60 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500" },
@@ -6092,65 +6181,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             React.createElement("span", { className: "font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded text-[11px]" },
                                 mvp.count,
                                 " fois"))))))))))),
-        adminPinModalOpen && (React.createElement("div", { className: "fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3" },
-            React.createElement("div", { className: "bg-[#150709] border border-amber-500/70 rounded-2xl max-w-sm w-full max-h-[92dvh] overflow-y-auto p-5 space-y-4 shadow-2xl text-center" },
-                React.createElement("div", { className: "w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xl font-black mx-auto" }, "\uD83D\uDD12"),
-                React.createElement("div", null,
-                    React.createElement("h3", { className: "font-bold text-white text-base" }, "Acc\u00E8s Organisateur"),
-                    React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Saisis le code PIN du club ou utilise ton compte organisateur Firebase.")),
-                React.createElement("div", null,
-                    React.createElement("input", { type: "password", maxLength: "8", placeholder: "Code PIN organisateur", value: pinInput, onChange: (e) => {
-                            setPinInput(e.target.value);
-                            setPinError('');
-                        }, onKeyDown: (e) => {
-                            if (e.key === 'Enter') {
-                                const expectedPin = config.adminPin || '1939';
-                                if (pinInput === expectedPin) {
-                                    setUserRole('editor');
-                                    setAdminPinModalOpen(false);
-                                    showToast('Accès Organisateur déverrouillé !');
-                                }
-                                else {
-                                    setPinError('Code PIN incorrect');
-                                }
-                            }
-                        }, className: "w-full bg-[#0b0304] border border-red-900 rounded-xl px-3 py-2 text-center text-lg font-mono tracking-widest text-white focus:outline-none focus:border-amber-500", autoFocus: true }),
-                    pinError && React.createElement("p", { className: "text-rose-400 text-xs font-semibold mt-1.5" }, pinError)),
-                React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("button", { onClick: () => setAdminPinModalOpen(false), className: "flex-1 py-2 bg-[#20080c] text-slate-400 hover:text-white rounded-xl text-xs font-semibold" }, "Annuler"),
-                    React.createElement("button", { onClick: () => {
-                            const expectedPin = config.adminPin || '1939';
-                            if (pinInput === expectedPin) {
-                                setUserRole('editor');
-                                setAdminPinModalOpen(false);
-                                showToast('Accès Organisateur déverrouillé !');
-                            }
-                            else {
-                                setPinError('Code PIN incorrect');
-                            }
-                        }, className: "flex-1 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs" }, "Valider")),
-                React.createElement("div", { className: "border-t border-amber-900/50 pt-3 text-left space-y-2" },
-                    React.createElement("button", { type: "button", onClick: () => { setSecureLoginOpen(v => !v); setPinError(''); }, className: "w-full text-amber-300 text-xs underline text-center" }, "\uD83D\uDD10 Connexion s\u00E9curis\u00E9e Firebase (compte organisateur)"),
-                    secureLoginOpen && React.createElement("div", { className: "space-y-2" },
-                        React.createElement("label", { className: "block text-xs text-slate-300" },
-                            "E-mail du compte Firebase",
-                            React.createElement("input", { type: "email", autoComplete: "username", value: secureEmail, onChange: e => setSecureEmail(e.target.value), placeholder: "organisateur@club.fr", className: "mt-1 w-full rounded-lg border border-amber-800 bg-black/40 text-white p-2" })),
-                        React.createElement("label", { className: "block text-xs text-slate-300" },
-                            "Mot de passe Firebase",
-                            React.createElement("input", { type: "password", autoComplete: "current-password", value: securePassword, onChange: e => setSecurePassword(e.target.value), className: "mt-1 w-full rounded-lg border border-amber-800 bg-black/40 text-white p-2" })),
-                        React.createElement("button", { type: "button", disabled: secureBusy || !secureEmail || !securePassword, onClick: secureFirebaseLogin, className: "w-full min-h-[42px] rounded-lg bg-emerald-700 text-white text-xs font-black disabled:opacity-40" }, secureBusy ? 'Connexion…' : 'Se connecter à Firebase'),
-                        React.createElement("button", { type: "button", onClick: async () => {
-                                try {
-                                    if (!firebase.apps.length || !firebase.auth().currentUser || firebase.auth().currentUser.isAnonymous)
-                                        throw new Error('Connecte d’abord ton compte Firebase.');
-                                    await firebase.auth().currentUser.sendEmailVerification();
-                                    setPinError('E-mail de vérification envoyé : ouvre-le puis reconnecte-toi.');
-                                }
-                                catch (err) {
-                                    setPinError('Vérification : ' + ((err === null || err === void 0 ? void 0 : err.message) || String(err)));
-                                }
-                            }, className: "w-full min-h-[36px] border border-amber-900 rounded-lg text-amber-200 text-[11px]" }, "\uD83D\uDCE9 Envoyer l\u2019e-mail de v\u00E9rification"),
-                        React.createElement("p", { className: "text-[10px] text-slate-400" }, "Ce mode n\u00E9cessite un compte Firebase Authentication v\u00E9rifi\u00E9 et des r\u00E8gles Firestore r\u00E9servant l'\u00E9criture aux organisateurs. Le PIN seul ne s\u00E9curise pas Firebase.")))))),
+        adminPinModalOpen && React.createElement("div", { className: "fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3" },
+            React.createElement("div", { className: "bg-[#150709] border border-amber-500/70 rounded-2xl max-w-sm w-full max-h-[92dvh] overflow-y-auto p-5 space-y-3 shadow-2xl" },
+                React.createElement("h3", { className: "text-amber-300 font-black" }, "🔒 Accès organisateur"),
+                React.createElement("p", { className: "text-xs text-slate-300" }, "Connexion par compte Firebase vérifié. Le code PIN historique ne déverrouille plus les modifications."),
+                React.createElement("label", { className: "block text-xs text-slate-300" }, "E-mail Firebase",
+                    React.createElement("input", { type: "email", autoComplete: "username", value: secureEmail, onChange: e => setSecureEmail(e.target.value), className: "mt-1 w-full min-h-[44px] rounded-lg border border-amber-800 bg-black/40 text-white p-2" })),
+                React.createElement("label", { className: "block text-xs text-slate-300" }, "Mot de passe Firebase",
+                    React.createElement("input", { type: "password", autoComplete: "current-password", value: securePassword, onChange: e => setSecurePassword(e.target.value), className: "mt-1 w-full min-h-[44px] rounded-lg border border-amber-800 bg-black/40 text-white p-2" })),
+                pinError && React.createElement("p", { role: "alert", className: "text-xs text-rose-400" }, pinError),
+                React.createElement("button", { type: "button", disabled: secureBusy || !secureEmail || !securePassword, onClick: secureFirebaseLogin, className: "w-full min-h-[44px] rounded-lg bg-emerald-700 text-white font-black text-sm disabled:opacity-40" }, secureBusy ? "Connexion…" : "Se connecter"),
+                React.createElement("button", { type: "button", onClick: () => setAdminPinModalOpen(false), className: "w-full min-h-[42px] rounded-lg border border-amber-900 text-slate-300 text-xs" }, "Annuler"))),
         isShareModalOpen && (React.createElement("div", { className: "fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5" },
             React.createElement("div", { className: "bg-[#150709] border border-red-900 rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" },
                 React.createElement("div", { className: "flex justify-between items-center pb-3 border-b border-red-950" },
