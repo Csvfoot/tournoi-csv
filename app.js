@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '7.1';
+const CSV_APP_VERSION = '7.2';
 // V7.1 sécurité calendrier : données saisies à ne jamais écraser.
 // Fonction pure, également utilisée pour les changements de poules.
 function csvMatchHasProtectedData(m) {
@@ -46,9 +46,28 @@ const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
 // Il n'est pas un mot de passe : seule la règle Firebase côté serveur
 // détermine les droits réels d'écriture.
 const CSV_APPROVED_ORGANIZER_UID = 'ewjuchE1caWjm9SVWesg3JIkgQ02';
+// CSV_V72_MULTI_ORGANISATEURS : cache volatile, contrôle serveur Firestore obligatoire.
+const csvAuthorizedOrganizerUIDs = new Set();
 function csvIsApprovedOrganizer(user) {
     return Boolean(user && !user.isAnonymous && user.emailVerified === true &&
-        typeof user.uid === 'string' && user.uid === CSV_APPROVED_ORGANIZER_UID);
+        typeof user.uid === 'string' && (user.uid === CSV_APPROVED_ORGANIZER_UID ||
+        csvAuthorizedOrganizerUIDs.has(user.uid)));
+}
+async function csvCheckOrganizerAccess(user) {
+    if (!user || user.isAnonymous || user.emailVerified !== true) return false;
+    if (user.uid === CSV_APPROVED_ORGANIZER_UID) return true;
+    csvAuthorizedOrganizerUIDs.delete(user.uid);
+    try {
+        const snap = await firebase.firestore().collection('organizers').doc(user.uid).get({source: 'server'});
+        const d = snap.exists ? snap.data() : null;
+        const authorized = Boolean(d && d.active === true && d.role === 'editor' &&
+            d.email === user.email && firebase.auth().currentUser === user);
+        if (authorized) csvAuthorizedOrganizerUIDs.add(user.uid);
+        return authorized;
+    } catch (err) {
+        console.warn('Contrôle serveur des droits organisateur indisponible', err.code || err.message);
+        return false; // jamais de nouveaux droits hors connexion
+    }
 }
 const CSV_BACKUP_FORMAT = 'tournoi-csv-backup';
 const CSV_BACKUP_VERSION = 1;
@@ -1678,16 +1697,35 @@ function MultiTournamentShell() {
         }
         if (!firebase.apps.length) return;
         csvConnectLocalEmulators();
+      let csvOrganizerDocUnsubscribe = null;
       const unsubscribe = firebase.auth().onAuthStateChanged(async user => {
-            if (!user || user.isAnonymous) { setHubIsEditor(false); return; }
+            if (csvOrganizerDocUnsubscribe) { csvOrganizerDocUnsubscribe(); csvOrganizerDocUnsubscribe = null; }
+            if (!user || user.isAnonymous) { csvAuthorizedOrganizerUIDs.clear(); setHubIsEditor(false); return; }
             try {
                 await user.reload();
-                if (firebase.auth().currentUser === user && csvIsApprovedOrganizer(user))
+                await user.getIdToken(true);
+                const authorized = await csvCheckOrganizerAccess(user);
+                if (firebase.auth().currentUser !== user) return;
+                if (authorized) {
                     onRoleChange('editor');
-                else if (firebase.auth().currentUser === user) setHubIsEditor(false);
-            } catch (e) { console.warn('Session organisateur à revalider', e); }
+                    if (user.uid !== CSV_APPROVED_ORGANIZER_UID) {
+                        csvOrganizerDocUnsubscribe = firebase.firestore().collection('organizers').doc(user.uid)
+                          .onSnapshot(snap => {
+                              const d = snap.exists ? snap.data() : null;
+                              if (!d || d.active !== true || d.role !== 'editor' || d.email !== user.email) {
+                                  csvAuthorizedOrganizerUIDs.delete(user.uid);
+                                  setHubIsEditor(false);
+                              }
+                          }, err => {
+                              csvAuthorizedOrganizerUIDs.delete(user.uid);
+                              setHubIsEditor(false);
+                              console.warn('Suivi des droits perdu', err.code || err.message);
+                          });
+                    }
+                } else setHubIsEditor(false);
+            } catch (e) { setHubIsEditor(false); console.warn('Session organisateur à revalider', e); }
         });
-        return () => unsubscribe();
+        return () => { unsubscribe(); if (csvOrganizerDocUnsubscribe) csvOrganizerDocUnsubscribe(); };
     }, [onRoleChange]);
     const [catalog, setCatalog] = useState(() => cleanCategories(readLocalJson('cslv_multi_catalog_v1', initialTournaments())));
     const [selectedId, setSelectedId] = useState(() => urlTournament || readLocalJson('cslv_last_tournament_v1', 'principal'));
@@ -2250,7 +2288,7 @@ function MultiTournamentShell() {
                 await result.user.getIdToken(true);
                 if (!((_a = firebase.auth().currentUser) === null || _a === void 0 ? void 0 : _a.emailVerified))
                     throw new Error('Adresse e-mail Firebase non vérifiée.');
-                if (!csvIsApprovedOrganizer(firebase.auth().currentUser))
+                if (!(await csvCheckOrganizerAccess(firebase.auth().currentUser)))
                     throw new Error('Ce compte Firebase n’est pas autorisé à organiser les tournois.');
             }
             else {
@@ -3242,6 +3280,7 @@ function MultiTournamentShell() {
                     React.createElement("button", { type: "submit", disabled: shellLoginBusy, className: "w-full min-h-[44px] rounded-lg bg-amber-500 text-black font-bold disabled:opacity-50" }, "Valider le PIN"),
                     React.createElement("p", { className: "text-[11px] text-slate-400" }, "Le PIN ne donne pas de droits d'écriture sur une base Firebase protégée. Utilise un compte organisateur autorisé."))),
             shellLoginError && React.createElement("p", { role: "alert", className: "rounded-lg border border-rose-700/60 bg-rose-950/40 p-3 text-xs text-rose-200" }, shellLoginError),
+            React.createElement("a", { href: "./rejoindre-organisateurs.html", className: "block text-center text-xs text-amber-300 underline py-2" }, "Créer mon compte / demander un accès organisateur"),
             React.createElement("a", { href: "./spectateur.html", className: "block text-center text-xs text-slate-300 underline py-2" }, "Ouvrir plutôt CSV Spectateur")
         ));
     }
@@ -3261,6 +3300,9 @@ function MultiTournamentShell() {
                     React.createElement("div", { className: "grid grid-cols-2 gap-2" },
                         React.createElement("button", { type: "button", onClick: () => { setAdminToolsOpen(true); setShellMoreOpen(false); setPage('tournoi'); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-xl border border-amber-700/60 bg-[#32131b] px-3 text-left text-xs font-bold" }, "\uD83D\uDDC2 G\u00E9rer les tournois"),
                         React.createElement("button", { type: "button", onClick: () => { setAdminToolsOpen(true); setShowBackupPanel(true); setShellMoreOpen(false); setPage('tournoi'); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-xl border border-emerald-800/60 bg-[#12302b] px-3 text-left text-xs font-bold" }, "\uD83D\uDCBE Sauvegardes"),
+                        firebase.apps.length && firebase.auth().currentUser &&
+                          firebase.auth().currentUser.uid === CSV_APPROVED_ORGANIZER_UID &&
+                          React.createElement("a", { href: "./gestion-organisateurs.html", className: "col-span-2 min-h-[46px] inline-flex items-center justify-center rounded-xl border border-amber-500/70 bg-[#38210d] text-amber-100 text-xs font-bold" }, "👥 Gérer les organisateurs"),
                         React.createElement("button", { type: "button", onClick: () => { onRoleChange('viewer'); setPage('tournoi'); setShellMoreOpen(false); }, className: "col-span-2 min-h-[46px] rounded-xl border border-amber-900/50 text-amber-200 text-xs font-bold" }, "\uD83D\uDC41 Passer en spectateur")))),
             React.createElement("nav", { "aria-label": "Navigation principale organisateur", className: "xl:hidden fixed inset-x-0 bottom-0 z-40 border-t border-amber-800/50 bg-[#21090e]/95 backdrop-blur-lg shadow-2xl", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
                 React.createElement("div", { className: "grid grid-cols-5 gap-1 px-2 pt-2" }, [{ id: 'dashboard', icon: '🏠', label: 'Accueil', active: page === 'tournoi' && workspaceTab === 'dashboard', click: () => openWorkspaceTab('dashboard') },
@@ -3845,6 +3887,29 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [secureEmail, setSecureEmail] = useState('');
     const [securePassword, setSecurePassword] = useState('');
     const [secureBusy, setSecureBusy] = useState(false);
+    // CSV_V72_LOGOUT_MOBILE : veritable deconnexion Firebase depuis iPhone ou PC.
+    const [csvLogoutBusy, setCsvLogoutBusy] = useState(false);
+    const csvLogoutOrganizer = async () => {
+        if (csvLogoutBusy || userRole !== 'editor') return;
+        if (!window.confirm('Se deconnecter du compte organisateur sur cet appareil ?')) return;
+        setCsvLogoutBusy(true);
+        try {
+            if (typeof firebase !== 'undefined' && firebase.apps.length) {
+                await firebase.auth().signOut();
+                await firebase.auth().signInAnonymously();
+            }
+            setUserRole('viewer');
+            setActiveTab('matches');
+            setSecurePassword('');
+            setPinError('');
+            if (CSV_HOME_MODE !== 'spectator') setAdminPinModalOpen(true);
+            showToast('Compte organisateur deconnecte. Reconnexion necessaire pour modifier.');
+        } catch (err) {
+            window.alert('Deconnexion impossible : ' + (err.message || String(err)));
+        } finally {
+            setCsvLogoutBusy(false);
+        }
+    };
     const secureFirebaseLogin = async () => {
         if (secureBusy)
             return;
@@ -3860,7 +3925,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             await result.user.getIdToken(true);
             if (!firebase.auth().currentUser.emailVerified)
                 throw new Error('Adresse e-mail non vérifiée. Confirme l’e-mail du compte Firebase avant de réessayer.');
-            if (!csvIsApprovedOrganizer(firebase.auth().currentUser))
+            if (!(await csvCheckOrganizerAccess(firebase.auth().currentUser)))
                 throw new Error('Ce compte Firebase n’est pas autorisé à organiser les tournois.');
             setUserRole('editor');
             setAdminPinModalOpen(false);
@@ -5503,6 +5568,16 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         String(Math.floor(timerSeconds / 60)).padStart(2, '0'),
                         ":",
                         String(timerSeconds % 60).padStart(2, '0'))),
+                    userRole === 'editor' && firebase.apps.length &&
+                      firebase.auth().currentUser && firebase.auth().currentUser.uid === CSV_APPROVED_ORGANIZER_UID &&
+                      React.createElement("a", { href: "./gestion-organisateurs.html", className: "hidden sm:inline-flex min-h-[40px] items-center rounded-lg border border-amber-700/60 px-3 text-xs font-bold text-amber-200" }, "👥 Comptes"),
+                    userRole === 'editor' && React.createElement("button", {
+                        type: "button", onClick: csvLogoutOrganizer, disabled: csvLogoutBusy,
+                        className: "inline-flex shrink-0 items-center justify-center min-h-[40px] w-10 sm:w-auto sm:px-3 rounded-lg border border-amber-600/60 bg-[#1f080c] text-amber-300 hover:bg-[#300c14] focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300 disabled:opacity-50",
+                        title: "Se déconnecter du compte organisateur",
+                        "aria-label": "Se déconnecter du compte organisateur"
+                    }, React.createElement("span", { className: "text-lg sm:text-sm", "aria-hidden": true }, "⎋"),
+                       React.createElement("span", { className: "hidden sm:inline text-xs font-bold ml-1" }, csvLogoutBusy ? "Déconnexion…" : "Se déconnecter")), /* CSV_V72_LOGOUT_MOBILE_UI_COMPACTE */
                     userRole === 'editor' ? (React.createElement("button", { onClick: () => {
                             setUserRole('viewer');
                             if (activeTab === 'config')
