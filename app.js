@@ -1522,12 +1522,12 @@ function DayEntryMatchCard({ event, match, teams, fields, onOpen }) {
                 React.createElement("span", { className: status === 'live' ? 'text-emerald-400 font-black animate-pulse' : status === 'finished' ? 'text-amber-300 font-bold' : 'text-cyan-400 font-bold' }, status === 'live' ? '● Live' : status === 'finished' ? 'Terminé' : 'À venir')),
             React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                 React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
-                    React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: a.color || '#d4a53c' } }),
+                    React.createElement(CsvTeamLogo, { team: a, size: 24 }),
                     React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, match.team1Id ? a.name : (match.placeholder1 || 'Équipe à déterminer'))),
                 React.createElement("div", { className: "bg-[#0b0304] px-2.5 py-1 rounded border border-red-950 font-mono font-black text-white text-xs sm:text-base min-w-[54px] text-center" }, score),
                 React.createElement("div", { className: "flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right" },
                     React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, match.team2Id ? b.name : (match.placeholder2 || 'Équipe à déterminer')),
-                    React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: b.color || '#d4a53c' } }))),
+                    React.createElement(CsvTeamLogo, { team: b, size: 24 }))),
             React.createElement("div", { className: "flex justify-end mt-1.5 text-[11px] font-bold text-amber-300" }, "\u270F\uFE0F Ouvrir la feuille de match")));
 }
 function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
@@ -4055,11 +4055,22 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     });
     // Un match n'est « En direct » QUE lorsque son statut est passé à live
     // depuis la feuille de match organisateur ; jamais sur la seule heure théorique.
-    const visibleMatches = (userRole === 'viewer' && isCompactMatchScreen)
-        ? matches.filter(m => mobileMatchFilter === 'finished' ? m.status === 'finished'
-            : mobileMatchFilter === 'live' ? m.status === 'live'
-                : m.status !== 'finished' && m.status !== 'live')
-        : matches;
+    const [csvFieldFilter, csvSetFieldFilter] = useState('all');
+    const [csvGroupFilter, csvSetGroupFilter] = useState('all');
+    const [csvSearch, csvSetSearch] = useState('');
+    const visibleMatches = matches.filter(m => {
+        if (userRole === 'viewer' && isCompactMatchScreen &&
+            !(mobileMatchFilter === 'finished' ? m.status === 'finished'
+                : mobileMatchFilter === 'live' ? m.status === 'live'
+                    : m.status !== 'finished' && m.status !== 'live')) return false;
+        if (csvFieldFilter !== 'all' && m.fieldId !== csvFieldFilter) return false;
+        if (csvGroupFilter !== 'all' && m.group !== csvGroupFilter) return false;
+        const needle = csvSearch.trim().toLocaleLowerCase('fr');
+        if (needle && ![m.stage, m.group, m.fieldName,
+            teams.find(t => t.id === m.team1Id)?.name,
+            teams.find(t => t.id === m.team2Id)?.name].some(v => String(v || '').toLocaleLowerCase('fr').includes(needle))) return false;
+        return true;
+    });
     // Tri d'affichage uniquement, sans modifier les horaires ni les résultats enregistrés.
     const sortVisibleMatches = (a, b) => {
         const knockout = m => /phase finale/i.test(String(m.group || '')) ||
@@ -5964,7 +5975,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 React.createElement("div", { className: "bg-[#150709] border border-amber-500/60 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[94dvh] overflow-y-auto overscroll-contain" },
                     React.createElement("div", { className: "flex items-center justify-between pb-3 border-b border-red-950" },
                         React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs shadow-md", style: { backgroundColor: selectedTeamSchedule.color } }, selectedTeamSchedule.name.substring(0, 2).toUpperCase()),
+                            React.createElement(CsvTeamLogo, { team: selectedTeamSchedule, size: 38 }),
                             React.createElement("div", null,
                                 React.createElement("h3", { className: "font-bold text-white text-sm sm:text-base" }, selectedTeamSchedule.name),
                                 React.createElement("span", { className: "text-xs text-amber-400 font-medium" }, "Calendrier officiel"))),
@@ -6006,6 +6017,25 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     React.createElement("div", { className: "pt-2 flex justify-end" },
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
+                userRole === 'viewer' && React.createElement("section", { className: "rounded-2xl border border-amber-700/50 bg-[#1b0a11] p-4 space-y-3", "aria-label": "Le tournoi en un coup d'œil" },
+                    React.createElement("h2", { className: "text-base font-black text-amber-300" }, "⚽ Le tournoi en direct · " + tournament.category),
+                    React.createElement("div", { className: "grid grid-cols-3 gap-2" }, [
+                        ['🟢 En direct', matches.filter(m => m.status === 'live').length],
+                        ['📅 À venir', matches.filter(m => m.status !== 'live' && m.status !== 'finished').length],
+                        ['🏁 Terminés', matches.filter(m => m.status === 'finished').length]
+                    ].map(([label, count]) => React.createElement("div", { key: label, className: "rounded-xl bg-[#0b0304] p-3 text-center" },
+                        React.createElement("p", { className: "text-[11px] text-slate-300" }, label),
+                        React.createElement("strong", { className: "text-2xl text-amber-300" }, count)))),
+                    React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" }, [
+                        { title: "🟢 En direct / prochains matchs", rows: matches.filter(m => m.status === 'live').concat(matches.filter(m => m.status !== 'live' && m.status !== 'finished').sort(sortVisibleMatches)).slice(0, 4) },
+                        { title: "🏁 Derniers résultats", rows: matches.filter(m => m.status === 'finished').slice().reverse().slice(0, 4) }
+                    ].map(section => React.createElement("div", { key: section.title, className: "rounded-xl bg-[#0b0304] p-3 space-y-2" },
+                        React.createElement("h3", { className: "text-xs font-bold text-amber-300" }, section.title),
+                        section.rows.length ? section.rows.map(m => React.createElement("div", { key: m.id, className: "flex flex-wrap justify-between gap-2 text-xs border-t border-red-950/50 pt-2" },
+                            React.createElement("span", { className: "text-slate-300" }, (m.startTime || '--:--') + " · " + (m.fieldName || 'Terrain')),
+                            React.createElement("span", { className: "text-white font-bold" }, getTeam(m.team1Id).name + " – " + getTeam(m.team2Id).name),
+                            React.createElement("strong", { className: "text-amber-300" }, m.score1 != null && m.score2 != null ? m.score1 + ' - ' + m.score2 : m.status === 'live' ? '● LIVE' : 'À venir')))
+                        ) : React.createElement("p", { className: "text-xs text-slate-500" }, "Aucune rencontre pour le moment."))))),
                 React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3" },
                     React.createElement("div", null,
                         React.createElement("h2", { className: "text-base sm:text-lg font-bold text-white" }, userRole === 'viewer' ? '⚽ Matchs et résultats' : 'Calendrier & Scores'),
@@ -6013,6 +6043,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-xl p-1 flex self-stretch sm:self-auto" },
                         React.createElement("button", { type: "button", onClick: () => setScheduleViewMode('chrono'), className: `flex-1 sm:flex-initial px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${scheduleViewMode === 'chrono' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black shadow' : 'text-slate-400 hover:text-white'}` }, "\u23F1 Vue Chrono"),
                         React.createElement("button", { type: "button", onClick: () => setScheduleViewMode('fields'), className: `flex-1 sm:flex-initial px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${scheduleViewMode === 'fields' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black shadow' : 'text-slate-400 hover:text-white'}` }, "\uD83C\uDFDF Par Terrain"))),
+                React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-xl border border-red-900/50 bg-[#16080b] p-3" },
+                    React.createElement("label", { className: "text-xs text-amber-300" }, "🏟 Terrain",
+                        React.createElement("select", { className: "mt-1 w-full min-h-[42px] rounded-lg bg-[#0b0304] border border-red-900 px-2 text-white", value: csvFieldFilter, onChange: e => csvSetFieldFilter(e.target.value) },
+                            React.createElement("option", { value: "all" }, "Tous les terrains"),
+                            fields.map(f => React.createElement("option", { key: f.id, value: f.id }, f.name)))),
+                    React.createElement("label", { className: "text-xs text-amber-300" }, "📊 Poule / phase",
+                        React.createElement("select", { className: "mt-1 w-full min-h-[42px] rounded-lg bg-[#0b0304] border border-red-900 px-2 text-white", value: csvGroupFilter, onChange: e => csvSetGroupFilter(e.target.value) },
+                            React.createElement("option", { value: "all" }, "Toutes les phases"),
+                            [...new Set(matches.map(m => m.group).filter(Boolean))].map(g => React.createElement("option", { key: g, value: g }, g)))),
+                    React.createElement("label", { className: "text-xs text-amber-300" }, "🔎 Équipe / horaire / match",
+                        React.createElement("input", { type: "search", className: "mt-1 w-full min-h-[42px] rounded-lg bg-[#0b0304] border border-red-900 px-2 text-white", placeholder: "Rechercher un club...", value: csvSearch, onChange: e => csvSetSearch(e.target.value) }))),
                 userRole === 'viewer' && (React.createElement("div", { className: "xl:hidden grid grid-cols-3 gap-2", role: "group", "aria-label": "Filtrer les matchs sur t\u00E9l\u00E9phone et tablette" }, [
                     ['upcoming', 'À venir'], ['live', 'En direct'], ['finished', 'Terminés']
                 ].map(([id, label]) => (React.createElement("button", { type: "button", key: id, onClick: () => setMobileMatchFilter(id), "aria-pressed": mobileMatchFilter === id, className: `csv-mobile-filter min-h-[44px] rounded-xl border px-2 py-2 text-xs sm:text-sm font-bold touch-manipulation transition ${mobileMatchFilter === id
