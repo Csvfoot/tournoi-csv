@@ -87,3 +87,11 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Vérifications directes supplémentaires réalisées : 8/8 sur les scripts, le stockage, les 24 équipes et 36 matchs, l'absence de déploiement dans le workflow et la CSP réseau.
 - `GUIDE_PREVISUALISATION_V73.md` explique le téléchargement de l'artefact GitHub, un essai local Windows, et la mise à disposition facultative via un hébergement HTTPS distinct, tel que Netlify Drop. Une URL publique ne doit pas être annoncée tant qu'elle n'existe pas et n'a pas été réellement testée.
 - **Ne pas déployer ce dossier sur GitHub Pages officiel** ni mélanger les données de production et de test.
+
+## Étape 9 — défaut réel découvert pendant le test Mac : poules fictives (18 novembre 2026)
+- Retour utilisateur : « Poules » montrait les 16 équipes U10 dans la poule A et la poule B vide.
+- Cause : le générateur de démonstration `preview-v73-boot.js` renseignait `matches[].group` mais omettait `teams[].group`. Le moteur de classement s'appuie sur la poule affectée à chaque équipe, avec repli historique vers « Poule A ».
+- Correction limitée **aux données fictives** : `group` ajouté à chaque équipe au moment de sa création. U10 : 4 poules A/B/C/D de 4 équipes, 6 matchs par poule. U11 : 2 poules A/B de 4 équipes.
+- Test ajouté dans `tests/v73.test.cjs` : nombre de poules, tailles de groupes, nombre de matchs et cohérence des groupes de chaque adversaire.
+- Vérification directe du générateur effectuée : 24 équipes et 36 matchs avec groupes cohérents, 4+2 poules correctement réparties.
+- **Important** : télécharger le nouvel artefact GitHub Actions après le commit, puis arrêter/relaisser le serveur local sur le dossier fraîchement décompressé. Un ancien dossier conserve l'ancien générateur.
