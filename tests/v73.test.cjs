@@ -82,3 +82,84 @@ test('Contrôle visuel: script valide, données réelles et absence de Firebase'
   assert.doesNotMatch(html, /firebase-app-compat|firebase-firestore-compat/);
   assert.doesNotMatch(html, /\.innerHTML\s*=/);
 });
+
+
+const previewBoot = fs.readFileSync('preview-v73-boot.js', 'utf8');
+const previewHtml = fs.readFileSync('previsualisation-v73.html', 'utf8');
+function previewFixture(configurable = true) {
+  let originalWrites = 0;
+  const originalStorage = {
+    getItem() { return 'vraies données du navigateur'; },
+    setItem() { originalWrites++; },
+    removeItem() { originalWrites++; }
+  };
+  const fakeWindow = {};
+  Object.defineProperty(fakeWindow, 'localStorage', {
+    configurable, enumerable: true, value: originalStorage
+  });
+  const context = vm.createContext({ window: fakeWindow, console: { error() {} } });
+  vm.runInContext(previewBoot, context, { timeout: 1000 });
+  return { window: fakeWindow, originalStorage, get originalWrites() { return originalWrites; } };
+}
+test('Prévisualisation: deux catégories fictives et stockage en mémoire uniquement', () => {
+  const result = previewFixture();
+  assert.equal(result.window.CSV_V73_PREVIEW_BOOT_OK, true);
+  assert.equal(result.window.CSV_V73_ISOLATED_PREVIEW, true);
+  assert.notEqual(result.window.localStorage, result.originalStorage);
+  assert.equal(result.originalWrites, 0);
+  const get = key => JSON.parse(result.window.localStorage.getItem(key));
+  const catalog = get('cslv_multi_catalog_v1');
+  assert.equal(catalog.length, 2);
+  assert.deepEqual(Array.from(catalog,x=>x.category), ['U10','U11']);
+  assert.equal(get('cslv_teams').length, 16);
+  assert.equal(get('cslv_matches').length, 24);
+  assert.equal(get('cslv_mt_u11_apercu_teams').length, 8);
+  assert.equal(get('cslv_mt_u11_apercu_matches').length, 12);
+});
+test('Prévisualisation: aucun match du jeu d’essai ne se superpose sur un terrain', () => {
+  const storage = previewFixture().window.localStorage;
+  const matches = [
+    ...JSON.parse(storage.getItem('cslv_matches')),
+    ...JSON.parse(storage.getItem('cslv_mt_u11_apercu_matches'))
+  ];
+  const minute = value => Number(value.slice(0,2))*60+Number(value.slice(3,5));
+  for(let i=0;i<matches.length;i++){
+    for(let j=i+1;j<matches.length;j++){
+      const a=matches[i],b=matches[j];
+      if(a.fieldId !== b.fieldId) continue;
+      assert.ok(minute(a.endTime)<=minute(b.startTime) || minute(b.endTime)<=minute(a.startTime),
+        'Conflit de terrain entre ' + a.id + ' et ' + b.id);
+    }
+  }
+});
+test('Prévisualisation: isolation impossible = démarrage refusé sans retomber sur Firebase', () => {
+  const { window } = previewFixture(false);
+  assert.equal(window.CSV_V73_PREVIEW_BOOT_OK, false);
+  assert.equal(window.CSV_V73_ISOLATED_PREVIEW, false);
+  assert.match(window.CSV_V73_PREVIEW_ERROR, /isolable/);
+});
+test('Prévisualisation: configuration Cloud neutralisée pour le vrai code applicatif', () => {
+  const start=app.indexOf('const CSV_V73_ISOLATED_PREVIEW =');
+  const end=app.indexOf('// Production : aucune connexion aux émulateurs',start);
+  assert.ok(start>=0 && end>start);
+  const ctx=vm.createContext({
+    window:{CSV_V73_ISOLATED_PREVIEW:true},
+    DEFAULT_CLOUD_CONFIG:{projectId:'projet-officiel-factice'}
+  });
+  vm.runInContext(app.slice(start,end)+'\nthis.previewCloud=loadCloudConfig();',ctx);
+  assert.equal(ctx.previewCloud,null);
+  assert.match(app,/if \(CSV_V73_ISOLATED_PREVIEW\) throw new Error/);
+  assert.match(app,/CSV_V73_ISOLATED_PREVIEW \|\| !\('serviceWorker' in navigator\)/);
+  assert.match(app,/CSV_V73_ISOLATED_PREVIEW && csvCachedTournament\(current.id\)/);
+});
+test('Prévisualisation: page non connectée, CSP strict et scripts valides', () => {
+  assert.match(previewHtml,/connect-src 'none'/);
+  assert.match(previewHtml,/preview-v73-boot\.js/);
+  assert.match(previewHtml,/window\.CSV_V73_PREVIEW_BOOT_OK/);
+  assert.doesNotMatch(previewHtml,/firebase-(?:app|auth|firestore)/);
+  const blocks=[...previewHtml.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
+    .map(x=>x[1]).filter(Boolean);
+  assert.ok(blocks.length>0);
+  for(const code of blocks)new vm.Script(code);
+  new vm.Script(previewBoot);
+});
