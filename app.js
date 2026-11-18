@@ -3881,6 +3881,122 @@ function MultiTournamentShell() {
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
 // V7.4 — Résumé public compact des matchs (ne déclenche aucune écriture).
+// V7.4 — Fiche « Mon équipe » avec résultats et classement.
+function CsvTeamOverview({ team, teams, matches, config, groups }) {
+    if (!team) return null;
+    const group = team.group || (groups && groups[0]) || 'Poule A';
+    const ranking = standingsFor(teams, matches, group, config);
+    const position = ranking.findIndex(r => r.team.id === team.id);
+    const row = position >= 0 ? ranking[position] : null;
+    const total = sortedMatchesForTeam(matches, team.id);
+    return React.createElement('section', { className: 'csv-v74-team-summary' },
+        React.createElement('div',{className:'csv-v74-team-name'},
+            React.createElement(CsvTeamLogo,{team,size:56}),
+            React.createElement('div',null,
+                React.createElement('h3',null,team.name),
+                React.createElement('p',null,group+(position >= 0 ? ' · '+(position+1)+'e au classement' : '')))),
+        React.createElement('div',{className:'csv-v74-mini-metrics'},
+            [['Points',row ? row.points : '—'],['Joués',row ? row.played : 0],
+             ['Buts',row ? row.gf : 0],['Diff.',row ? row.gd : 0]].map(([label,value]) =>
+                React.createElement('div',{key:label},
+                    React.createElement('strong',null,value),
+                    React.createElement('small',null,label)))),
+        React.createElement('p',{className:'csv-v74-muted'},
+            total.length+' matchs · '+total.filter(m=>m.status==='finished').length+' terminés · '
+            +total.filter(m=>m.status==='live').length+' en direct'));
+}
+// V7.4 — Accueil premium relié aux véritables matchs et équipes, sans score fictif.
+function CsvVisualHome({ tournament, matches, teams, fields, config, onNavigate, onChooseTeam }) {
+    const club = id => teams.find(t=>t.id===id) || {name:'À déterminer',color:'#64748b'};
+    const live = matches.filter(m=>m.status==='live');
+    const upcoming = matches.filter(m=>m.status!=='live'&&m.status!=='finished').slice()
+        .sort((a,b)=>String(a.startTime||'99:99').localeCompare(String(b.startTime||'99:99')));
+    const finished = matches.filter(m=>m.status==='finished').slice().reverse();
+    const matchLine = (m,index) => React.createElement('div',{className:'csv-v74-fixture',key:m.id||index},
+        React.createElement('span',{className:'csv-v74-fixture-details'},(m.startTime||'--:--')+' · '+(m.fieldName||'Terrain')),
+        React.createElement('div',{className:'csv-v74-fixture-main'},
+            React.createElement('span',null,club(m.team1Id).name),
+            React.createElement('strong',null,m.score1!=null&&m.score2!=null?m.score1+' – '+m.score2:m.status==='live'?'LIVE':'VS'),
+            React.createElement('span',null,club(m.team2Id).name)));
+    return React.createElement('section',{className:'csv-v74-home','aria-label':'Accueil du tournoi'},
+        React.createElement('div',{className:'csv-v74-eyebrow'},'⚽ CS LA VERPILLIÈRE · '+(tournament.date||'')),
+        React.createElement('div',{className:'csv-v74-hero'},
+            React.createElement('div',null,
+                React.createElement('h1',null,'Le football se vit ici.'),
+                React.createElement('p',null,'Retrouvez tous les matchs, vos équipes et les résultats du tournoi '+tournament.category+'.')),
+            React.createElement('span',{className:'csv-v74-tag'},tournament.category)),
+        React.createElement('div',{className:'csv-v74-home-grid'},
+            React.createElement('article',{className:'csv-v74-panel csv-v74-panel-feature'},
+                React.createElement('div',{className:'csv-v74-panel-eyebrow'},'🟢 EN DIRECT · RÉSULTATS OFFICIELS'),
+                React.createElement('h2',null,'Les rencontres du moment'),
+                React.createElement('p',null,'Scores et classements mis à jour pendant la journée.'),
+                (live.length?live:upcoming).slice(0,2).map(matchLine),
+                !live.length&&!upcoming.length&&React.createElement('p',{className:'csv-v74-muted'},'Aucun match en cours ou à venir.'),
+                React.createElement('div',{className:'csv-v74-metrics'},
+                    [['Équipes',teams.length],['Poules',new Set(teams.map(t=>t.group||'Poule A')).size],
+                    ['Terrains',fields.length]].map(([label,count])=>React.createElement('div',{key:label},
+                        React.createElement('strong',null,count),React.createElement('small',null,label)))),
+                React.createElement('button',{type:'button',className:'csv-v74-link',onClick:()=>onNavigate('matches')},'Voir les matchs')),
+            React.createElement('article',{className:'csv-v74-panel'},
+                React.createElement('h2',null,'⏱ À venir'),
+                upcoming.slice(0,4).map(matchLine),
+                !upcoming.length&&React.createElement('p',{className:'csv-v74-muted'},'Aucune rencontre à venir.'),
+                React.createElement('button',{type:'button',className:'csv-v74-link',onClick:()=>onNavigate('matches')},'Voir tout le programme →'))),
+        React.createElement('div',{className:'csv-v74-home-grid csv-v74-secondary'},
+            React.createElement('article',{className:'csv-v74-panel'},
+                React.createElement('h2',null,'⭐ Suivez votre équipe'),
+                React.createElement('p',null,'Horaires, terrains, scores et classement de votre club.'),
+                React.createElement('button',{type:'button',className:'csv-v74-link',onClick:onChooseTeam},'Choisir mon équipe →'),
+                React.createElement('h3',null,'🏁 Derniers résultats'),
+                finished.slice(0,3).map(matchLine),
+                !finished.length&&React.createElement('p',{className:'csv-v74-muted'},'Les résultats apparaîtront ici dès la fin des matchs.')),
+            React.createElement('article',{className:'csv-v74-panel'},
+                React.createElement('h2',null,'📍 Informations pratiques'),
+                React.createElement('p',{className:'csv-v74-practical'},config.practicalInfo||'Bienvenue au Tournoi CSV ! Les informations pratiques seront annoncées par les organisateurs.'),
+                React.createElement('h3',null,'🤝 Nos partenaires'),
+                Array.isArray(config.sponsors)&&config.sponsors.length?React.createElement('div',{className:'csv-v74-sponsors'},
+                    config.sponsors.map((sp,i)=>React.createElement('div',{key:i,className:'csv-v74-sponsor'},
+                        csvSafeLogoUrl(sp.logoUrl)?React.createElement('img',{src:csvSafeLogoUrl(sp.logoUrl),alt:sp.name,loading:'lazy',referrerPolicy:'no-referrer'}):null,
+                        React.createElement('span',null,sp.name)))) :
+                    React.createElement('p',{className:'csv-v74-muted'},'Les partenaires du tournoi seront présentés ici.'))));
+}
+// V7.4 — Phases finales en colonnes par tour, avec progression et podium.
+function CsvVisualFinals({ matches, teams }) {
+    const rounds = matches.filter(m=>m.group==='Phase Finale Principale'&&m.id!=='ko-bronze'&&!/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
+    const roundName = m => /huit/i.test(m.stage||'')?'Huitièmes':
+        /quart/i.test(m.stage||'')?'Quarts':/demi/i.test(m.stage||'')?'Demi-finales':
+        /final/i.test(m.stage||'')?'Grande finale':'Autres matchs';
+    const names = ['Huitièmes','Quarts','Demi-finales','Autres matchs','Grande finale']
+        .filter(name=>rounds.some(m=>roundName(m)===name));
+    const club = (id,placeholder) => teams.find(t=>t.id===id)||{name:placeholder||'À déterminer',color:'#64748b'};
+    const tile = m=>React.createElement('div',{key:m.id,className:'csv-v74-round-match'},
+        React.createElement('span',{className:'csv-v74-round-subtitle'},(m.stage||'Match')+' · '+(m.startTime||'--:--')),
+        [[m.team1Id,m.placeholder1,m.score1],[m.team2Id,m.placeholder2,m.score2]].map(([id,placeholder,score],i)=>
+            React.createElement('div',{className:'csv-v74-round-team',key:i},
+                React.createElement(CsvTeamLogo,{team:club(id,placeholder),size:24}),
+                React.createElement('span',null,club(id,placeholder).name),
+                React.createElement('strong',null,score==null?'–':score))));
+    const bronze=matches.find(m=>m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
+    const final=matches.find(m=>m.stage==='Grande Finale'||m.id==='ko-final');
+    const finalResult=resultOf(final),bronzeResult=resultOf(bronze);
+    const medal = (name,id,placeholder)=>React.createElement('div',{className:'csv-v74-podium-place',key:name},
+        React.createElement('strong',null,name),
+        React.createElement('span',null,club(id,placeholder).name));
+    return React.createElement('section',{className:'csv-v74-final-visual'},
+        React.createElement('h2',null,'🏆 La route vers la finale'),
+        React.createElement('p',{className:'csv-v74-muted'},'Les qualifications et résultats sont issus du calendrier officiel.'),
+        rounds.length?React.createElement('div',{className:'csv-v74-rounds'},
+            names.map(name=>React.createElement('div',{className:'csv-v74-round',key:name},
+                React.createElement('h3',null,name),
+                rounds.filter(m=>roundName(m)===name).map(tile)))):
+            React.createElement('p',{className:'csv-v74-muted'},'Les phases finales seront affichées après programmation.'),
+        bronze&&React.createElement('div',{className:'csv-v74-bronze'},
+            React.createElement('h3',null,'🥉 Match pour la 3e place'),tile(bronze)),
+        React.createElement('div',{className:'csv-v74-podium'},
+            medal('🥇 Champion',finalResult&&finalResult.winner,'En attente de la finale'),
+            medal('🥈 Finaliste',finalResult&&finalResult.loser,'En attente de la finale'),
+            medal('🥉 Troisième',bronzeResult&&bronzeResult.winner,'En attente de la petite finale')));
+}
 function CsvSpectatorSummary({ matches, teams, category }) {
     const club = id => (teams.find(t => t.id === id) || {}).name || 'À déterminer';
     const live = matches.filter(m => m.status === 'live');
@@ -3918,8 +4034,8 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (hubIsEditor) return requestedOrganizerTab || 'dashboard';
         try {
             const saved = sessionStorage.getItem(viewerTabStorageKey);
-            return ['matches', 'teams', 'standings', 'bracket', 'finalStandings', 'stats'].includes(saved) ? saved : 'matches';
-        } catch (err) { return 'matches'; }
+            return ['home', 'matches', 'teams', 'standings', 'bracket', 'finalStandings', 'stats'].includes(saved) ? saved : 'home';
+        } catch (err) { return 'home'; }
     });
     const setActiveTab = tab => {
         setActiveTabState(tab);
@@ -3942,6 +4058,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const userRole = hubIsEditor ? 'editor' : 'viewer';
     const setUserRole = onRoleChange;
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+    const [csvTvMode, csvSetTvMode] = useState(false);
     const [copiedLinkType, setCopiedLinkType] = useState(null);
     const [cloudStatus, setCloudStatus] = useState('offline');
     const [cloudErrorMsg, setCloudErrorMsg] = useState('');
@@ -5776,12 +5893,13 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     group.tabs.map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseOrganizerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                         tab.icon,
                         " ",
-                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => setActiveTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
+                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'home', icon: '🏠', text: 'Accueil' }, { id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => setActiveTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                     tab.icon,
                     " ",
                     tab.text)))))),
         userRole === 'viewer' && (React.createElement("nav", { "aria-label": "Navigation spectateur", className: "xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
             React.createElement("div", { className: "flex items-stretch justify-around gap-1 px-2 pt-2" }, [
+                { id: 'home', icon: '🏠', text: 'Accueil' },
                 { id: 'matches', icon: '📅', text: 'Matchs' },
                 { id: 'myTeam', icon: '👟', text: 'Mon équipe' },
                 { id: 'standings', icon: '📊', text: 'Poules' },
@@ -6076,7 +6194,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         if (teamMatches.length === 0) {
                             return React.createElement("div", { className: "text-center py-8 text-xs text-slate-400 italic" }, "Aucun match programm\u00E9 pour le moment.");
                         }
-                        return (React.createElement("div", { className: "space-y-2.5" }, analysis.rows.map(({ match: m, rest, warning }, index) => {
+                        return (React.createElement("div", { className: "space-y-2.5" },
+                            React.createElement(CsvTeamOverview, { team: selectedTeamSchedule, teams, matches, config, groups: activeGroupNames }),
+                            analysis.rows.map(({ match: m, rest, warning }, index) => {
                             const isT1 = m.team1Id === selectedTeamSchedule.id;
                             const opp = getTeam(isT1 ? m.team2Id : m.team1Id);
                             return (React.createElement("div", { key: m.id, className: "bg-[#0b0304] border border-red-950 p-3 rounded-xl flex flex-col gap-1.5" },
@@ -6106,6 +6226,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     })(),
                     React.createElement("div", { className: "pt-2 flex justify-end" },
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
+            activeTab === 'home' && userRole === 'viewer' && React.createElement(CsvVisualHome, {
+                tournament, matches, teams, fields, config, onNavigate: setActiveTab,
+                onChooseTeam: () => setTeamPickerOpen(true)
+            }),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
                 userRole === 'viewer' && React.createElement(CsvSpectatorSummary, { matches, teams, category: tournament.category }),
                 userRole === 'viewer' && (Boolean(config.practicalInfo) || (Array.isArray(config.sponsors) && config.sponsors.length > 0)) &&
@@ -6377,6 +6501,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("td", { className: "py-3 px-2 text-slate-400" }, r.exact ? r.description : (r.level > 0 ? 'Phase finale' : 'Classement de poule'))))))))));
             })(),
             activeTab === 'bracket' && (React.createElement("div", { className: "space-y-6" },
+                React.createElement(CsvVisualFinals, { matches, teams }),
                 React.createElement("div", null,
                     React.createElement("h2", { className: "text-lg font-bold text-white mb-1" }, "Phases Finales & Matchs de Classement"),
                     React.createElement("p", { className: "text-xs text-slate-400" }, "Matchs \u00E0 \u00E9limination directe (en cas d'\u00E9galit\u00E9, tirs au but obligatoires pour d\u00E9partager).")),
