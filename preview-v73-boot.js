@@ -46,7 +46,7 @@
         const group='Poule '+letters[gi], groupTeams=[];
         for(let ti=0;ti<4;ti++){
           const n=gi*4+ti+1;
-          const team={id:id+'-t'+n,name:'Équipe fictive '+category+' '+n,color:['#dc2626','#eab308','#2563eb','#16a34a'][ti],players:[]};
+          const team={id:id+'-t'+n,name:'Équipe fictive '+category+' '+n,group,color:['#dc2626','#eab308','#2563eb','#16a34a'][ti],players:[]};
           teams.push(team);groupTeams.push(team);
         }
         for(let mi=0;mi<pairs.length;mi++){
