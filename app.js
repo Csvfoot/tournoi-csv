@@ -2220,6 +2220,9 @@ function MultiTournamentShell() {
         setSelectedId(id);
         setPage('tournoi');
         setShellMoreOpen(false);
+        // Une action de l'accueil spectateur n'est pas une navigation entre catégories.
+        // Sinon son effet réapplique « Matchs » au remontage du composant.
+        setRequestedViewerAction(null);
         try {
             localStorage.setItem('cslv_last_tournament_v1', JSON.stringify(id));
         }
@@ -3999,6 +4002,14 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
     useEffect(() => {
         if (hubIsEditor || !requestedViewerAction) return;
+        // Les changements de catégorie recréent TournamentApp : ne pas rejouer
+        // une action de l'accueil déjà consommée sur une autre catégorie.
+        const actionKey = 'csv_viewer_last_action_v73';
+        const token = String(requestedViewerAction.seq || '') + ':' + String(requestedViewerAction.type || '');
+        try {
+            if (sessionStorage.getItem(actionKey) === token) return;
+            sessionStorage.setItem(actionKey, token);
+        } catch (err) { /* Le parcours reste utilisable sans stockage. */ }
         setActiveTab('matches');
         setViewerMoreOpen(false);
         setScheduleViewMode('chrono');
