@@ -1361,6 +1361,20 @@ function refreshDayEntryKnockouts(list, teamList, rules) {
 }
 // Composant commun : la même fenêtre « Feuille de Match » dans
 // « Calendrier & Scores » ET dans « Saisie journée ».
+// V7.4 — Contrôle de score large et utilisable sur iPhone.
+function CsvScoreStepper({ value, onChange, label }) {
+    const current = Number.isFinite(Number(value)) && value !== null ? Number(value) : 0;
+    return React.createElement('div', { className: 'flex justify-center gap-1.5 items-center', role: 'group', 'aria-label': label },
+        React.createElement('button', { type: 'button', onClick: () => onChange(Math.max(0, current - 1)),
+            className: 'min-w-[38px] min-h-[48px] bg-[#32121b] rounded-lg border border-amber-800 text-amber-200 text-xl font-black',
+            'aria-label': 'Retirer un but à ' + label }, '−'),
+        React.createElement('input', { type: 'number', min: '0', max: '99', inputMode: 'numeric', value: value == null ? '' : value,
+            onChange: e => onChange(e.target.value === '' ? null : Math.min(99, Math.max(0, Number(e.target.value)))),
+            'aria-label': 'Score ' + label, className: 'w-[62px] min-h-[48px] bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl' }),
+        React.createElement('button', { type: 'button', onClick: () => onChange(Math.min(99, current + 1)),
+            className: 'min-w-[38px] min-h-[48px] bg-[#32121b] rounded-lg border border-amber-800 text-amber-200 text-xl font-black',
+            'aria-label': 'Ajouter un but à ' + label }, '+'));
+}
 function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goalTeamId, setGoalTeamId, goalScorerName, setGoalScorerName, onSave, onClose, categoryLabel = '', readOnlySchedule = false, requireKnownTeams = false, saving = false, saveError = '' }) {
     var _a, _b, _c, _d;
     if (!editingMatch)
@@ -1388,11 +1402,11 @@ function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goal
             React.createElement("div", { className: "grid grid-cols-5 items-center bg-[#0b0304] p-3 rounded-xl border border-red-950 text-center" },
                 React.createElement("div", { className: "col-span-2" },
                     React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team1Id).name),
-                    React.createElement("input", { type: "number", min: "0", value: (_a = editingMatch.score1) !== null && _a !== void 0 ? _a : '', placeholder: "0", onChange: (e) => setEditingMatch({ ...editingMatch, score1: e.target.value === '' ? null : parseInt(e.target.value) }), className: "w-16 h-12 bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl mx-auto block" })),
+                    React.createElement(CsvScoreStepper, { value: editingMatch.score1, label: getTeam(editingMatch.team1Id).name, onChange: score1 => setEditingMatch(old => ({ ...old, score1 })) })),
                 React.createElement("span", { className: "col-span-1 font-black text-amber-500 text-sm" }, "VS"),
                 React.createElement("div", { className: "col-span-2" },
                     React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team2Id).name),
-                    React.createElement("input", { type: "number", min: "0", value: (_b = editingMatch.score2) !== null && _b !== void 0 ? _b : '', placeholder: "0", onChange: (e) => setEditingMatch({ ...editingMatch, score2: e.target.value === '' ? null : parseInt(e.target.value) }), className: "w-16 h-12 bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl mx-auto block" }))),
+                    React.createElement(CsvScoreStepper, { value: editingMatch.score2, label: getTeam(editingMatch.team2Id).name, onChange: score2 => setEditingMatch(old => ({ ...old, score2 })) }))),
             editingMatch.score1 !== null && editingMatch.score1 === editingMatch.score2 && editingMatch.group && (editingMatch.group.includes('Finale') || editingMatch.group.includes('Consolante') || editingMatch.group.includes('Classement') || editingMatch.group.includes('Élimination')) && (React.createElement("div", { className: "bg-[#1f0a0d] border-2 border-amber-500/70 p-3.5 rounded-xl space-y-2" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("span", { className: "text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5" }, "\uD83E\uDD45 Tirs au But obligatoires (\u00C9galit\u00E9)"),
@@ -1496,7 +1510,13 @@ function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goal
                 saveError),
             React.createElement("div", { className: "csv-mobile-editor-actions flex justify-end gap-2 pt-2 border-t border-red-950" },
                 React.createElement("button", { onClick: onClose, className: "px-3 py-1.5 text-xs text-slate-400" }, "Annuler"),
-                React.createElement("button", { onClick: onSave, disabled: saving || (requireKnownTeams && (!editingMatch.team1Id || !editingMatch.team2Id)), className: "min-h-[44px] disabled:opacity-40 px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs" }, saving ? 'Enregistrement…' : 'Valider & Enregistrer')))));
+                React.createElement("button", { onClick: () => {
+                    const a = getTeam(editingMatch.team1Id).name, b = getTeam(editingMatch.team2Id).name;
+                    if (!window.confirm('Confirmer l’enregistrement du match ?\n' + a + ' ' +
+                        (editingMatch.score1 ?? '–') + ' - ' + (editingMatch.score2 ?? '–') + ' ' + b +
+                        '\nStatut : ' + (editingMatch.status || 'pending'))) return;
+                    onSave();
+                }, disabled: saving || (requireKnownTeams && (!editingMatch.team1Id || !editingMatch.team2Id)), className: "min-h-[44px] disabled:opacity-40 px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs" }, saving ? 'Enregistrement…' : 'Valider & Enregistrer')))));
 }
 // Les cartes restent compactes ; un clic ouvre la fenêtre habituelle.
 function DayEntryMatchCard({ event, match, teams, fields, onOpen }) {
