@@ -95,3 +95,12 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Test ajouté dans `tests/v73.test.cjs` : nombre de poules, tailles de groupes, nombre de matchs et cohérence des groupes de chaque adversaire.
 - Vérification directe du générateur effectuée : 24 équipes et 36 matchs avec groupes cohérents, 4+2 poules correctement réparties.
 - **Important** : télécharger le nouvel artefact GitHub Actions après le commit, puis arrêter/relaisser le serveur local sur le dossier fraîchement décompressé. Un ancien dossier conserve l'ancien générateur.
+
+## Étape 10 — tableau des finales absent dans l’aperçu Mac (18 novembre 2026)
+- Retour utilisateur : l'onglet « Finales » affichait uniquement les titres sans aucune rencontre.
+- Cause confirmée : le jeu de démonstration comportait les 36 rencontres de poules mais **aucun match** `Phase Finale Principale` ni `Tournoi Classement`. L'interface filtre correctement les rencontres existantes ; l'absence de tableau était due aux données d'essai.
+- Correction du **bootstrap fictif uniquement** : U10, 4 quarts croisés A1–B2, B1–A2, C1–D2, D1–C2, deux demi-finales, grande finale, troisième place et quatre rencontres de classement ; U11, deux demies croisées, grande finale, troisième place et deux classements.
+- Les qualifications restent vides avant la fin des poules : `team1Id`, `team2Id`, scores et tirs au but sont `null`. Des `source1`/`source2` et intitulés « 1e Poule A » ou « Vainqueur du match précédent » expliquent les emplacements.
+- Le bootstrap comporte maintenant 36 matchs de poules **plus 18 matchs de tableau / classement** (54 au total). Tests automatisés mis à jour : les conflits ignorent les matchs non planifiés, les affectations d'équipes sont testées sur les matchs de poules, et un test spécifique vérifie la structure du tableau.
+- Vérification directe : 24 matchs de poules, 8 matchs du tableau principal et 4 classements en U10 ; 12 matchs de poules, 4 matchs du tableau principal et 2 classements en U11 ; aucune qualification anticipée.
+- **Pour tester sur Mac** : télécharger le dernier paquet GitHub Actions réussi, décompresser dans un nouveau dossier, arrêter le serveur local précédent, puis relancer depuis ce dossier. Le lien de l’ancien dossier conservera les anciens fichiers.
