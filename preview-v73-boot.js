@@ -10,7 +10,9 @@
   };
   try {
     const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    if (!descriptor || !descriptor.configurable) throw new Error('Stockage navigateur non isolable');
+    const sessionDescriptor = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+    if (!descriptor || !descriptor.configurable || !sessionDescriptor || !sessionDescriptor.configurable)
+      throw new Error('Stockage navigateur non isolable');
     const content = new Map();
     const memoryStorage = Object.freeze({
       get length() { return content.size; },
@@ -23,7 +25,11 @@
     Object.defineProperty(window, 'localStorage', {
       configurable: true, enumerable: true, get() { return memoryStorage; }
     });
-    if (window.localStorage !== memoryStorage) throw new Error('Le stockage de test n’est pas actif');
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true, enumerable: true, get() { return memoryStorage; }
+    });
+    if (window.localStorage !== memoryStorage || window.sessionStorage !== memoryStorage)
+      throw new Error('Le stockage de test n’est pas actif');
     const set = (key, val) => memoryStorage.setItem(key, JSON.stringify(val));
     const now = new Date();
     const date = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')].join('-');
