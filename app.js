@@ -4240,6 +4240,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         }
     });
     const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+    const openMyTeamSchedule = () => {
+        const savedTeam = teams.find(t => t.id === viewerTeamId);
+        if (savedTeam) {
+            setSelectedTeamSchedule(savedTeam);
+            setTeamPickerOpen(false);
+        } else {
+            setSelectedTeamSchedule(null);
+            setTeamPickerOpen(true);
+        }
+        setViewerMoreOpen(false);
+    };
     // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
     useEffect(() => {
         if (hubIsEditor || !requestedViewerAction) return;
@@ -5866,7 +5877,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     group.tabs.map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseOrganizerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                         tab.icon,
                         " ",
-                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseViewerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
+                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'myTeam', icon: '👟', text: 'Mon équipe' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => tab.id === 'myTeam' ? openMyTeamSchedule() : chooseViewerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                     tab.icon,
                     " ",
                     tab.text)))))),
@@ -5879,14 +5890,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 { id: 'more', icon: '☰', text: 'Plus' }
             ].map(tab => (React.createElement("button", { type: "button", key: tab.id, "aria-current": activeTab === tab.id ? 'page' : undefined, onClick: () => {
                     if (tab.id === 'myTeam') {
-                        const savedTeam = teams.find(t => t.id === viewerTeamId);
-                        if (savedTeam) {
-                            setSelectedTeamSchedule(savedTeam);
-                            setTeamPickerOpen(false);
-                        } else {
-                            setTeamPickerOpen(true);
-                        }
-                        setViewerMoreOpen(false);
+                        openMyTeamSchedule();
                     }
                     else if (tab.id === 'more')
                         setViewerMoreOpen(v => !v);
