@@ -4297,8 +4297,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         if (data.config)
                             setConfig(csvCleanPublicConfig(data.config));
                         // Les terrains sont gérés dans le catalogue commun.
-                        if (data.teams)
-                            setTeams(data.teams);
+                        if (data.teams) {
+                            const logos = data.teamLogos && typeof data.teamLogos === 'object' && !Array.isArray(data.teamLogos) ? data.teamLogos : {};
+                            const withLogos = data.teams.map(t => ({
+                                ...t,
+                                logoUrl: Object.prototype.hasOwnProperty.call(logos, String(t.id))
+                                  ? String(logos[String(t.id)] || '') : String(t.logoUrl || '')
+                            }));
+                            setTeams(withLogos);
+                        }
                         if (data.matches)
                             setMatches(data.matches);
                         try {
