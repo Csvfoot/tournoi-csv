@@ -104,3 +104,9 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Le bootstrap comporte maintenant 36 matchs de poules **plus 18 matchs de tableau / classement** (54 au total). Tests automatisés mis à jour : les conflits ignorent les matchs non planifiés, les affectations d'équipes sont testées sur les matchs de poules, et un test spécifique vérifie la structure du tableau.
 - Vérification directe : 24 matchs de poules, 8 matchs du tableau principal et 4 classements en U10 ; 12 matchs de poules, 4 matchs du tableau principal et 2 classements en U11 ; aucune qualification anticipée.
 - **Pour tester sur Mac** : télécharger le dernier paquet GitHub Actions réussi, décompresser dans un nouveau dossier, arrêter le serveur local précédent, puis relancer depuis ce dossier. Le lien de l’ancien dossier conservera les anciens fichiers.
+
+## Étape 11 — affichage du classement général provisoire (18 novembre 2026)
+- Capture réelle Mac : 16 équipes affichées dans le classement général avec des médailles 1–3 alors que les poules et finales fictives restent inachevées.
+- Correctif d'interface dans `app.js` : titre « Classement général provisoire » lorsque `finalTable.finished` est faux ; aucun podium ni surlignage de médaillés avant la fin de toutes les rencontres. Une fois le calendrier achevé, titre final et médailles reviennent.
+- Aucun changement de calcul de points, de résultats, d'affectation d'équipe ou de Firebase. Test de non-régression ajouté dans `tests/v73.test.cjs`.
+- À revoir dans une évolution ultérieure : présenter explicitement le classement provisoire par niveau de qualification, éviter de faire passer une position inter-poules pour une place définitive.
