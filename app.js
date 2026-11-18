@@ -4406,6 +4406,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [csvSponsorDraft, csvSetSponsorDraft] = useState(() =>
         Array.isArray(config.sponsors) ? config.sponsors.map(x => [x.name || '', x.logoUrl || '', x.url || ''].join(' | ')).join('\n') : '');
     const [csvPracticalDraft, csvSetPracticalDraft] = useState(() => config.practicalInfo || '');
+    useEffect(() => {
+        csvSetSponsorDraft(Array.isArray(config.sponsors)
+            ? config.sponsors.map(x => [x.name || '', x.logoUrl || '', x.url || ''].join(' | ')).join('\n') : '');
+    }, [JSON.stringify(config.sponsors || [])]);
+    useEffect(() => { csvSetPracticalDraft(config.practicalInfo || ''); }, [config.practicalInfo]);
     const activeGroupNames = useMemo(() => {
         if (config.format === 'round_robin')
             return ['Poule Unique'];
@@ -6452,12 +6457,12 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                             m.stage || 'Match')),
                                     React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                                         React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
-                                            React.createElement("span", { className: "w-2 h-2 rounded-full flex-shrink-0", style: { backgroundColor: t1.color } }),
+                                            React.createElement(CsvTeamLogo, { team: t1, size: 26 }),
                                             React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t1.name)),
                                         React.createElement("div", { className: "bg-[#18080a] px-2 py-0.5 rounded border border-red-900 font-mono font-black text-amber-300 text-xs sm:text-sm flex-shrink-0 whitespace-nowrap min-w-[48px] text-center shadow-inner" }, m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'),
                                         React.createElement("div", { className: "flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right" },
                                             React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t2.name),
-                                            React.createElement("span", { className: "w-2 h-2 rounded-full flex-shrink-0", style: { backgroundColor: t2.color } }))),
+                                            React.createElement(CsvTeamLogo, { team: t2, size: 26 }))),
                                     React.createElement("div", { className: "flex justify-between items-center pt-1 border-t border-red-950/60 text-[9px] sm:text-[10px]" },
                                         React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● En direct' : m.status === 'finished' ? 'Terminé' : 'À venir'),
                                         userRole === 'editor' && (React.createElement("div", { className: "flex items-center gap-1" },
@@ -6495,12 +6500,12 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● Live' : m.status === 'finished' ? 'Terminé' : 'À venir'))),
                         React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                             React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
-                                React.createElement("span", { className: "w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t1.color } }),
+                                React.createElement(CsvTeamLogo, { team: t1, size: 28 }),
                                 React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t1.name)),
                             React.createElement("div", { className: "bg-[#0b0304] px-2.5 py-1 rounded border border-red-950 font-mono font-black text-white text-xs sm:text-base flex-shrink-0 whitespace-nowrap min-w-[54px] text-center shadow-md" }, m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'),
                             React.createElement("div", { className: "flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right" },
                                 React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t2.name),
-                                React.createElement("span", { className: "w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t2.color } }))),
+                                React.createElement(CsvTeamLogo, { team: t2, size: 28 }))),
                         userRole === 'editor' && (React.createElement("button", { type: "button", className: "sm:hidden mt-2 min-h-[44px] w-full rounded-lg border border-amber-600/30 bg-amber-950/30 text-amber-200 text-xs font-bold touch-manipulation", onClick: e => { e.stopPropagation(); setEditingMatch(JSON.parse(JSON.stringify(m))); setGoalTeamId(m.team1Id || ''); setCardTeamId(m.team1Id || ''); } }, "\u270F\uFE0F Saisir ou modifier ce match")),
                         userRole === 'editor' && m.mvp && (React.createElement("div", { className: "mt-1.5 pt-1 border-t border-red-950/70 text-[11px] text-amber-300" },
                             "\u2B50 Homme du Match : ",
@@ -6540,7 +6545,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             const currentGrp = t.group || activeGroupNames[0];
                             return (React.createElement("div", { key: t.id, className: "bg-[#0b0304] border border-red-950 p-2 rounded-xl flex items-center justify-between gap-1.5" },
                                 React.createElement("div", { className: "flex items-center gap-1.5 min-w-0" },
-                                    React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t.color } }),
+                                    React.createElement(CsvTeamLogo, { team: t, size: 24 }),
                                     React.createElement("span", { className: "font-bold text-white text-xs truncate" }, t.name)),
                                 React.createElement("select", { value: currentGrp, onChange: (e) => handleAssignTeamToGroup(t.id, e.target.value), className: "bg-[#18080a] border border-red-900/60 text-[10px] font-bold text-amber-300 rounded px-1.5 py-1 focus:outline-none focus:border-amber-500" }, activeGroupNames.map(grp => (React.createElement("option", { key: grp, value: grp }, grp))))));
                         }))))),
@@ -6574,7 +6579,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             React.createElement("tbody", { className: "divide-y divide-red-950/60" }, finalTable.rows.map(r => (React.createElement("tr", { key: r.team.id, className: r.position <= 3 ? 'bg-amber-500/5' : '' },
                                 React.createElement("td", { className: "py-3 px-2 font-black text-amber-300" }, r.position === 1 ? '🥇' : r.position === 2 ? '🥈' : r.position === 3 ? '🥉' : `${r.position}e`),
                                 React.createElement("td", { className: "py-3 px-2 font-bold text-white" },
-                                    React.createElement("span", { className: "inline-block w-2.5 h-2.5 rounded-full mr-2", style: { backgroundColor: r.team.color } }),
+                                    React.createElement(CsvTeamLogo, { team: r.team, size: 26 }),
                                     r.team.name),
                                 React.createElement("td", { className: "py-3 px-2 text-slate-400" }, r.group),
                                 React.createElement("td", { className: "py-3 px-2 text-amber-200 text-center font-bold" }, r.points),
