@@ -116,9 +116,9 @@ test('Prévisualisation: deux catégories fictives et stockage en mémoire uniqu
   assert.equal(catalog.length, 2);
   assert.deepEqual(Array.from(catalog,x=>x.category), ['U10','U11']);
   assert.equal(get('cslv_teams').length, 16);
-  assert.equal(get('cslv_matches').length, 24);
+  assert.equal(get('cslv_matches').filter(m => m.stage.startsWith('Journée')).length, 24);
   assert.equal(get('cslv_mt_u11_apercu_teams').length, 8);
-  assert.equal(get('cslv_mt_u11_apercu_matches').length, 12);
+  assert.equal(get('cslv_mt_u11_apercu_matches').filter(m => m.stage.startsWith('Journée')).length, 12);
 });
 test('Prévisualisation: aucun match du jeu d’essai ne se superpose sur un terrain', () => {
   const storage = previewFixture().window.localStorage;
@@ -126,10 +126,11 @@ test('Prévisualisation: aucun match du jeu d’essai ne se superpose sur un ter
     ...JSON.parse(storage.getItem('cslv_matches')),
     ...JSON.parse(storage.getItem('cslv_mt_u11_apercu_matches'))
   ];
+  const scheduled = matches.filter(m => m.fieldId && m.startTime && m.endTime);
   const minute = value => Number(value.slice(0,2))*60+Number(value.slice(3,5));
-  for(let i=0;i<matches.length;i++){
-    for(let j=i+1;j<matches.length;j++){
-      const a=matches[i],b=matches[j];
+  for(let i=0;i<scheduled.length;i++){
+    for(let j=i+1;j<scheduled.length;j++){
+      const a=scheduled[i],b=scheduled[j];
       if(a.fieldId !== b.fieldId) continue;
       assert.ok(minute(a.endTime)<=minute(b.startTime) || minute(b.endTime)<=minute(a.startTime),
         'Conflit de terrain entre ' + a.id + ' et ' + b.id);
@@ -183,9 +184,38 @@ test('Prévisualisation: répartition des équipes et rencontres dans les bonnes
       assert.equal(matches.filter(m=>m.group===group).length,6,group+' doit avoir 6 rencontres');
     }
     const teamById=new Map(teams.map(t=>[t.id,t]));
-    for(const match of matches){
+    for(const match of matches.filter(m=>m.stage.startsWith('Journée'))){
       assert.equal(teamById.get(match.team1Id)?.group,match.group,match.id+' équipe 1');
       assert.equal(teamById.get(match.team2Id)?.group,match.group,match.id+' équipe 2');
     }
   }
+});
+
+test('Prévisualisation: tableau principal et classements fictifs préparés, sans qualifications anticipées', () => {
+  const storage=previewFixture().window.localStorage;
+  for(const [prefix,quarterCount,rankingCount] of [['cslv_',4,4],['cslv_mt_u11_apercu_',0,2]]){
+    const matches=JSON.parse(storage.getItem(prefix+'matches'));
+    const ko=matches.filter(m=>m.group==='Phase Finale Principale');
+    const classement=matches.filter(m=>m.group==='Tournoi Classement');
+    assert.equal(ko.filter(m=>m.stage.startsWith('Quart')).length,quarterCount);
+    assert.equal(ko.filter(m=>m.stage.startsWith('Demi')).length,2);
+    assert.equal(ko.filter(m=>m.stage==='Grande Finale').length,1);
+    assert.equal(ko.filter(m=>m.id.endsWith('ko-bronze')).length,1);
+    assert.equal(classement.length,rankingCount);
+    for(const m of [...ko,...classement]){
+      assert.equal(m.status,'pending');
+      assert.equal(m.team1Id,null);
+      assert.equal(m.team2Id,null);
+      assert.equal(m.score1,null);
+      assert.equal(m.score2,null);
+      assert.ok(m.placeholder1 && m.placeholder2);
+      assert.ok(m.source1 && m.source2);
+    }
+  }
+  const u10=JSON.parse(storage.getItem('cslv_matches'));
+  const quarter=u10.find(m=>m.id==='principal-ko-q1');
+  assert.equal(quarter.source1.group,'Poule A');
+  assert.equal(quarter.source1.position,0);
+  assert.equal(quarter.source2.group,'Poule B');
+  assert.equal(quarter.source2.position,1);
 });
