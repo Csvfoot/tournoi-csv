@@ -132,7 +132,7 @@ function csvV73ConfirmMatchSave(match,getTeam) {
     const scoreFields=['score1','score2','pens1','pens2'];
     for (const k of scoreFields) {
         const v=match[k];
-        if (v !== null && v !== undefined && v !== '' && (!/^\\d{1,3}$/.test(String(v)) || !Number.isSafeInteger(Number(v)) || Number(v) < 0 || Number(v) > 999)) {
+        if (v !== null && v !== undefined && v !== '' && (!/^\d{1,3}$/.test(String(v)) || !Number.isSafeInteger(Number(v)) || Number(v) < 0 || Number(v) > 999)) {
             window.alert('Score ou tirs au but invalide : entre un nombre entier entre 0 et 999.');
             return false;
         }
