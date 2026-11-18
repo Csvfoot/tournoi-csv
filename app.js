@@ -1904,6 +1904,8 @@ function MultiTournamentShell() {
         ? catalog.filter(e => e.date === viewerDay && e.published !== false) : [];
     const accessibleEvents = hubIsEditor ? catalog : publicEvents;
     const [page, setPage] = useState('tournoi');
+    // La navigation publique reste la même quand on change de catégorie.
+    const [viewerActiveTab, setViewerActiveTab] = useState('matches');
     // Navigation organisateur commune aux écrans Tournoi, Saisie et Planning.
     const [workspaceTab, setWorkspaceTab] = useState('dashboard');
     const [adminToolsOpen, setAdminToolsOpen] = useState(false);
@@ -3994,20 +3996,21 @@ function MultiTournamentShell() {
                 React.createElement("p", { className: "text-sm text-slate-300" }, "Ouvre une premi\u00E8re fois cette journ\u00E9e avec Internet pour enregistrer ses matchs sur cet appareil.")),
             isViewer && current && !((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id)) && (hubStatus === 'loading' || (hubStatus === 'online' && !loadedDocs[current.id])) && React.createElement("div", { role: "status", className: "max-w-lg mx-auto text-center text-amber-200 text-sm p-8" }, "\u23F3 Chargement du calendrier de cette journ\u00E9e\u2026"),
             isViewer && current && hubStatus === 'error' && !csvCachedTournament(current.id) && React.createElement("div", { role: "alert", className: "max-w-lg mx-auto text-center text-rose-200 text-sm p-8" }, "Connexion aux r\u00E9sultats indisponible. V\u00E9rifie ta connexion Internet et actualise la page."),
-            current && (CSV_V73_ISOLATED_PREVIEW && csvCachedTournament(current.id) || !isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
+            current && (CSV_V73_ISOLATED_PREVIEW && csvCachedTournament(current.id) || !isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, viewerActiveTab: viewerActiveTab, onViewerTabChange: setViewerActiveTab, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
                     var _a;
                     const data = eventData(e);
                     return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
                         ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
-function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
+function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange, viewerActiveTab, onViewerTabChange }) {
     var _a, _b, _c, _d;
-    const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : 'matches');
+    const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : (viewerActiveTab || 'matches'));
     useEffect(() => { if (!hubIsEditor)
-        setActiveTab('matches');
+        setActiveTab(viewerActiveTab || 'matches');
     else if (requestedOrganizerTab)
-        setActiveTab(requestedOrganizerTab); }, [requestedOrganizerTab, hubIsEditor]);
+        setActiveTab(requestedOrganizerTab); }, [requestedOrganizerTab, hubIsEditor, viewerActiveTab]);
+    const chooseViewerTab = id => { setActiveTab(id); if (onViewerTabChange) onViewerTabChange(id); };
     const chooseOrganizerTab = id => { setActiveTab(id); if (onOrganizerTabChange)
         onOrganizerTabChange(id); };
     // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
@@ -5766,14 +5769,14 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     group.tabs.map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseOrganizerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                         tab.icon,
                         " ",
-                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => setActiveTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
+                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseViewerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                     tab.icon,
                     " ",
                     tab.text)))))),
         userRole === 'viewer' && (React.createElement("nav", { "aria-label": "Navigation spectateur", className: "xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
             React.createElement("div", { className: "flex items-stretch justify-around gap-1 px-2 pt-2" }, [
                 { id: 'matches', icon: '📅', text: 'Matchs' },
-                { id: 'myTeam', icon: '👟', text: teams.some(t => t.id === viewerTeamId) ? 'Mon club' : 'Mon équipe' },
+                { id: 'myTeam', icon: '👟', text: 'Mon équipe' },
                 { id: 'standings', icon: '📊', text: 'Poules' },
                 ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []),
                 { id: 'more', icon: '☰', text: 'Plus' }
@@ -5791,7 +5794,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     else if (tab.id === 'more')
                         setViewerMoreOpen(v => !v);
                     else {
-                        setActiveTab(tab.id);
+                        chooseViewerTab(tab.id);
                         setViewerMoreOpen(false);
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                     }
@@ -5799,7 +5802,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 React.createElement("span", { className: "text-xl leading-none", "aria-hidden": "true" }, tab.icon),
                 React.createElement("span", { className: "truncate w-full text-center" }, tab.text))))))),
         userRole === 'viewer' && viewerMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2", style: { bottom: 'calc(85px + env(safe-area-inset-bottom, 0px))' }, role: "region", "aria-label": "Autres vues spectateur" },
-            [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { setActiveTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
+            [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { chooseViewerTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
             React.createElement("button", { type: "button", onClick: () => setViewerMoreOpen(false), className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs" }, "Fermer")),
         React.createElement("main", { className: "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
             userRole === 'viewer' && activeTab === 'matches' && React.createElement("section", {
