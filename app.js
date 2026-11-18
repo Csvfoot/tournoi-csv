@@ -2071,6 +2071,10 @@ function MultiTournamentShell() {
     // lorsque l'app revient au premier plan et sur demande du spectateur.
     // Un échec réseau n'efface JAMAIS le dernier programme local.
     const refreshServerCatalog = useCallback(async (options = {}) => {
+        if (CSV_V73_ISOLATED_PREVIEW) {
+            if (options.manual) setCatalogRefreshMessage('Mode test : données fictives, sans synchronisation Firebase.');
+            return false;
+        }
         const manual = Boolean(options.manual);
         if (refreshInFlight.current) {
             if (manual)
