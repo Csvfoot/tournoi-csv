@@ -61,3 +61,11 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Aucune modification des matchs, scores, Firebase ou droits organisateur ; l'identifiant d'équipe reste enregistré seulement en local comme auparavant.
 - app.js relu sur GitHub après commit ; analyse syntaxique JavaScript réussie.
 - **Tests à réaliser** : première sélection, deuxième ouverture, changement d'équipe, sélection supprimée du tournoi, rechargement de la page et affichage mobile.
+
+## Étape 6 — tests de non-régression et contrôle visuel (18 novembre 2026)
+- Nouvelle suite Node.js autonome `tests/v73.test.cjs` : scores 0 à 999, contrôle des champs vides, bornes +/−, préservation des matchs renseignés, références d'équipes, configuration publique et ouverture de « Mon équipe ».
+- Workflow `.github/workflows/verification-v73.yml` : exécution demandée sur push de `develop-v73` uniquement, avec permission minimale `contents: read`; aucune publication ni authentification Firebase.
+- Nouveau `controle-visuel-v73.html` : panneau de contrôle responsive qui lit la configuration **réelle** de `experience-v73.js` sur la branche déployée localement, sans inventer de sponsors et sans importer Firebase. Il réaffiche l'annonce, les services et partenaires et liste les validations de structure et de liens.
+- Vérification directe effectuée sur GitHub : le panneau est bien présent, son JavaScript inline a une syntaxe valide, la configuration publique est bien lue, aucun SDK Firebase n'est chargé. Une analyse statique et 9 vérifications unitaires directes ont réussi. Exécution du workflow GitHub Actions et tests sur appareils réels **encore à confirmer**.
+- La version de développement contient toujours l'identifiant du **projet Firebase officiel** dans `app.js` : il serait dangereux de l'héberger sur une URL de prévisualisation non isolée, car les authentifications et les écritures pourraient concerner les vraies données. **Ne pas déployer l'application complète V7.3 tant qu'un environnement Firebase de test distinct (ou une isolation effective des accès) n'est pas prêt et vérifié.**
+- En attendant, le contrôle visuel et l'éditeur de réglages publics sont entièrement séparés de Firebase et ne peuvent modifier les tournois.
