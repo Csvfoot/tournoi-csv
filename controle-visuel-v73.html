@@ -95,10 +95,10 @@
     announcement.textContent=txt(cfg.announcement,260)||"📢 Aucune annonce renseignée";
     if(!sv.length)services.appendChild(el("p","hint","Aucun service configuré actuellement."));
     for (const [i,s] of sv.entries()){
-      const okay=s&&txt(s.label,61)&&txt(s.detail,161)&&s.label.length<=60&&s.detail.length<=160;
+      const okay=s&&typeof s.label==='string'&&typeof s.detail==='string'&&txt(s.label,61)&&txt(s.detail,161)&&s.label.length<=60&&s.detail.length<=160;
       checks.push(["Service "+(i+1)+" : nom et détail valides",Boolean(okay)]);
       const card=el("div","row");
-      card.appendChild(el("span","",txt(s.icon,3)+" "+txt(s.label,60)+" — "+txt(s.detail,160)));
+      card.appendChild(el("span","",txt(s?.icon,3)+" "+txt(s?.label,60)+" — "+txt(s?.detail,160)));
       services.appendChild(card);
     }
     if(!sp.length)sponsors.appendChild(el("p","hint","Aucun partenaire configuré actuellement."));
