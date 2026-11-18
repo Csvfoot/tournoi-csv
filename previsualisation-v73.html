@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#21070d">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'self'">
+<title>Tournoi CSV — Prévisualisation V7.3 isolée</title>
+<link rel="stylesheet" href="./styles.css?v=7.1">
+<link rel="stylesheet" href="./experience-v73.css?v=7.3-dev3">
+<link rel="stylesheet" href="./saisie-v73.css?v=7.3-dev4">
+<style>
+#csv-preview-banner{position:sticky;top:0;z-index:9999;background:#f5c65b;color:#280c16;font:900 12px/1.4 system-ui,sans-serif;padding:10px 12px;text-align:center;box-shadow:0 2px 8px #0007}
+#csv-preview-banner strong{font-weight:950}#csv-preview-banner small{display:block;font-weight:650;font-size:11px}
+#csv-preview-banner a{color:#280c16;text-decoration:underline}
+#csv-preview-error{display:none;min-height:45vh;align-items:center;justify-content:center;padding:22px;background:#210c14;color:#ffe4c3;text-align:center;font:700 16px system-ui,sans-serif}
+</style>
+<script>window.CSV_LAUNCH_MODE='spectator';</script>
+<script defer src="./preview-v73-boot.js?v=7.3-iso1"></script>
+<script defer src="./experience-v73.js?v=7.3-dev3"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+</head>
+<body style="margin:0;background:#10060a">
+<header id="csv-preview-banner" role="status"><strong>⚠ PRÉVISUALISATION V7.3 — DONNÉES FICTIVES</strong><small>Vraie interface spectateur · 24 équipes fictives · aucun accès Firebase · aucune donnée enregistrée</small></header>
+<div id="csv-preview-error" role="alert"></div>
+<div id="root"></div>
+<script>
+window.addEventListener('DOMContentLoaded',() => {
+  const showError = msg => {
+    const panel=document.getElementById('csv-preview-error');
+    panel.style.display='flex';
+    panel.textContent='Prévisualisation désactivée : '+msg+'. Aucun accès au tournoi officiel.';
+    document.getElementById('root').replaceChildren();
+  };
+  if(!window.CSV_V73_PREVIEW_BOOT_OK || !window.CSV_V73_ISOLATED_PREVIEW || window.CSV_V73_PREVIEW_SUMMARY?.firebase !== false) {
+    showError(window.CSV_V73_PREVIEW_ERROR || 'isolation non confirmée');return;
+  }
+  if(!window.React||!window.ReactDOM){showError('bibliothèques React non chargées');return;}
+  const app=document.createElement('script');
+  app.src='./app.js?v=7.3-iso1';
+  app.onerror=()=>showError('script principal indisponible');
+  document.body.appendChild(app);
+});
+</script>
+</body></html>
