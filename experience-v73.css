@@ -1,0 +1,20 @@
+/* Tournoi CSV V7.3 — Habillage indépendant des utilitaires Tailwind V7.2. */
+.csv-extras-wrap{display:flex;flex-direction:column;gap:12px;margin:0 0 18px}
+.csv-extras-details,.csv-extras-partners{padding:15px;border:1px solid rgba(237,188,78,.28);border-radius:17px;background:#210c15;color:#f9eee8}
+.csv-extras-summary{font-size:14px;line-height:1.4;min-height:36px;display:flex;align-items:center;cursor:pointer;font-weight:900;color:#f4c650}
+.csv-extras-summary:focus-visible{outline:2px solid #f4c650;outline-offset:3px}
+.csv-extras-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:13px;font-size:13px}
+.csv-extras-fact{background:#2a111b;border-radius:12px;padding:12px;min-width:0;overflow-wrap:anywhere;color:#ffefe4;line-height:1.45}
+.csv-extras-fact>span:first-child{display:block;color:#f3c250;font-size:11px;font-weight:900;margin-bottom:4px}
+.csv-extras-announcement{padding:12px 14px;border:1px solid rgba(243,194,80,.48);border-radius:12px;background:#432819;color:#ffeccf;font-size:13px;line-height:1.45}
+.csv-extras-partners{border-color:rgba(165,59,78,.45)}
+.csv-extras-partners-title{font-weight:900;font-size:15px;color:#f4c650;margin:0 0 12px}
+.csv-extras-partner-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.csv-extras-partner{min-height:72px;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid rgba(243,194,80,.18);border-radius:12px;background:#30141e;color:#fff1e4;text-decoration:none;min-width:0}
+a.csv-extras-partner:hover,a.csv-extras-partner:focus-visible{border-color:#f4c650;outline:2px solid #f4c650;outline-offset:2px}
+.csv-extras-partner-logo,.csv-extras-partner-placeholder{display:grid;place-items:center;width:46px;height:46px;min-width:46px;object-fit:contain;border-radius:10px}
+.csv-extras-partner-placeholder{color:#f4c650;font-weight:900;background:#5e1c2a}
+.csv-extras-partner strong{display:block;line-height:1.25;font-size:13px;overflow-wrap:anywhere}
+.csv-extras-partner small{display:block;margin-top:3px;color:#f5ca70;font-size:11px}
+@media(max-width:560px){.csv-extras-facts{grid-template-columns:1fr}.csv-extras-partner-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.csv-extras-partner{padding:8px;gap:6px}.csv-extras-partner-logo,.csv-extras-partner-placeholder{width:35px;height:35px;min-width:35px}.csv-extras-partner strong{font-size:12px}}
+@media(max-width:350px){.csv-extras-partner-grid{grid-template-columns:1fr}}
