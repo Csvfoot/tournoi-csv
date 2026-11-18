@@ -450,3 +450,12 @@ test('Mon équipe : un accès direct identique depuis la navigation PC et mobile
   assert.match(app,/if \(tab\.id === 'myTeam'\) \{\s*openMyTeamSchedule\(\);/);
   assert.match(app,/const savedTeam = teams\.find\(t => t\.id === viewerTeamId\)/);
 });
+
+
+test('Spectateur: les écrans ne présentent pas la démonstration comme officielle', () => {
+  assert.match(app,/CSV_V73_ISOLATED_PREVIEW \? "Calendrier de démonstration" : "Calendrier officiel"/);
+  assert.match(app,/!CSV_V73_ISOLATED_PREVIEW && React\.createElement\("button", \{ type: "button", onClick: \(\) => void refreshServerCatalog/);
+  assert.match(app,/!CSV_V73_ISOLATED_PREVIEW && !isLoading && !canEnter/);
+  assert.match(app,/id: 'finalStandings', icon: '🏅', text: 'Classement général'/);
+  assert.doesNotMatch(app,/id: 'finalStandings', icon: '🥇', text: 'Classement final'/);
+});
