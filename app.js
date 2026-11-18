@@ -2392,6 +2392,9 @@ function MultiTournamentShell() {
         const target = accessibleEvents.find(e => e.id === id);
         if (!target)
             return; // un spectateur ne peut pas sortir de la journée publiée
+        // Un ancien raccourci de l'accueil ne doit pas réinitialiser l'onglet
+        // de la nouvelle catégorie lors du remontage de TournamentApp.
+        setRequestedViewerAction(null);
         setSelectedId(id);
         setPage('tournoi');
         setShellMoreOpen(false);
