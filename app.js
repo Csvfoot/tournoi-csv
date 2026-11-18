@@ -694,6 +694,17 @@ const planningMinutes = value => {
     return parts.length === 2 && parts.every(Number.isFinite) ? parts[0] * 60 + parts[1] : -1;
 };
 const planningTime = value => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+// Un match sans horaire (tableau final encore non planifié) doit apparaître
+// après les rencontres datées, sans modifier le calendrier enregistré.
+const csvViewerMatchOrder = (a, b) => {
+    const minute = m => {
+        const value = String(m.startTime || '');
+        if (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return 99999;
+        const [h, min] = value.split(':').map(Number);
+        return h * 60 + min;
+    };
+    return minute(a) - minute(b) || String(a.fieldName || a.fieldId || '').localeCompare(String(b.fieldName || b.fieldId || ''), 'fr') || String(a.id || '').localeCompare(String(b.id || ''));
+};
 // Le calendrier d'équipe doit TOUJOURS lire les horaires de matches,
 // jamais l'ordre initial du tableau ou celui des journées.
 const sortedMatchesForTeam = (allMatches, teamId) => (allMatches || [])
@@ -6188,7 +6199,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 /* VUE PAR TERRAIN */
                 React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6" }, fields.map(f => {
                     const fMatches = visibleMatches.filter(m => m.fieldId === f.id)
-                        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+                        .sort(csvViewerMatchOrder);
                     return (React.createElement("div", { key: f.id, className: "bg-[#150709] border border-red-950 rounded-2xl p-4 shadow-xl flex flex-col" },
                         React.createElement("div", { className: "flex items-center justify-between pb-3 mb-3 border-b border-red-950" },
                             React.createElement("span", { className: "font-bold text-white text-sm" },
@@ -6244,7 +6255,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 }))) : (
                 /* VUE CHRONO */
                 React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4" }, visibleMatches.slice()
-                    .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
+                    .sort(csvViewerMatchOrder).map(m => {
                     const t1 = getTeam(m.team1Id);
                     const t2 = getTeam(m.team2Id);
                     return (React.createElement("div", { key: m.id, onClick: () => {
