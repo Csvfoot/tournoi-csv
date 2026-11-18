@@ -128,3 +128,9 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Vérification directe de création du composant avec React simulé : navigation mobile présente, colonnes desktop présentes, bronze et classements séparés, cartes des rencontres rendues.
 - **À valider visuellement dans le navigateur et sur iPhone** après téléchargement du paquet GitHub Actions : espacement des colonnes, lisibilité des équipes, absence de débordement et passage entre tours.
 - Cette étape est uniquement dans `develop-v73`. `main` et Firebase sont inchangés.
+
+## Étape 14 — diagnostics de planification et tests renforcés (18 novembre 2026)
+- Contrôles automatiques ajoutés aux tests V7.3 : conflit entre deux matchs sur un terrain, chevauchement d'une même équipe sur deux terrains, absence de conflit entre catégories distinctes utilisant un même ID local, réservation de créneau, absence de conflit pour deux créneaux contigus, pause de rotation 0 et 5 minutes.
+- **Défaut corrigé** : l'indicateur de conflits dans le tableau de bord organisateur comptait les *matchs impliqués* et non les *paires de collisions*. Il appelle désormais `planningConflictPairs(...).length`, qui compte chaque paire réellement conflictuelle, notamment lorsque trois matchs se chevauchent sur un terrain (3 paires au lieu de 2 matchs comptés).
+- Vérification directe : trois matchs simultanés sur le même terrain donnent 3 paires ; déplacer un match sur un terrain différent réduit ce nombre à 1 paire ; la syntaxe JavaScript du code et des tests reste valide.
+- Les tests n'effacent ni matchs ni résultats et n'ouvrent aucun accès Firebase. La prochaine validation fonctionnelle doit se faire avec un scénario d'organisation isolé avant toute publication.
