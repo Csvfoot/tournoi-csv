@@ -1,0 +1,38 @@
+/* Tournoi CSV V7.3 — saisie tactile commune, complément des styles V7.2. */
+.csv-v73-score-panel{
+  display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  gap:clamp(6px,1.3vw,14px);align-items:center;
+  padding:14px 12px;border-radius:16px;
+  background:#11070b;border:1px solid #60313d;
+}
+.csv-v73-score-control{min-width:0;display:grid;gap:10px;align-items:start}
+.csv-v73-team-label{min-width:0;display:flex;gap:6px;align-items:center;justify-content:center;
+  color:#fff1e8;font-weight:850;font-size:clamp(12px,1.6vw,15px);text-align:center}
+.csv-v73-team-label>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.csv-v73-score-steps{display:grid;grid-template-columns:minmax(33px,1fr) minmax(44px,1.1fr) minmax(33px,1fr);
+  width:100%;max-width:210px;margin:0 auto;gap:5px}
+.csv-v73-step{min-width:0;min-height:52px;border-radius:12px;border:1px solid #8e5060;
+  background:#32141e;color:#f7d3cb;font-size:28px;font-weight:900;line-height:1;cursor:pointer;
+  touch-action:manipulation}
+.csv-v73-step:active{background:#6d2538;transform:scale(.97)}
+.csv-v73-step:focus-visible{outline:3px solid #f6c347;outline-offset:2px}
+.csv-v73-step:disabled{cursor:not-allowed;opacity:.45}
+.csv-v73-score-field{width:100%;min-width:0;min-height:52px;padding:4px 0;
+  border:2px solid #a3664b;border-radius:12px;background:#220e15;color:#fff;
+  text-align:center;font:950 clamp(24px,3.3vw,34px)/1.2 ui-monospace,monospace;
+  font-variant-numeric:tabular-nums}
+.csv-v73-score-field:focus{outline:2px solid #f5c048;outline-offset:2px}
+.csv-v73-score-field::-webkit-inner-spin-button,
+.csv-v73-score-field::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.csv-v73-score-field{-moz-appearance:textfield;appearance:textfield}
+.csv-v73-score-versus{font-size:25px;font-weight:950;color:#f5be43;text-align:center;align-self:end;margin-bottom:11px}
+.csv-v73-save-button{min-height:50px!important;font-size:14px!important}
+@media(max-width:410px){
+ .csv-v73-score-panel{padding:11px 7px;gap:5px}
+ .csv-v73-score-steps{grid-template-columns:minmax(32px,1fr) minmax(41px,1.1fr) minmax(32px,1fr);gap:3px}
+ .csv-v73-step,.csv-v73-score-field{min-height:49px}
+ .csv-v73-team-label{font-size:11px}
+ .csv-v73-score-versus{font-size:20px;margin-bottom:12px}
+ .csv-v73-save-button{width:100%;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){.csv-v73-step:active{transform:none}}
