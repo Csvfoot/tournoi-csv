@@ -342,3 +342,26 @@ test('Planification: détecter conflits de terrain, équipe, réservation et rot
   assert.equal(ctx.conflict(first,{kind:'réservation',eventId:'u10',startTime:'09:10',endTime:'09:20'}),true,'réservation bloque le créneau');
   assert.equal(ctx.conflict(first,match('missing','f1',null,null,'c','d')),false,'match non programmé');
 });
+
+
+test('Tableau de bord: compter toutes les paires de conflits, pas seulement les matchs touchés', () => {
+  assert.match(app,/hubConflictsCount: planningConflictPairs\(catalog\.filter\(e => e\.date === selectedDate\)/);
+  const minuteStart=app.indexOf('const planningMinutes =');
+  const minuteEnd=app.indexOf('const planningTime =',minuteStart);
+  const conflictStart=app.indexOf('const planningKey =');
+  const conflictEnd=app.indexOf('// V6.0 — diagnostic commun',conflictStart);
+  const pairsStart=app.indexOf('const planningConflictPairs =');
+  const pairsEnd=app.indexOf('const buildPlanningRepair =',pairsStart);
+  assert.ok(pairsStart>=0&&pairsEnd>pairsStart);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(minuteStart,minuteEnd) + '\n'+
+    app.slice(conflictStart,conflictEnd)+'\n'+app.slice(pairsStart,pairsEnd)+
+    '\nthis.pairs=planningConflictPairs;',ctx);
+  const entries=['a','b','c'].map(id=>({
+    id,eventId:'u10',kind:'match',fieldId:'terrain-1',
+    team1Id:id,team2Id:null,startTime:'09:00',endTime:'09:15'
+  }));
+  assert.equal(ctx.pairs(entries).length,3,'3 rencontres simultanées = 3 paires de conflits');
+  entries[2].fieldId='terrain-2';
+  assert.equal(ctx.pairs(entries).length,1,'Une seule paire partage le même terrain');
+});
