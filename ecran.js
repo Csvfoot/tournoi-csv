@@ -415,6 +415,8 @@
       : ['Entente Frontonas','AS Pusignan','FC Genas','CS La Verpillière','US Colombier','FC Heyrieux','Stade Nord-Isère','ES Saint-Quentin'];
     const colors=['#de3e49','#edbc40','#4da2ed','#8a6bd2','#60c3a7','#ef7b50','#fbcd65','#60ade1'];
     const teams=names.map((name,i)=>team(n+i,name,i<4?'Poule A':'Poule B',colors[i]));
+    // Démonstration sans données réelles : le logo CSV existe déjà dans le dépôt.
+    teams.forEach(t=>{if(/CSV La Verpillière|CS La Verpillière/i.test(t.name))t.logoUrl='./icon-512.png';});
     const m=(id,a,b,group,stage,startTime,fieldName,s1=null,s2=null)=>({id,team1Id:teams[a]?.id||null,team2Id:teams[b]?.id||null,group,stage,startTime,fieldName,score1:s1,score2:s2,status:s1===null?'pending':'finished'});
     const fA=cat==='U10'?'Terrain Honneur':'Terrain 3';
     const fB=cat==='U10'?'Terrain Annexe':'Terrain 4';
