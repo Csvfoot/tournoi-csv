@@ -3066,3 +3066,15 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-category-pills button:hover,.csv-v74-category-pills .csv-v74-category-active{color:#ffca43;border-color:#ffca43;background:#4d1b2b;}
 .csv-v74-welcome-status{font-size:13px;color:#ffcc70;margin-bottom:12px;}
 @media(max-width:700px){.csv-v74-welcome{padding:12px 12px 90px;}.csv-v74-welcome-header{gap:12px;margin-bottom:15px;}.csv-v74-welcome-header h1{font-size:22px;}.csv-v74-quicknav{gap:5px;}.csv-v74-quicknav button{font-size:12px;padding:10px 12px;flex:1 1 auto;}.csv-v74-public-note{letter-spacing:.2px;font-size:10px;}.csv-v74-category-pills button{padding:8px 13px;}}
+
+/* V7.4 — contrôles de score tactile, sans dépendre de Tailwind au runtime */
+.csv-v74-score-grid{display:grid;grid-template-columns:minmax(0,1fr) 22px minmax(0,1fr);gap:4px;align-items:center;}
+.csv-v74-score-side{min-width:0;}
+.csv-v74-versus{font-size:12px;color:#ffca43;font-weight:900;align-self:center;}
+.csv-v74-stepper{display:flex;align-items:center;justify-content:center;gap:3px;width:100%;}
+.csv-v74-stepper-button{width:33px;min-width:33px;height:48px;border-radius:9px;background:#32121b;border:1px solid #845b35;color:#ffe1a6;font-size:22px;font-weight:900;touch-action:manipulation;}
+.csv-v74-stepper-button:active{background:#ffca43;color:#281018;}
+.csv-v74-stepper-button:focus-visible,.csv-v74-stepper-input:focus-visible{outline:2px solid #ffca43;outline-offset:2px;}
+.csv-v74-stepper-input{width:42px;min-width:0;height:48px;border-radius:10px;background:#18080a;border:1px solid #813047;color:#fff;text-align:center;font-family:ui-monospace,monospace;font-size:22px;font-weight:900;appearance:textfield;}
+.csv-v74-stepper-input::-webkit-inner-spin-button,.csv-v74-stepper-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
+@media(min-width:480px){.csv-v74-stepper{gap:6px;}.csv-v74-stepper-input{width:58px;}.csv-v74-stepper-button{width:40px;min-width:40px;}}
