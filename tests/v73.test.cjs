@@ -97,6 +97,9 @@ function previewFixture(configurable = true) {
   Object.defineProperty(fakeWindow, 'localStorage', {
     configurable, enumerable: true, value: originalStorage
   });
+  Object.defineProperty(fakeWindow, 'sessionStorage', {
+    configurable, enumerable: true, value: originalStorage
+  });
   const context = vm.createContext({ window: fakeWindow, console: { error() {} } });
   vm.runInContext(previewBoot, context, { timeout: 1000 });
   return { window: fakeWindow, originalStorage, get originalWrites() { return originalWrites; } };
@@ -106,6 +109,7 @@ test('Prévisualisation: deux catégories fictives et stockage en mémoire uniqu
   assert.equal(result.window.CSV_V73_PREVIEW_BOOT_OK, true);
   assert.equal(result.window.CSV_V73_ISOLATED_PREVIEW, true);
   assert.notEqual(result.window.localStorage, result.originalStorage);
+  assert.notEqual(result.window.sessionStorage, result.originalStorage);
   assert.equal(result.originalWrites, 0);
   const get = key => JSON.parse(result.window.localStorage.getItem(key));
   const catalog = get('cslv_multi_catalog_v1');
