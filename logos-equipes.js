@@ -66,7 +66,12 @@
       const docId=id==='principal'?'cslv_main_data':'cslv_mt_'+id;
       const snap=await S.db.collection('tournaments').doc(docId).get();
       if(!snap.exists)throw Error('Tournoi absent de Firestore.');
-      S.teams=Array.isArray(snap.data()?.teams)?snap.data().teams:[];
+      const source=snap.data()||{};
+      const teamLogos=source.teamLogos && typeof source.teamLogos==='object' && !Array.isArray(source.teamLogos)?source.teamLogos:{};
+      S.teams=(Array.isArray(source.teams)?source.teams:[]).map(t=>({
+        ...t,logoUrl:Object.prototype.hasOwnProperty.call(teamLogos,String(t.id))
+          ?String(teamLogos[String(t.id)]||''):String(t.logoUrl||'')
+      }));
       renderTeams(); message(S.teams.length+' équipes chargées en lecture seule. Enregistrement uniquement sur ton clic.',true);
     }catch(e){message('Impossible de charger les équipes : '+e.message);$('teams').replaceChildren();}
   }
@@ -103,12 +108,16 @@
             if(!snap.exists||!Array.isArray(snap.data()?.teams))throw Error('Équipes introuvables.');
             const current=snap.data().teams;const idx=current.findIndex(t=>String(t.id)===String(team.id));
             if(idx<0||current[idx].name!==team.name)throw Error('Équipe modifiée entre-temps. Recharge le tournoi.');
-            if(String(current[idx].logoUrl||'')!==old)throw Error('Logo changé par ailleurs. Recharge avant de réessayer.');
-            const next=current.map((t,i)=>i===idx?{...t,logoUrl:url}:t);
-            // Une seule mise à jour du champ teams ; les scores et matchs sont intacts.
-            tx.update(ref,{teams:next});
+            const logos=snap.data().teamLogos||{};
+            const effective=Object.prototype.hasOwnProperty.call(logos,String(team.id))
+              ?String(logos[String(team.id)]||''):String(current[idx].logoUrl||'');
+            if(effective!==old)throw Error('Logo changé par ailleurs. Recharge avant de réessayer.');
+            // Champs isolés des équipes, des matchs et des paramètres.
+            // Firestore met à jour uniquement teamLogos/<id> ; aucune équipe ni score n'est réécrit.
+            const fieldPath=new firebase.firestore.FieldPath('teamLogos',String(team.id));
+            tx.update(ref,fieldPath,url);
           });
-          team.logoUrl=url;message('Logo enregistré pour '+team.name+'. Les scores et matchs restent intacts.',true);renderTeams();
+          team.logoUrl=url;message('Logo enregistré séparément pour '+team.name+'. Aucun match, score ou poule modifié.',true);renderTeams();
         }catch(e){message('Enregistrement refusé : '+e.message);}finally{S.busy=false;save.disabled=false;clear.disabled=false;}
       });
       actions.append(save,clear);row.append(ident,edit,actions);root.append(row);
