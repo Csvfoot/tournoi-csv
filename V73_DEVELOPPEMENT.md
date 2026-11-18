@@ -38,3 +38,12 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Syntaxe JavaScript vérifiée pour `app.js`, `ecran.js`, `logos-equipes.js` et `reglages-ecran.js` sur `develop-v73`.
 - Prévisualisation autonome testée par navigateur : 4 équipes U10, 3 U11, validation des paramètres, URL dangereuse refusée, image locale convertie en WebP (7,2 Ko), téléchargement WebP, absence de débordement sur 390 px, aucune exception JS.
 - Ces essais ne remplacent **pas** les tests des règles Firebase ni une validation sur les appareils réels.
+
+## Étape 3 — sponsors et informations pratiques (18 novembre 2026)
+- Fichiers publics `experience-v73.js` et `experience-v73.css` chargés sur `index.html` et `spectateur.html` (branche de développement seulement).
+- Configurations **optionnelles** : annonce, informations utiles, partenaires (nom, mention, logo et lien HTTPS). Aucune fausse information réelle tant qu'elles ne sont pas renseignées.
+- Accueil spectateur « Matchs » : volet « Infos pratiques » alimenté par la catégorie/date/terrains de la journée et les services configurés, ainsi que grille responsive des partenaires.
+- Aucune modification des résultats, catégories, règles Firestore, comptes ou scores.
+- Validation des liens HTTPS sans identifiants ; logos HTTPS PNG/JPG/WebP ou chemin `./logos/` ; texte ajouté au DOM par React, sans HTML brut.
+- Prévisualisation autonome avec **données fictives**, testée à 1280 et 390 px : changement U10/U11, ajout de partenaire, rejet de `javascript:`, vérification des réglages et absence d'erreur JS ou de débordement.
+- **À faire avant production** : renseignement de vrais partenaires et informations pratiques, vérification de l'intégration au React réel, cache/service worker, contrôles Firestore de `teamLogos`, tests sur téléphones/TV et sauvegarde.
