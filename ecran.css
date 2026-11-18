@@ -44,3 +44,13 @@
 .parallel-fixtures .score.pending{font-size:clamp(18px,1.45vw,28px);min-width:clamp(57px,5vw,100px)}
 .parallel-fixtures .match-bottom{font-size:clamp(12px,1vw,18px)}
 @media(max-width:920px){.parallel-fixtures .team{font-size:clamp(11px,1.7vw,16px)}.parallel-fixtures .match-meta{font-size:clamp(10px,1.2vw,14px)}}
+
+
+/* V7.3 (développement) — blasons facultatifs, positionnés sans modifier le score. */
+.csv-team-badge{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:clamp(19px,2vw,35px);height:clamp(19px,2vw,35px)}
+.csv-team-badge .team-dot{flex:none}
+.csv-team-logo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:4px;background:transparent}
+.csv-team-name{display:flex;align-items:center;gap:clamp(5px,.65vw,11px);min-width:0;overflow:hidden}
+.csv-team-name .csv-team-badge{width:clamp(15px,1.45vw,28px);height:clamp(15px,1.45vw,28px)}
+.csv-team-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:920px){.csv-team-badge{width:20px;height:20px}.csv-team-name .csv-team-badge{width:16px;height:16px}}
