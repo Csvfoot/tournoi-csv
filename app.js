@@ -3860,6 +3860,36 @@ function MultiTournamentShell() {
                         ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
+// V7.4 — Résumé public compact des matchs (ne déclenche aucune écriture).
+function CsvSpectatorSummary({ matches, teams, category }) {
+    const club = id => (teams.find(t => t.id === id) || {}).name || 'À déterminer';
+    const live = matches.filter(m => m.status === 'live');
+    const upcoming = matches.filter(m => m.status !== 'live' && m.status !== 'finished')
+        .slice().sort((a,b) => String(a.startTime || '99:99').localeCompare(String(b.startTime || '99:99')));
+    const finished = matches.filter(m => m.status === 'finished').slice().reverse();
+    const panels = [
+        { title: '🟢 En direct et prochains matchs', rows: live.concat(upcoming).slice(0, 4) },
+        { title: '🏁 Derniers résultats', rows: finished.slice(0, 4) }
+    ];
+    return React.createElement('section', { className: 'rounded-2xl border border-amber-700/50 bg-[#1b0a11] p-4 space-y-3', 'aria-label': 'Résumé du tournoi' },
+        React.createElement('h2', { className: 'text-base font-black text-amber-300' }, '⚽ Le tournoi en direct · ' + category),
+        React.createElement('div', { className: 'grid grid-cols-3 gap-2' },
+            [['🟢 En direct',live.length],['📅 À venir',upcoming.length],['🏁 Terminés',finished.length]].map(([label,count]) =>
+                React.createElement('div', { key:label, className:'rounded-xl bg-[#0b0304] p-3 text-center' },
+                    React.createElement('p',{className:'text-[11px] text-slate-300'},label),
+                    React.createElement('strong',{className:'text-2xl text-amber-300'},count)))),
+        React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-3' },
+            panels.map(panel => React.createElement('div',{key:panel.title,className:'rounded-xl bg-[#0b0304] p-3 space-y-2'},
+                React.createElement('h3',{className:'text-xs font-bold text-amber-300'},panel.title),
+                panel.rows.length ? panel.rows.map(m => React.createElement('div',
+                    {key:m.id,className:'flex flex-wrap justify-between gap-2 text-xs border-t border-red-950/50 pt-2'},
+                    React.createElement('span',{className:'text-slate-300'},(m.startTime || '--:--')+' · '+(m.fieldName || 'Terrain')),
+                    React.createElement('span',{className:'text-white font-bold'},club(m.team1Id)+' – '+club(m.team2Id)),
+                    React.createElement('strong',{className:'text-amber-300'}, m.score1 != null && m.score2 != null ?
+                        m.score1 + ' - ' + m.score2 : m.status === 'live' ? '● LIVE' : 'À venir'))) :
+                    React.createElement('p',{className:'text-xs text-slate-500'},'Aucun match pour le moment.'))))
+    );
+}
 function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
     var _a, _b, _c, _d;
     // Conserve l'onglet spectateur lors d'un changement de catégorie.
@@ -6017,25 +6047,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     React.createElement("div", { className: "pt-2 flex justify-end" },
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
-                userRole === 'viewer' && React.createElement("section", { className: "rounded-2xl border border-amber-700/50 bg-[#1b0a11] p-4 space-y-3", "aria-label": "Le tournoi en un coup d'œil" },
-                    React.createElement("h2", { className: "text-base font-black text-amber-300" }, "⚽ Le tournoi en direct · " + tournament.category),
-                    React.createElement("div", { className: "grid grid-cols-3 gap-2" }, [
-                        ['🟢 En direct', matches.filter(m => m.status === 'live').length],
-                        ['📅 À venir', matches.filter(m => m.status !== 'live' && m.status !== 'finished').length],
-                        ['🏁 Terminés', matches.filter(m => m.status === 'finished').length]
-                    ].map(([label, count]) => React.createElement("div", { key: label, className: "rounded-xl bg-[#0b0304] p-3 text-center" },
-                        React.createElement("p", { className: "text-[11px] text-slate-300" }, label),
-                        React.createElement("strong", { className: "text-2xl text-amber-300" }, count)))),
-                    React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" }, [
-                        { title: "🟢 En direct / prochains matchs", rows: matches.filter(m => m.status === 'live').concat(matches.filter(m => m.status !== 'live' && m.status !== 'finished').sort(sortVisibleMatches)).slice(0, 4) },
-                        { title: "🏁 Derniers résultats", rows: matches.filter(m => m.status === 'finished').slice().reverse().slice(0, 4) }
-                    ].map(section => React.createElement("div", { key: section.title, className: "rounded-xl bg-[#0b0304] p-3 space-y-2" },
-                        React.createElement("h3", { className: "text-xs font-bold text-amber-300" }, section.title),
-                        section.rows.length ? section.rows.map(m => React.createElement("div", { key: m.id, className: "flex flex-wrap justify-between gap-2 text-xs border-t border-red-950/50 pt-2" },
-                            React.createElement("span", { className: "text-slate-300" }, (m.startTime || '--:--') + " · " + (m.fieldName || 'Terrain')),
-                            React.createElement("span", { className: "text-white font-bold" }, getTeam(m.team1Id).name + " – " + getTeam(m.team2Id).name),
-                            React.createElement("strong", { className: "text-amber-300" }, m.score1 != null && m.score2 != null ? m.score1 + ' - ' + m.score2 : m.status === 'live' ? '● LIVE' : 'À venir')))
-                        ) : React.createElement("p", { className: "text-xs text-slate-500" }, "Aucune rencontre pour le moment."))))),
+                userRole === 'viewer' && React.createElement(CsvSpectatorSummary, { matches, teams, category: tournament.category }),
                 React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3" },
                     React.createElement("div", null,
                         React.createElement("h2", { className: "text-base sm:text-lg font-bold text-white" }, userRole === 'viewer' ? '⚽ Matchs et résultats' : 'Calendrier & Scores'),
