@@ -80,3 +80,10 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - La page de prévisualisation renvoie vers le panneau séparé qui vérifie les **réglages publics réellement chargés** (`experience-v73.js`).
 - La suite `tests/v73.test.cjs` contient maintenant des tests pérennes couvrant cet isolement ; leur exécution automatique par GitHub Actions doit encore être confirmée dans l'interface GitHub.
 - **Important** : la page est bien enregistrée dans `develop-v73`, mais **elle n'est pas encore déployée**. Le lien GitHub vers le code n'est pas un lien de prévisualisation utilisable sur iPhone. Avant d'annoncer un site de test accessible, mettre en place un hébergement distinct, puis contrôler le rendu réel et les interactions sur téléphone et ordinateur. Ne surtout pas remplacer la publication officielle par la branche `develop-v73`.
+
+## Étape 8 — paquet de prévisualisation distribuable (18 novembre 2026)
+- Workflow `.github/workflows/paquet-preview-v73.yml` ajouté : contrôle JavaScript et tests Node, création d'un répertoire statique `dist-preview-v73/` avec la vraie application de test, puis archivage comme artifact `tournoi-csv-v73-preview-isolee` (sans déploiement). GitHub Actions doit encore confirmer l'exécution réussie et la présence de l'artefact.
+- `preview-v73-boot.js` isole désormais **localStorage et sessionStorage** dans une mémoire temporaire commune ; échec de l'un ou de l'autre = refus de charger l'application. Tests mis à jour.
+- Vérifications directes supplémentaires réalisées : 8/8 sur les scripts, le stockage, les 24 équipes et 36 matchs, l'absence de déploiement dans le workflow et la CSP réseau.
+- `GUIDE_PREVISUALISATION_V73.md` explique le téléchargement de l'artefact GitHub, un essai local Windows, et la mise à disposition facultative via un hébergement HTTPS distinct, tel que Netlify Drop. Une URL publique ne doit pas être annoncée tant qu'elle n'existe pas et n'a pas été réellement testée.
+- **Ne pas déployer ce dossier sur GitHub Pages officiel** ni mélanger les données de production et de test.
