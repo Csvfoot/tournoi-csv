@@ -1,5 +1,5 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-const CSV_APP_VERSION = '7.2';
+const CSV_APP_VERSION = '7.3';
 // V7.1 sécurité calendrier : données saisies à ne jamais écraser.
 // Fonction pure, également utilisée pour les changements de poules.
 function csvMatchHasProtectedData(m) {
@@ -2220,6 +2220,9 @@ function MultiTournamentShell() {
         setSelectedId(id);
         setPage('tournoi');
         setShellMoreOpen(false);
+        // Une action de l'accueil spectateur n'est pas une navigation entre catégories.
+        // Sinon son effet réapplique « Matchs » au remontage du composant.
+        setRequestedViewerAction(null);
         try {
             localStorage.setItem('cslv_last_tournament_v1', JSON.stringify(id));
         }
@@ -3841,11 +3844,30 @@ function MultiTournamentShell() {
 }
 function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
     var _a, _b, _c, _d;
-    const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : 'matches');
-    useEffect(() => { if (!hubIsEditor)
-        setActiveTab('matches');
-    else if (requestedOrganizerTab)
-        setActiveTab(requestedOrganizerTab); }, [requestedOrganizerTab, hubIsEditor]);
+    // Conserve l'onglet spectateur lors d'un changement de catégorie.
+    const viewerTabStorageKey = 'csv_spectator_selected_tab_v73';
+    const [activeTab, setActiveTabState] = useState(() => {
+        if (hubIsEditor) return requestedOrganizerTab || 'dashboard';
+        try {
+            const saved = sessionStorage.getItem(viewerTabStorageKey);
+            return ['matches', 'teams', 'standings', 'bracket', 'finalStandings', 'stats'].includes(saved) ? saved : 'matches';
+        } catch (err) { return 'matches'; }
+    });
+    const setActiveTab = tab => {
+        setActiveTabState(tab);
+        if (!hubIsEditor) {
+            try { sessionStorage.setItem(viewerTabStorageKey, tab); } catch (err) { }
+        }
+    };
+    const previousEditorRole = useRef(hubIsEditor);
+    useEffect(() => {
+        if (previousEditorRole.current !== hubIsEditor) {
+            previousEditorRole.current = hubIsEditor;
+            setActiveTab(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : 'matches');
+        } else if (hubIsEditor && requestedOrganizerTab) {
+            setActiveTab(requestedOrganizerTab);
+        }
+    }, [requestedOrganizerTab, hubIsEditor]);
     const chooseOrganizerTab = id => { setActiveTab(id); if (onOrganizerTabChange)
         onOrganizerTabChange(id); };
     // Le rôle appartient à la coque multi-tournois : une navigation ne le réinitialise jamais.
@@ -3980,6 +4002,14 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
     useEffect(() => {
         if (hubIsEditor || !requestedViewerAction) return;
+        // Les changements de catégorie recréent TournamentApp : ne pas rejouer
+        // une action de l'accueil déjà consommée sur une autre catégorie.
+        const actionKey = 'csv_viewer_last_action_v73';
+        const token = String(requestedViewerAction.seq || '') + ':' + String(requestedViewerAction.type || '');
+        try {
+            if (sessionStorage.getItem(actionKey) === token) return;
+            sessionStorage.setItem(actionKey, token);
+        } catch (err) { /* Le parcours reste utilisable sans stockage. */ }
         setActiveTab('matches');
         setViewerMoreOpen(false);
         setScheduleViewMode('chrono');
@@ -4012,6 +4042,18 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             : mobileMatchFilter === 'live' ? m.status === 'live'
                 : m.status !== 'finished' && m.status !== 'live')
         : matches;
+    // Tri d'affichage uniquement, sans modifier les horaires ni les résultats enregistrés.
+    const sortVisibleMatches = (a, b) => {
+        const knockout = m => /phase finale/i.test(String(m.group || '')) ||
+            /(?:quart|demi|finale|huitième|classement)/i.test(String(m.stage || '')) ||
+            String(m.id || '').startsWith('ko-');
+        const phaseDiff = Number(knockout(a)) - Number(knockout(b));
+        if (phaseDiff) return phaseDiff;
+        const minutes = m => /^\d{1,2}:\d{2}$/.test(String(m.startTime || ''))
+            ? timeToMinutes(m.startTime) : Number.POSITIVE_INFINITY;
+        return minutes(a) - minutes(b) || String(a.fieldName || '').localeCompare(String(b.fieldName || ''), 'fr') ||
+            String(a.id || '').localeCompare(String(b.id || ''), 'fr');
+    };
     const [editingMatch, setEditingMatch] = useState(null);
     const [movingMatchId, setMovingMatchId] = useState(null);
     const [moveTargetId, setMoveTargetId] = useState('');
@@ -5984,7 +6026,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 /* VUE PAR TERRAIN */
                 React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6" }, fields.map(f => {
                     const fMatches = visibleMatches.filter(m => m.fieldId === f.id)
-                        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+                        .sort(sortVisibleMatches);
                     return (React.createElement("div", { key: f.id, className: "bg-[#150709] border border-red-950 rounded-2xl p-4 shadow-xl flex flex-col" },
                         React.createElement("div", { className: "flex items-center justify-between pb-3 mb-3 border-b border-red-950" },
                             React.createElement("span", { className: "font-bold text-white text-sm" },
@@ -6040,7 +6082,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 }))) : (
                 /* VUE CHRONO */
                 React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4" }, visibleMatches.slice()
-                    .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)).map(m => {
+                    .sort(sortVisibleMatches).map(m => {
                     const t1 = getTeam(m.team1Id);
                     const t2 = getTeam(m.team2Id);
                     return (React.createElement("div", { key: m.id, onClick: () => {
@@ -6159,7 +6201,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     React.createElement("h3", { className: "text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDFC6 Phase Finale Principale (Titre)"),
                     React.createElement("div", { className: "flex flex-col md:flex-row gap-6 justify-around" },
                         React.createElement("div", { className: "flex-1 space-y-3" },
-                            React.createElement("div", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider text-center" }, "Huiti\u00E8mes, Quarts & Demi-Finales"),
+                            React.createElement("div", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider text-center" }, "Autres matchs de la phase finale"),
                             matches.filter(m => { var _a, _b, _c; return m.group === 'Phase Finale Principale' && (((_a = m.stage) === null || _a === void 0 ? void 0 : _a.includes('Demi')) || ((_b = m.stage) === null || _b === void 0 ? void 0 : _b.includes('Quart')) || ((_c = m.stage) === null || _c === void 0 ? void 0 : _c.includes('Huitième')) || m.id === 'ko-bronze'); }).map(m => {
                                 const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
                                 const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
