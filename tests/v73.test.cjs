@@ -365,3 +365,35 @@ test('Tableau de bord: compter toutes les paires de conflits, pas seulement les 
   entries[2].fieldId='terrain-2';
   assert.equal(ctx.pairs(entries).length,1,'Une seule paire partage le même terrain');
 });
+
+
+test('Renommer une poule conserve scores et met à jour les sources des finales', () => {
+  const start=app.indexOf('const csvRenameGroupReferences =');
+  const end=app.indexOf('const standingsFor =',start);
+  assert.ok(start>=0 && end>start);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(start,end)+'\nthis.rename=csvRenameGroupReferences;',ctx);
+  const teams=[{id:'a1',name:'Club A1',group:'Poule A'},{id:'b1',name:'Club B1',group:'Poule B'}];
+  const matches=[
+    {id:'group-a',group:'Poule A',status:'finished',score1:2,score2:1,events:[{type:'goal'}]},
+    {id:'quarter',group:'Phase Finale Principale',stage:'Quart de Finale 1',
+      source1:{kind:'rank',group:'Poule A',position:0},source2:{kind:'rank',group:'Poule B',position:1},
+      placeholder1:'1e Poule A',placeholder2:'2e Poule B',status:'pending',score1:null,score2:null},
+    {id:'semi',group:'Phase Finale Principale',source1:{kind:'winner',matchId:'quarter'},status:'pending'}
+  ];
+  const before=JSON.stringify({teams,matches});
+  const out=ctx.rename(teams,matches,'Poule A','Poule Or');
+  assert.equal(out.teams.find(t=>t.id==='a1').group,'Poule Or');
+  assert.equal(out.teams.find(t=>t.id==='b1').group,'Poule B');
+  assert.equal(out.matches[0].group,'Poule Or');
+  assert.equal(out.matches[0].score1,2);
+  assert.equal(out.matches[0].score2,1);
+  assert.equal(out.matches[0].events[0].type,'goal');
+  assert.equal(out.matches[1].source1.group,'Poule Or');
+  assert.equal(out.matches[1].placeholder1,'1e Poule Or');
+  assert.equal(out.matches[1].source2.group,'Poule B');
+  assert.equal(out.matches[1].placeholder2,'2e Poule B');
+  assert.equal(out.matches[2].source1.kind,'winner');
+  assert.equal(JSON.stringify({teams,matches}),before,'Aucune mutation des données originales');
+  assert.match(app,/csvRenameGroupReferences\(teams, matches, oldName, fresh\)/);
+});
