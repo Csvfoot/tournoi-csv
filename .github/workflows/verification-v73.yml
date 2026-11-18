@@ -1,0 +1,28 @@
+name: Vérification V7.3 (sans déploiement)
+on:
+  push:
+    branches: [develop-v73]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  controle:
+    name: Syntaxe et protections des données
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Récupérer la branche de développement
+        uses: actions/checkout@v4
+      - name: Préparer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vérifier la syntaxe JavaScript
+        run: |
+          node --check app.js
+          node --check ecran.js
+          node --check logos-equipes.js
+          node --check experience-v73.js
+          node --check reglages-ecran.js
+      - name: Tests des scores, de l’intégrité et des réglages publics
+        run: node --test tests/v73.test.cjs
