@@ -18,3 +18,44 @@ a.csv-extras-partner:hover,a.csv-extras-partner:focus-visible{border-color:#f4c6
 .csv-extras-partner small{display:block;margin-top:3px;color:#f5ca70;font-size:11px}
 @media(max-width:560px){.csv-extras-facts{grid-template-columns:1fr}.csv-extras-partner-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.csv-extras-partner{padding:8px;gap:6px}.csv-extras-partner-logo,.csv-extras-partner-placeholder{width:35px;height:35px;min-width:35px}.csv-extras-partner strong{font-size:12px}}
 @media(max-width:350px){.csv-extras-partner-grid{grid-template-columns:1fr}}
+
+
+/* V7.3 — arbre des phases finales. Lecture seule, sans faux résultat. */
+.csv-v73-bracket{color:#fef5e8}
+.csv-v73-bracket-header h2{font-size:1.2rem;font-weight:900;color:#f6c65b}
+.csv-v73-bracket-header p{font-size:.76rem;color:#b5a0a6;margin-top:.35rem}
+.csv-v73-bracket-desktop{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:17px;align-items:stretch;border:1px solid #7b4c22;border-radius:20px;padding:20px;background:#19090f;overflow-x:auto}
+.csv-v73-bracket-round{min-width:0;display:flex;flex-direction:column;gap:13px;position:relative}
+.csv-v73-bracket-round-title{text-align:center;font-size:.75rem;text-transform:uppercase;letter-spacing:.055em;font-weight:900;color:#f1c65a;min-height:32px}
+.csv-v73-bracket-round-matches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:16px}
+.csv-v73-bracket-round:not(:last-child) .csv-v73-bracket-match:after{content:"";position:absolute;left:100%;top:50%;width:17px;border-top:2px solid #ac773a;pointer-events:none}
+.csv-v73-bracket-match{position:relative;background:#110609;border:1px solid #793039;border-radius:12px;padding:12px 11px;min-width:0;overflow:visible}
+.csv-v73-bracket-match-head{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:10px;color:#f6bf48;margin-bottom:10px}
+.csv-v73-bracket-match-head strong{overflow-wrap:anywhere}
+.csv-v73-bracket-match-head span{white-space:nowrap;color:#dbc6a7}
+.csv-v73-bracket-team{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px}
+.csv-v73-bracket-team-name{display:flex;align-items:center;gap:5px;font-weight:700;font-size:11px;min-width:0;overflow-wrap:anywhere}
+.csv-v73-bracket-team-name>span:last-child{min-width:0}
+.csv-v73-bracket-score{color:#ffe29d;white-space:nowrap;font-size:12px}
+.csv-v73-bracket-schedule{font-size:10px;color:#d0ad79;margin-top:6px}
+.csv-v73-bracket-extra{border:1px solid #5b252d;border-radius:16px;padding:16px;background:#1b0a10}
+.csv-v73-bracket-extra h3{font-size:.9rem;font-weight:900;color:#eebd65;margin-bottom:12px}
+.csv-v73-bracket-rankings h3{color:#75dbe5}
+.csv-v73-bracket-extras{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.csv-v73-bracket-empty{border:1px solid #704344;border-radius:12px;padding:20px;text-align:center;color:#cab7ad}
+.csv-v73-bracket-mobile-nav,.csv-v73-bracket-mobile{display:none}
+@media(max-width:767px){
+ .csv-v73-bracket-desktop{display:none}
+ .csv-v73-bracket-mobile-nav{display:flex;gap:7px;overflow-x:auto;padding:1px 1px 9px;scrollbar-width:thin}
+ .csv-v73-bracket-mobile-nav button{flex:0 0 auto;min-height:44px;padding:8px 12px;border:1px solid #72403d;border-radius:10px;background:#281017;color:#e9cec0;font-size:12px;font-weight:800}
+ .csv-v73-bracket-mobile-nav button.is-active{background:#f6bb4a;border-color:#f6bb4a;color:#281017}
+ .csv-v73-bracket-mobile{display:block;border:1px solid #754235;border-radius:14px;padding:12px;background:#1a090f}
+ .csv-v73-bracket-mobile .csv-v73-bracket-round-matches{gap:10px}
+ .csv-v73-bracket-mobile .csv-v73-bracket-round-title{text-align:left;min-height:auto}
+ .csv-v73-bracket-mobile .csv-v73-bracket-match:after{display:none}
+ .csv-v73-bracket-extras{grid-template-columns:1fr}
+}
+@media(min-width:768px) and (max-width:1023px){
+ .csv-v73-bracket-desktop{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .csv-v73-bracket-round:not(:last-child) .csv-v73-bracket-match:after{display:none}
+}
