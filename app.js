@@ -1656,7 +1656,9 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
                     React.createElement('small',null,'CLUB SPORTIF LA VERPILLIÈRE · 1939'),
                     React.createElement('h1',null,'TOURNOI CSV'))),
             React.createElement('nav',{className:'csv-v74-quicknav','aria-label':'Navigation rapide'},
-                [['🏠 Accueil',null],['⭐ Mon équipe','team'],['📅 Calendrier','program'],['🏆 Résultats','results']]
+                [['🏠 Accueil',null],['⭐ Mon équipe','team'],['📅 Calendrier','program'],
+                  ['📊 Classements','standings'],['🏆 Phases finales','finals'],
+                  ['📺 Écran TV','tv']]
                     .map(([label,action])=>React.createElement('button',{
                         key:label,type:'button',disabled:action&&!available,
                         className:action?'':'csv-v74-active',
@@ -4260,11 +4262,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             if (sessionStorage.getItem(actionKey) === token) return;
             sessionStorage.setItem(actionKey, token);
         } catch (err) { /* Le parcours reste utilisable sans stockage. */ }
-        setActiveTab('matches');
+        const action = requestedViewerAction.type;
+        setActiveTab(action === 'standings' ? 'standings' :
+            action === 'finals' && config.format !== 'round_robin' ? 'bracket' :
+            action === 'tv' ? 'home' : 'matches');
         setViewerMoreOpen(false);
         setScheduleViewMode('chrono');
-        setMobileMatchFilter(requestedViewerAction.type === 'results' ? 'finished' : 'upcoming');
-        if (requestedViewerAction.type === 'team') setTeamPickerOpen(true);
+        setMobileMatchFilter(action === 'results' ? 'finished' : 'upcoming');
+        if (action === 'team') setTeamPickerOpen(true);
+        if (action === 'tv') csvSetTvMode(true);
     }, [requestedViewerAction, hubIsEditor]);
     const [newPlayerInputs, setNewPlayerInputs] = useState({});
     useEffect(() => {
