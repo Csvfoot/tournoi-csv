@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#16070d">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Tournoi CSV V7.3 — Logos des équipes</title>
+  <link rel="icon" href="./icon-512.png">
+  <link rel="stylesheet" href="./logos-equipes.css?v=7.3-dev2">
+  <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script defer src="./organizers-config.js"></script>
+  <script defer src="./logos-equipes.js?v=7.3-dev2"></script>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div class="brand"><img src="./icon-512.png" alt="Logo du CS La Verpillière"><div><div class="small">CS LA VERPILLIÈRE • V7.3</div><h1>Logos des équipes</h1></div></div>
+    <a href="./gestion-organisateurs.html">← Administration</a>
+  </header>
+  <section class="intro"><span class="pill" id="modeLabel">GESTION DES BLASONS</span><h2>Un blason pour chaque club</h2><p>Ajoute un logo à côté du nom de l’équipe. Le logo est facultatif et ne change ni les résultats, ni les poules, ni les matchs.</p></section>
+  <div id="feedback" class="alert" role="status" aria-live="polite">Vérification de l’accès…</div>
+  <section id="loginArea" class="card hidden"><h3>Connexion du responsable principal</h3><form id="loginForm" class="formrow"><label>Adresse e-mail<input id="email" type="email" required autocomplete="email"></label><label>Mot de passe<input id="password" type="password" required autocomplete="current-password"></label><button type="submit">Se connecter</button></form></section>
+  <section id="workspace" class="hidden">
+    <div class="card"><div class="formrow"><label>Choisir le tournoi / la catégorie<select id="tournament"></select></label><button type="button" id="validate">✓ Vérifier les réglages</button></div><p class="hint">Formats acceptés : URL HTTPS d’un logo PNG, JPG ou WebP, ou fichier du dépôt dans <code>./logos/</code>. Héberge de préférence les logos sur le domaine du tournoi.</p></div>
+    <div class="card"><h3 id="teamTitle">Équipes</h3><div id="teams" class="team-list"></div></div>
+  </section>
+  <footer class="bottom">🔐 Modifications réservées au responsable principal. Vérification avant enregistrement. Aucun score, calendrier ni compte Firebase n’est modifié par cet écran. <span id="offlineNote"></span></footer>
+</main>
+</body>
+</html>
