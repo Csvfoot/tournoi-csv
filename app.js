@@ -5847,7 +5847,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         React.createElement("div", null,
                             React.createElement("div", { className: "flex items-center justify-between pb-3 border-b border-red-950/80 mb-3" },
                                 React.createElement("div", { className: "flex items-center gap-2.5" },
-                                    React.createElement("div", { className: "w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs shadow-md", style: { backgroundColor: t.color } }, t.name.substring(0, 2).toUpperCase()),
+                                    React.createElement(CsvTeamBadge, { team: t, large: true }),
                                     React.createElement("div", null,
                                         React.createElement("div", { className: "flex items-center gap-1.5" },
                                             React.createElement("h3", { className: "font-bold text-white text-sm" }, t.name),
