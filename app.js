@@ -1364,15 +1364,15 @@ function refreshDayEntryKnockouts(list, teamList, rules) {
 // V7.4 — Contrôle de score large et utilisable sur iPhone.
 function CsvScoreStepper({ value, onChange, label }) {
     const current = Number.isFinite(Number(value)) && value !== null ? Number(value) : 0;
-    return React.createElement('div', { className: 'flex justify-center gap-1.5 items-center', role: 'group', 'aria-label': label },
+    return React.createElement('div', { className: 'csv-v74-stepper', role: 'group', 'aria-label': label },
         React.createElement('button', { type: 'button', onClick: () => onChange(Math.max(0, current - 1)),
-            className: 'min-w-[38px] min-h-[48px] bg-[#32121b] rounded-lg border border-amber-800 text-amber-200 text-xl font-black',
+            className: 'csv-v74-stepper-button',
             'aria-label': 'Retirer un but à ' + label }, '−'),
         React.createElement('input', { type: 'number', min: '0', max: '99', inputMode: 'numeric', value: value == null ? '' : value,
             onChange: e => onChange(e.target.value === '' ? null : Math.min(99, Math.max(0, Number(e.target.value)))),
-            'aria-label': 'Score ' + label, className: 'w-[62px] min-h-[48px] bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl' }),
+            'aria-label': 'Score ' + label, className: 'csv-v74-stepper-input' }),
         React.createElement('button', { type: 'button', onClick: () => onChange(Math.min(99, current + 1)),
-            className: 'min-w-[38px] min-h-[48px] bg-[#32121b] rounded-lg border border-amber-800 text-amber-200 text-xl font-black',
+            className: 'csv-v74-stepper-button',
             'aria-label': 'Ajouter un but à ' + label }, '+'));
 }
 function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goalTeamId, setGoalTeamId, goalScorerName, setGoalScorerName, onSave, onClose, categoryLabel = '', readOnlySchedule = false, requireKnownTeams = false, saving = false, saveError = '' }) {
@@ -1399,12 +1399,12 @@ function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goal
                     React.createElement("option", { value: "", disabled: true }, "Choisir le terrain"),
                     fields.map(f => React.createElement("option", { key: f.id, value: f.id }, f.name))),
                 !readOnlySchedule && React.createElement("span", { className: "mt-2 block text-[11px] text-slate-400" }, "Le changement est contr\u00F4l\u00E9 \u00E0 l'enregistrement. Si le terrain est occup\u00E9, utilise \u2194 dans le calendrier pour modifier aussi l'heure.")),
-            React.createElement("div", { className: "grid grid-cols-5 items-center bg-[#0b0304] p-3 rounded-xl border border-red-950 text-center" },
-                React.createElement("div", { className: "col-span-2" },
+            React.createElement("div", { className: "csv-v74-score-grid bg-[#0b0304] p-3 rounded-xl border border-red-950 text-center" },
+                React.createElement("div", { className: "csv-v74-score-side" },
                     React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team1Id).name),
                     React.createElement(CsvScoreStepper, { value: editingMatch.score1, label: getTeam(editingMatch.team1Id).name, onChange: score1 => setEditingMatch(old => ({ ...old, score1 })) })),
-                React.createElement("span", { className: "col-span-1 font-black text-amber-500 text-sm" }, "VS"),
-                React.createElement("div", { className: "col-span-2" },
+                React.createElement("span", { className: "csv-v74-versus" }, "VS"),
+                React.createElement("div", { className: "csv-v74-score-side" },
                     React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team2Id).name),
                     React.createElement(CsvScoreStepper, { value: editingMatch.score2, label: getTeam(editingMatch.team2Id).name, onChange: score2 => setEditingMatch(old => ({ ...old, score2 })) }))),
             editingMatch.score1 !== null && editingMatch.score1 === editingMatch.score2 && editingMatch.group && (editingMatch.group.includes('Finale') || editingMatch.group.includes('Consolante') || editingMatch.group.includes('Classement') || editingMatch.group.includes('Élimination')) && (React.createElement("div", { className: "bg-[#1f0a0d] border-2 border-amber-500/70 p-3.5 rounded-xl space-y-2" },
