@@ -4017,6 +4017,71 @@ function MultiTournamentShell() {
                         ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
                 }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
 }
+// V7.3 — Arbre des finales : les sources et scores proviennent exclusivement des matchs existants.
+// Le tableau n'invente aucune qualification, aucun résultat ni aucun horaire.
+function CsvV73Bracket({ matches, getTeam }) {
+    const { useState: useBracketState } = React;
+    const finals = matches.filter(m => m.group === 'Phase Finale Principale');
+    const rankings = matches.filter(m => m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante');
+    const stage = m => String(m.stage || '');
+    const bronze = finals.filter(m => /3(?:ème|e)\s*\/\s*4/i.test(stage(m)) || m.id === 'ko-bronze');
+    const main = finals.filter(m => !bronze.includes(m));
+    const roundKey = m => /Huitième/i.test(stage(m)) ? 'r16' :
+        /Quart/i.test(stage(m)) ? 'quarter' : /Demi/i.test(stage(m)) ? 'semi' :
+        /Grande Finale/i.test(stage(m)) ? 'final' : 'other';
+    const roundTitles = { r16: 'Huitièmes', quarter: 'Quarts de finale', semi: 'Demi-finales', final: 'Grande finale', other: 'Autres rencontres' };
+    const rounds = ['r16', 'quarter', 'semi', 'final', 'other']
+        .map(key => ({ key, title: roundTitles[key], items: main.filter(m => roundKey(m) === key) }))
+        .filter(round => round.items.length);
+    const [mobileRound, setMobileRound] = useBracketState('first');
+    const currentRound = rounds.some(r => r.key === mobileRound) ? mobileRound : (rounds[0] ? rounds[0].key : null);
+    const score = (match, side) => {
+        const value = match['score' + side], pens = match['pens' + side];
+        return value == null ? '–' : String(value) + (pens == null ? '' : ' (' + pens + ' TAB)');
+    };
+    const matchCard = (m, i) => {
+        const a = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
+        const b = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
+        return React.createElement('article', { key: String(m.id || i), className: 'csv-v73-bracket-match', 'aria-label': stage(m) },
+            React.createElement('div', { className: 'csv-v73-bracket-match-head' },
+                React.createElement('strong', null, stage(m)),
+                React.createElement('span', null, m.status === 'finished' ? '✓ Terminé' : m.status === 'live' ? '● En direct' : 'À venir')),
+            [[a, 1], [b, 2]].map(([team, side]) => React.createElement('div', { key: side, className: 'csv-v73-bracket-team' },
+                React.createElement('span', { className: 'csv-v73-bracket-team-name' },
+                    React.createElement(CsvTeamBadge, { team }), React.createElement('span', null, team.name)),
+                React.createElement('strong', { className: 'csv-v73-bracket-score' }, score(m, side)))),
+            m.startTime && React.createElement('div', { className: 'csv-v73-bracket-schedule' },
+                m.startTime, m.fieldName ? ' · ' + m.fieldName : ''));
+    };
+    const roundColumn = round => React.createElement('section', {
+        key: round.key, className: 'csv-v73-bracket-round',
+        'aria-label': round.title
+    }, React.createElement('h3', { className: 'csv-v73-bracket-round-title' }, round.title),
+        React.createElement('div', { className: 'csv-v73-bracket-round-matches' }, round.items.map(matchCard)));
+    return React.createElement('div', { className: 'csv-v73-bracket space-y-4' },
+        React.createElement('header', { className: 'csv-v73-bracket-header' },
+            React.createElement('h2', null, '🏆 Tableau des phases finales'),
+            React.createElement('p', null, 'Les qualifiés apparaissent au fur et à mesure des résultats des poules.')),
+        main.length === 0 ? React.createElement('p', { className: 'csv-v73-bracket-empty', role: 'status' },
+            'Aucune phase finale programmée pour ce tournoi.') : React.createElement(React.Fragment, null,
+            React.createElement('nav', { className: 'csv-v73-bracket-mobile-nav', 'aria-label': 'Choisir le tour des finales' },
+                rounds.map(round => React.createElement('button', {
+                    key: round.key, type: 'button',
+                    'aria-pressed': currentRound === round.key,
+                    className: currentRound === round.key ? 'is-active' : '',
+                    onClick: () => setMobileRound(round.key)
+                }, round.title, ' (', round.items.length, ')'))),
+            React.createElement('div', { className: 'csv-v73-bracket-desktop' }, rounds.map(roundColumn)),
+            React.createElement('div', { className: 'csv-v73-bracket-mobile' },
+                rounds.filter(round => round.key === currentRound).map(roundColumn))),
+        bronze.length > 0 && React.createElement('section', { className: 'csv-v73-bracket-extra' },
+            React.createElement('h3', null, '🥉 Match pour la 3ᵉ place'),
+            React.createElement('div', { className: 'csv-v73-bracket-extras' }, bronze.map(matchCard))),
+        rankings.length > 0 && React.createElement('section', { className: 'csv-v73-bracket-extra csv-v73-bracket-rankings' },
+            React.createElement('h3', null, '🎖️ Matchs de classement'),
+            React.createElement('div', { className: 'csv-v73-bracket-extras' }, rankings.map(matchCard))));
+}
+
 function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange, viewerActiveTab, onViewerTabChange }) {
     var _a, _b, _c, _d;
     const [activeTab, setActiveTab] = useState(hubIsEditor ? (requestedOrganizerTab || 'dashboard') : (viewerActiveTab || 'matches'));
@@ -6369,63 +6434,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("td", { className: "py-3 px-2 text-amber-200 text-center font-bold" }, r.points),
                                 React.createElement("td", { className: "py-3 px-2 text-slate-400" }, r.exact ? r.description : (r.level > 0 ? 'Phase finale' : 'Classement de poule'))))))))));
             })(),
-            activeTab === 'bracket' && (React.createElement("div", { className: "space-y-6" },
-                React.createElement("div", null,
-                    React.createElement("h2", { className: "text-lg font-bold text-white mb-1" }, "Phases Finales & Matchs de Classement"),
-                    React.createElement("p", { className: "text-xs text-slate-400" }, "Matchs \u00E0 \u00E9limination directe (en cas d'\u00E9galit\u00E9, tirs au but obligatoires pour d\u00E9partager).")),
-                React.createElement("div", { className: "bg-[#150709] border border-amber-500/50 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
-                    React.createElement("h3", { className: "text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDFC6 Phase Finale Principale (Titre)"),
-                    React.createElement("div", { className: "flex flex-col md:flex-row gap-6 justify-around" },
-                        React.createElement("div", { className: "flex-1 space-y-3" },
-                            React.createElement("div", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider text-center" }, "Huiti\u00E8mes, Quarts & Demi-Finales"),
-                            matches.filter(m => { var _a, _b, _c; return m.group === 'Phase Finale Principale' && (((_a = m.stage) === null || _a === void 0 ? void 0 : _a.includes('Demi')) || ((_b = m.stage) === null || _b === void 0 ? void 0 : _b.includes('Quart')) || ((_c = m.stage) === null || _c === void 0 ? void 0 : _c.includes('Huitième')) || m.id === 'ko-bronze' || /3(?:ème|e)\s*\/\s*4/.test(m.stage || '')); }).map(m => {
-                                const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
-                                const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
-                                return (React.createElement("div", { key: m.id, className: "bg-[#0b0304] border border-red-950 p-3 rounded-xl space-y-2" },
-                                    React.createElement("div", { className: "flex justify-between text-[11px] text-amber-400 font-bold" },
-                                        React.createElement("span", null, m.stage),
-                                        React.createElement("span", null, m.status === 'finished' ? 'Terminé' : 'À venir')),
-                                    React.createElement("div", { className: "flex justify-between items-center text-xs" },
-                                        React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t1 }), t1.name),
-                                        React.createElement("span", { className: "font-mono font-bold text-white" }, m.score1 !== null ? `${m.score1} ${m.pens1 !== null ? `(${m.pens1} tab)` : ''}` : '-')),
-                                    React.createElement("div", { className: "flex justify-between items-center text-xs" },
-                                        React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t2 }), t2.name),
-                                        React.createElement("span", { className: "font-mono font-bold text-white" }, m.score2 !== null ? `${m.score2} ${m.pens2 !== null ? `(${m.pens2} tab)` : ''}` : '-'))));
-                            })),
-                        React.createElement("div", { className: "flex-1 space-y-3" },
-                            React.createElement("div", { className: "text-xs font-bold text-amber-400 uppercase tracking-wider text-center" }, "Grande Finale"),
-                            matches.filter(m => m.group === 'Phase Finale Principale' && m.stage === 'Grande Finale').map(m => {
-                                const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
-                                const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
-                                return (React.createElement("div", { key: m.id, className: "bg-[#0b0304] border border-amber-500/70 p-4 rounded-xl space-y-2.5 shadow-lg" },
-                                    React.createElement("div", { className: "flex justify-between text-xs text-amber-400 font-black" },
-                                        React.createElement("span", null,
-                                            "\uD83C\uDFC6 ",
-                                            m.stage),
-                                        React.createElement("span", null, m.status === 'finished' ? 'Terminé' : 'À venir')),
-                                    React.createElement("div", { className: "flex justify-between items-center text-sm" },
-                                        React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t1 }), t1.name),
-                                        React.createElement("span", { className: "font-mono font-black text-amber-300 text-base" }, m.score1 !== null ? `${m.score1} ${m.pens1 !== null ? `(${m.pens1} tab)` : ''}` : '-')),
-                                    React.createElement("div", { className: "flex justify-between items-center text-sm" },
-                                        React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t2 }), t2.name),
-                                        React.createElement("span", { className: "font-mono font-black text-amber-300 text-base" }, m.score2 !== null ? `${m.score2} ${m.pens2 !== null ? `(${m.pens2} tab)` : ''}` : '-'))));
-                            })))),
-                matches.some(m => m.group === 'Tournoi Consolante' || m.group === 'Tournoi Classement') && (React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
-                    React.createElement("h3", { className: "text-sm font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDF96 Matchs de classement par rang de poule"),
-                    React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, matches.filter(m => m.group === 'Tournoi Consolante' || m.group === 'Tournoi Classement').map(m => {
-                        const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
-                        const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
-                        return (React.createElement("div", { key: m.id, className: "bg-[#0b0304] border border-red-950 p-3.5 rounded-xl space-y-2" },
-                            React.createElement("div", { className: "flex justify-between text-xs text-cyan-400 font-bold" },
-                                React.createElement("span", null, m.stage),
-                                React.createElement("span", { className: "text-slate-400" }, m.status === 'finished' ? 'Terminé' : 'À venir')),
-                            React.createElement("div", { className: "flex justify-between items-center text-xs" },
-                                React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t1 }), t1.name),
-                                React.createElement("span", { className: "font-mono font-bold text-white" }, m.score1 !== null ? `${m.score1} ${m.pens1 !== null ? `(${m.pens1} tab)` : ''}` : '-')),
-                            React.createElement("div", { className: "flex justify-between items-center text-xs" },
-                                React.createElement("span", { className: "text-white font-bold inline-flex items-center gap-1.5" }, React.createElement(CsvTeamBadge, { team: t2 }), t2.name),
-                                React.createElement("span", { className: "font-mono font-bold text-white" }, m.score2 !== null ? `${m.score2} ${m.pens2 !== null ? `(${m.pens2} tab)` : ''}` : '-'))));
-                    })))))),
+            activeTab === 'bracket' && React.createElement(CsvV73Bracket, { matches, getTeam }),
             activeTab === 'stats' && (React.createElement("div", { className: "space-y-6" },
                 React.createElement("div", null,
                     React.createElement("h2", { className: "text-lg font-bold text-white mb-1" }, "\uD83D\uDD25 Statistiques du Tournoi"),
