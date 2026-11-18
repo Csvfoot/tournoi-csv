@@ -56,28 +56,28 @@ function CsvPublicExtras({tournament,fields}) {
     }
     const announcement=limited(cfg.announcement,260);
     return React.createElement('section',{className:'csv-extras-wrap space-y-3 mb-4',"aria-label":"Informations du tournoi"},
-        React.createElement('details',{className:'rounded-2xl border border-amber-700/30 bg-[#1b0a10] p-3 sm:p-4'},
-            React.createElement('summary',{className:'text-sm font-black text-amber-300 cursor-pointer min-h-[36px] flex items-center'},"ℹ️ Infos pratiques · terrains & journée"),
-            React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 text-sm'},
-                niceDay&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"📅 Date"),niceDay),
-                tournament?.category&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"🏆 Catégorie"),limited(tournament.category,50)),
+        React.createElement('details',{className:'csv-extras-details rounded-2xl border border-amber-700/30 bg-[#1b0a10] p-3 sm:p-4'},
+            React.createElement('summary',{className:'csv-extras-summary text-sm font-black text-amber-300 cursor-pointer min-h-[36px] flex items-center'},"ℹ️ Infos pratiques · terrains & journée"),
+            React.createElement('div',{className:'csv-extras-facts grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 text-sm'},
+                niceDay&&React.createElement('div',{className:'csv-extras-fact rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"📅 Date"),niceDay),
+                tournament?.category&&React.createElement('div',{className:'csv-extras-fact rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"🏆 Catégorie"),limited(tournament.category,50)),
                 names.length>0&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3 sm:col-span-2'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"🏟️ Terrains"),names.join(' · ')),
-                services.map((item,i)=>React.createElement('div',{key:item.label+i,className:'rounded-xl bg-[#2a1019] p-3'},
+                services.map((item,i)=>React.createElement('div',{key:item.label+i,className:'csv-extras-fact rounded-xl bg-[#2a1019] p-3'},
                   React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},item.icon?item.icon+' ':'',item.label),
                   React.createElement('span',{className:'text-slate-100'},item.detail))))),
-        announcement&&React.createElement('p',{className:'rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-100 font-medium'},'📢 '+announcement),
-        sponsors.length>0&&React.createElement('div',{className:'rounded-2xl border border-red-800/50 bg-[#210c13] p-3 sm:p-4'},
-            React.createElement('h3',{className:'font-black text-amber-300 text-sm mb-3'},"🤝 Les partenaires du tournoi"),
-            React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2'},
+        announcement&&React.createElement('p',{className:'csv-extras-announcement rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-100 font-medium'},'📢 '+announcement),
+        sponsors.length>0&&React.createElement('div',{className:'csv-extras-partners rounded-2xl border border-red-800/50 bg-[#210c13] p-3 sm:p-4'},
+            React.createElement('h3',{className:'csv-extras-partners-title font-black text-amber-300 text-sm mb-3'},"🤝 Les partenaires du tournoi"),
+            React.createElement('div',{className:'csv-extras-partner-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2'},
                 sponsors.map((item,i)=>{
                     const inside=React.createElement(React.Fragment,null,
                         item.logo?React.createElement('img',{src:item.logo,alt:'',loading:'lazy',decoding:'async',referrerPolicy:'no-referrer',
-                            onError:e=>e.currentTarget.style.display='none',className:'w-12 h-12 object-contain flex-shrink-0'}):
-                            React.createElement('span',{className:'rounded-lg bg-[#5e1c2a] w-12 h-12 flex items-center justify-center font-black text-amber-300 flex-shrink-0'},"★"),
+                            onError:e=>e.currentTarget.style.display='none',className:'csv-extras-partner-logo w-12 h-12 object-contain flex-shrink-0'}):
+                            React.createElement('span',{className:'csv-extras-partner-placeholder rounded-lg bg-[#5e1c2a] w-12 h-12 flex items-center justify-center font-black text-amber-300 flex-shrink-0'},"★"),
                         React.createElement('span',{className:'min-w-0 text-left'},
                             React.createElement('strong',{className:'block text-xs sm:text-sm text-white break-words'},item.name),
                             item.tier&&React.createElement('small',{className:'block text-amber-300 text-[11px]'},item.tier)));
-                    const cls='flex items-center gap-2 rounded-xl border border-amber-700/20 bg-[#30141e] p-2 min-h-[64px]';
+                    const cls='csv-extras-partner flex items-center gap-2 rounded-xl border border-amber-700/20 bg-[#30141e] p-2 min-h-[64px]';
                     return item.website
                        ?React.createElement('a',{key:item.name+i,href:item.website,target:'_blank',rel:'noopener noreferrer',referrerPolicy:'no-referrer',className:cls+' hover:border-amber-500'},inside)
                        :React.createElement('div',{key:item.name+i,className:cls},inside);
