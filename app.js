@@ -84,6 +84,73 @@ function CsvPublicExtras({tournament,fields}) {
                 }))));
 }
 
+/* V7.3 — commande tactile commune aux deux fenêtres de saisie de scores.
+   Aucun enregistrement déclenché par les boutons + / -, seul Enregistrer écrit. */
+function csvV73ScoreInput(raw) {
+    const value = String(raw);
+    if (value === '') return null;
+    if (!/^\d{1,3}$/.test(value)) return undefined;
+    const n = Number(value);
+    return Number.isSafeInteger(n) && n >= 0 && n <= 999 ? n : undefined;
+}
+function csvV73ScoreStep(value, delta) {
+    const n = value == null || value === '' ? 0 : Number(value);
+    const base = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+    return Math.max(0, Math.min(999, base + delta));
+}
+function CsvV73ScoreControl({team, value, onChange, disabled=false}) {
+    const name = team?.name || 'Équipe à déterminer';
+    const applyInput = e => {
+        const next = csvV73ScoreInput(e.target.value);
+        if (next !== undefined) onChange(next);
+    };
+    return React.createElement('div', {className:'csv-v73-score-control'},
+        React.createElement('div', {className:'csv-v73-team-label'},
+            React.createElement(CsvTeamBadge, {team}),
+            React.createElement('span', {title:name},name)),
+        React.createElement('div', {className:'csv-v73-score-steps'},
+            React.createElement('button', {
+                type:'button', disabled, className:'csv-v73-step',
+                'aria-label':'Retirer un but à '+name,
+                onClick:()=>onChange(csvV73ScoreStep(value,-1))
+            }, '−'),
+            React.createElement('input', {
+                type:'number', inputMode:'numeric', pattern:'[0-9]*', step:1, min:0, max:999,
+                value:value == null ? '' : value, placeholder:'—',
+                disabled, onChange:applyInput,
+                'aria-label':'Score de '+name,
+                className:'csv-v73-score-field'
+            }),
+            React.createElement('button', {
+                type:'button', disabled, className:'csv-v73-step',
+                'aria-label':'Ajouter un but à '+name,
+                onClick:()=>onChange(csvV73ScoreStep(value,1))
+            }, '+')));
+}
+function csvV73ConfirmMatchSave(match,getTeam) {
+    if (!match) return false;
+    const scoreFields=['score1','score2','pens1','pens2'];
+    for (const k of scoreFields) {
+        const v=match[k];
+        if (v !== null && v !== undefined && (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > 999)) {
+            window.alert('Score ou tirs au but invalide : entre un nombre entier entre 0 et 999.');
+            return false;
+        }
+    }
+    if (match.status === 'finished' && (match.score1 == null || match.score2 == null)) {
+        window.alert('Pour terminer le match, renseigne les deux scores, y compris les 0.');
+        return false;
+    }
+    const a=getTeam(match.team1Id)?.name || 'Équipe 1';
+    const b=getTeam(match.team2Id)?.name || 'Équipe 2';
+    const score=v=>v == null ? '—' : String(v);
+    const status=match.status === 'finished' ? 'Terminé' : match.status === 'live' ? 'En direct' : 'À venir';
+    return window.confirm('Confirmer l’enregistrement du match ?\n\n'+
+        a+'  '+score(match.score1)+' – '+score(match.score2)+'  '+b+
+        '\nStatut : '+status+
+        '\n\nLes scores et informations associés seront sauvegardés sur Firebase.');
+}
+
 const CSV_APP_VERSION = '7.2';
 // V7.1 sécurité calendrier : données saisies à ne jamais écraser.
 // Fonction pure, également utilisée pour les changements de poules.
@@ -1452,14 +1519,16 @@ function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goal
                     React.createElement("option", { value: "", disabled: true }, "Choisir le terrain"),
                     fields.map(f => React.createElement("option", { key: f.id, value: f.id }, f.name))),
                 !readOnlySchedule && React.createElement("span", { className: "mt-2 block text-[11px] text-slate-400" }, "Le changement est contr\u00F4l\u00E9 \u00E0 l'enregistrement. Si le terrain est occup\u00E9, utilise \u2194 dans le calendrier pour modifier aussi l'heure.")),
-            React.createElement("div", { className: "grid grid-cols-5 items-center bg-[#0b0304] p-3 rounded-xl border border-red-950 text-center" },
-                React.createElement("div", { className: "col-span-2" },
-                    React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team1Id).name),
-                    React.createElement("input", { type: "number", min: "0", value: (_a = editingMatch.score1) !== null && _a !== void 0 ? _a : '', placeholder: "0", onChange: (e) => setEditingMatch({ ...editingMatch, score1: e.target.value === '' ? null : parseInt(e.target.value) }), className: "w-16 h-12 bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl mx-auto block" })),
-                React.createElement("span", { className: "col-span-1 font-black text-amber-500 text-sm" }, "VS"),
-                React.createElement("div", { className: "col-span-2" },
-                    React.createElement("span", { className: "text-xs font-bold text-slate-300 block truncate mb-1" }, getTeam(editingMatch.team2Id).name),
-                    React.createElement("input", { type: "number", min: "0", value: (_b = editingMatch.score2) !== null && _b !== void 0 ? _b : '', placeholder: "0", onChange: (e) => setEditingMatch({ ...editingMatch, score2: e.target.value === '' ? null : parseInt(e.target.value) }), className: "w-16 h-12 bg-[#18080a] border border-red-900 text-center font-mono font-black text-2xl text-white rounded-xl mx-auto block" }))),
+            React.createElement('div', { className:'csv-v73-score-panel' },
+                React.createElement(CsvV73ScoreControl, {
+                    team:getTeam(editingMatch.team1Id), value:editingMatch.score1, disabled:saving,
+                    onChange:next=>setEditingMatch(old=>old?{...old,score1:next}:old)
+                }),
+                React.createElement('span', { className:'csv-v73-score-versus', 'aria-hidden':'true' }, '–'),
+                React.createElement(CsvV73ScoreControl, {
+                    team:getTeam(editingMatch.team2Id), value:editingMatch.score2, disabled:saving,
+                    onChange:next=>setEditingMatch(old=>old?{...old,score2:next}:old)
+                })),
             editingMatch.score1 !== null && editingMatch.score1 === editingMatch.score2 && editingMatch.group && (editingMatch.group.includes('Finale') || editingMatch.group.includes('Consolante') || editingMatch.group.includes('Classement') || editingMatch.group.includes('Élimination')) && (React.createElement("div", { className: "bg-[#1f0a0d] border-2 border-amber-500/70 p-3.5 rounded-xl space-y-2" },
                 React.createElement("div", { className: "flex items-center justify-between" },
                     React.createElement("span", { className: "text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5" }, "\uD83E\uDD45 Tirs au But obligatoires (\u00C9galit\u00E9)"),
@@ -1563,7 +1632,7 @@ function MatchDetailModal({ editingMatch, setEditingMatch, getTeam, fields, goal
                 saveError),
             React.createElement("div", { className: "csv-mobile-editor-actions flex justify-end gap-2 pt-2 border-t border-red-950" },
                 React.createElement("button", { onClick: onClose, className: "px-3 py-1.5 text-xs text-slate-400" }, "Annuler"),
-                React.createElement("button", { onClick: onSave, disabled: saving || (requireKnownTeams && (!editingMatch.team1Id || !editingMatch.team2Id)), className: "min-h-[44px] disabled:opacity-40 px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs" }, saving ? 'Enregistrement…' : 'Valider & Enregistrer')))));
+                React.createElement("button", { type:"button", onClick: () => { if (csvV73ConfirmMatchSave(editingMatch, getTeam)) onSave(); }, disabled: saving || (requireKnownTeams && (!editingMatch.team1Id || !editingMatch.team2Id)), className: "csv-v73-save-button min-h-[48px] disabled:opacity-40 px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs" }, saving ? 'Enregistrement…' : '✓ Vérifier et enregistrer')))));
 }
 // Les cartes restent compactes ; un clic ouvre la fenêtre habituelle.
 function DayEntryMatchCard({ event, match, teams, fields, onOpen }) {
