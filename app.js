@@ -4173,6 +4173,30 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     });
     // État pour l'ajout d'une nouvelle poule personnalisée
     const [newCustomGroupName, setNewCustomGroupName] = useState('');
+    // V7.4 — Renseignements publics, intégrés à la configuration existante.
+    const csvSaveInfo = (field, value) => {
+        if (userRole !== 'editor' || !requireHub()) return;
+        const updated = { ...config, [field]: String(value || '').slice(0, 1600) };
+        setConfig(updated);
+        broadcastUpdate(updated, fields, teams, matches);
+        showToast('Informations pratiques enregistrées.');
+    };
+    const csvSaveSponsors = raw => {
+        if (userRole !== 'editor' || !requireHub()) return;
+        const sponsors = String(raw || '').split('\n').map(x => {
+            const parts = x.split('|').map(p => p.trim());
+            return { name: (parts[0] || '').slice(0, 80),
+                logoUrl: csvSafeLogoUrl(parts[1] || ''),
+                url: /^https:\/\//i.test(parts[2] || '') ? parts[2].slice(0, 250) : '' };
+        }).filter(x => x.name).slice(0, 20);
+        const updated = { ...config, sponsors };
+        setConfig(updated);
+        broadcastUpdate(updated, fields, teams, matches);
+        showToast('Partenaires enregistrés.');
+    };
+    const [csvSponsorDraft, csvSetSponsorDraft] = useState(() =>
+        Array.isArray(config.sponsors) ? config.sponsors.map(x => [x.name || '', x.logoUrl || '', x.url || ''].join(' | ')).join('\n') : '');
+    const [csvPracticalDraft, csvSetPracticalDraft] = useState(() => config.practicalInfo || '');
     const activeGroupNames = useMemo(() => {
         if (config.format === 'round_robin')
             return ['Poule Unique'];
@@ -5809,6 +5833,22 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("span", { className: "text-slate-300" }, m.status === 'live' ? '🟢 En direct' : 'À venir'));
                         })))),
             activeTab === 'config' && userRole === 'editor' && (React.createElement("div", { className: "space-y-6" },
+                React.createElement("section", { className: "rounded-2xl border border-amber-700/50 bg-[#150709] p-4 space-y-3" },
+                    React.createElement("h2", { className: "text-base font-black text-amber-300" }, "🏪 Partenaires & informations pratiques"),
+                    React.createElement("p", { className: "text-xs text-slate-300" }, "Visible par les spectateurs de cette catégorie. Pour chaque sponsor : Nom | URL HTTPS du logo | URL HTTPS du site (une ligne par partenaire)."),
+                    React.createElement("label", { className: "text-xs text-amber-200 block" }, "Sponsors et partenaires",
+                        React.createElement("textarea", { className: "mt-1 w-full rounded-lg border border-red-900 bg-[#0b0304] p-3 text-sm text-white", rows: 4,
+                            value: csvSponsorDraft, onChange: e => csvSetSponsorDraft(e.target.value),
+                            placeholder: "Sponsor CSV | https://exemple.fr/logo.png | https://exemple.fr" })),
+                    React.createElement("button", { type: "button", onClick: () => csvSaveSponsors(csvSponsorDraft),
+                        className: "min-h-[44px] rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-black" }, "💾 Enregistrer les partenaires"),
+                    React.createElement("label", { className: "text-xs text-amber-200 block" }, "Buvette, restauration, consignes, stationnement, informations de la journée",
+                        React.createElement("textarea", { className: "mt-1 w-full rounded-lg border border-red-900 bg-[#0b0304] p-3 text-sm text-white", rows: 4,
+                            value: csvPracticalDraft, onChange: e => csvSetPracticalDraft(e.target.value),
+                            placeholder: "Buvette ouverte dès 9 h… / Stationnement… / Consignes…" })),
+                    React.createElement("button", { type: "button", onClick: () => csvSaveInfo('practicalInfo', csvPracticalDraft),
+                        className: "min-h-[44px] rounded-xl bg-amber-500 px-4 py-2 text-xs font-black text-black" }, "💾 Enregistrer les informations")),
+
                 React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-6" },
                     React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2" },
                         React.createElement("div", null,
@@ -6048,6 +6088,18 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
                 userRole === 'viewer' && React.createElement(CsvSpectatorSummary, { matches, teams, category: tournament.category }),
+                userRole === 'viewer' && (Boolean(config.practicalInfo) || (Array.isArray(config.sponsors) && config.sponsors.length > 0)) &&
+                    React.createElement("section", { className: "rounded-2xl border border-red-900/60 bg-[#150709] p-4 space-y-3" },
+                        React.createElement("h2", { className: "text-sm font-black text-amber-300" }, "📍 Infos & partenaires du CSV"),
+                        config.practicalInfo && React.createElement("p", { className: "text-sm text-slate-200 whitespace-pre-wrap" }, config.practicalInfo),
+                        Array.isArray(config.sponsors) && React.createElement("div", { className: "flex flex-wrap gap-3" },
+                            config.sponsors.map((sp, i) => React.createElement("div", { key: i, className: "rounded-xl border border-amber-900/50 p-3 bg-[#0b0304] flex items-center gap-2" },
+                                csvSafeLogoUrl(sp.logoUrl) && React.createElement("img", { src: csvSafeLogoUrl(sp.logoUrl),
+                                    alt: "Logo " + sp.name, loading: "lazy", referrerPolicy: "no-referrer", className: "w-12 h-12 rounded-lg object-contain bg-white" }),
+                                sp.url && /^https:\/\//i.test(sp.url) ? React.createElement("a", { href: sp.url, target: "_blank", rel: "noopener noreferrer",
+                                    className: "text-sm text-amber-300 underline" }, sp.name) :
+                                    React.createElement("span", { className: "text-sm text-white font-bold" }, sp.name || 'Partenaire'))))),
+
                 React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3" },
                     React.createElement("div", null,
                         React.createElement("h2", { className: "text-base sm:text-lg font-bold text-white" }, userRole === 'viewer' ? '⚽ Matchs et résultats' : 'Calendrier & Scores'),
