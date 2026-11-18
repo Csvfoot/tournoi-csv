@@ -169,3 +169,23 @@ test('Prévisualisation: page non connectée, CSP strict et scripts valides', ()
   for(const code of blocks)new vm.Script(code);
   new vm.Script(previewBoot);
 });
+
+test('Prévisualisation: répartition des équipes et rencontres dans les bonnes poules', () => {
+  const storage = previewFixture().window.localStorage;
+  for (const [prefix, expected] of [['cslv_',4],['cslv_mt_u11_apercu_',2]]) {
+    const teams=JSON.parse(storage.getItem(prefix+'teams'));
+    const matches=JSON.parse(storage.getItem(prefix+'matches'));
+    const groups=Array.from(new Set(teams.map(t=>t.group))).sort();
+    assert.equal(groups.length,expected,'Nombre de poules');
+    assert.deepEqual(groups,Array.from({length:expected},(_,i)=>'Poule '+String.fromCharCode(65+i)));
+    for(const group of groups){
+      assert.equal(teams.filter(t=>t.group===group).length,4,group+' doit avoir 4 équipes');
+      assert.equal(matches.filter(m=>m.group===group).length,6,group+' doit avoir 6 rencontres');
+    }
+    const teamById=new Map(teams.map(t=>[t.id,t]));
+    for(const match of matches){
+      assert.equal(teamById.get(match.team1Id)?.group,match.group,match.id+' équipe 1');
+      assert.equal(teamById.get(match.team2Id)?.group,match.group,match.id+' équipe 2');
+    }
+  }
+});
