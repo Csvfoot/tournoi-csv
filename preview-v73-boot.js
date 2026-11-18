@@ -64,6 +64,45 @@
           });
         }
       }
+      // Tableaux fictifs conformes au format CSV : seuls les emplacements sont
+      // définis. Aucune qualification n'est calculée avant la fin des poules.
+      const rank=(letter,place)=>({kind:'rank',group:'Poule '+letter,position:place-1});
+      const winner=matchId=>({kind:'winner',matchId:id+'-'+matchId});
+      const loser=matchId=>({kind:'loser',matchId:id+'-'+matchId});
+      const phase=(key,stage,group,source1,source2)=>{
+        const name=src=>src.kind==='rank'
+          ?(src.position+1)+'e '+src.group
+          :(src.kind==='winner'?'Vainqueur':'Perdant')+' du match précédent';
+        matches.push({
+          id:id+'-'+key,group,stage,source1,source2,
+          team1Id:null,team2Id:null,
+          placeholder1:name(source1),placeholder2:name(source2),
+          score1:null,score2:null,pens1:null,pens2:null,
+          status:'pending',events:[]
+        });
+      };
+      if(pools===4){
+        // Quarts croisés : A1-B2, B1-A2, C1-D2, D1-C2.
+        phase('ko-q1','Quart de Finale 1','Phase Finale Principale',rank('A',1),rank('B',2));
+        phase('ko-q2','Quart de Finale 2','Phase Finale Principale',rank('B',1),rank('A',2));
+        phase('ko-q3','Quart de Finale 3','Phase Finale Principale',rank('C',1),rank('D',2));
+        phase('ko-q4','Quart de Finale 4','Phase Finale Principale',rank('D',1),rank('C',2));
+        phase('ko-semi-1','Demi-Finale 1','Phase Finale Principale',winner('ko-q1'),winner('ko-q3'));
+        phase('ko-semi-2','Demi-Finale 2','Phase Finale Principale',winner('ko-q2'),winner('ko-q4'));
+      } else {
+        phase('ko-semi-1','Demi-Finale 1','Phase Finale Principale',rank('A',1),rank('B',2));
+        phase('ko-semi-2','Demi-Finale 2','Phase Finale Principale',rank('B',1),rank('A',2));
+      }
+      phase('ko-final','Grande Finale','Phase Finale Principale',winner('ko-semi-1'),winner('ko-semi-2'));
+      phase('ko-bronze','Match 3ème / 4ème place','Phase Finale Principale',loser('ko-semi-1'),loser('ko-semi-2'));
+      // Pour les 3e et 4e de chaque poule : matchs de classement sans faux scores.
+      for(const place of [3,4]){
+        for(let gi=0;gi<pools;gi+=2){
+          const a=letters[gi],b=letters[gi+1];
+          phase('rank-'+place+'-'+a+b,'Classement '+place+'e de poule — '+a+' / '+b,
+            'Tournoi Classement',rank(a,place),rank(b,place));
+        }
+      }
       const config={
         name:'Prévisualisation '+category+' (données fictives)',
         format:'groups_knockout',numberOfGroups:pools,
@@ -88,7 +127,7 @@
     // Ce drapeau n'est activé qu'après isolation effective du stockage.
     window.CSV_V73_ISOLATED_PREVIEW = true;
     window.CSV_V73_PREVIEW_BOOT_OK = true;
-    window.CSV_V73_PREVIEW_SUMMARY = Object.freeze({events:catalog.length,teams:24,matches:36,date,storage:'mémoire uniquement',firebase:false});
+    window.CSV_V73_PREVIEW_SUMMARY = Object.freeze({events:catalog.length,teams:24,matches:36,finalMatches:catalog.length===2?18:0,date,storage:'mémoire uniquement',firebase:false});
   } catch (error) {
     fail(error?.message || error);
   }
