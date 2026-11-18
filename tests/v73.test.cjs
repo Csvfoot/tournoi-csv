@@ -219,3 +219,16 @@ test('Prévisualisation: tableau principal et classements fictifs préparés, sa
   assert.equal(quarter.source2.group,'Poule B');
   assert.equal(quarter.source2.position,1);
 });
+
+test('Finales: le filtre visuel affiche le match pour la troisième place même avec un identifiant préfixé', () => {
+  assert.match(app, /m\.id === 'ko-bronze' \|\| \/3\(\?:ème\|e\)/);
+  const sample=JSON.parse(previewFixture().window.localStorage.getItem('cslv_matches'));
+  const bronze=sample.find(m=>m.stage==='Match 3ème / 4ème place');
+  assert.ok(bronze);
+  assert.notEqual(bronze.id,'ko-bronze');
+  const display=m=>m.group==='Phase Finale Principale' &&
+    (m.stage.includes('Quart') || m.stage.includes('Demi') ||
+     m.stage.includes('Huitième') || m.id==='ko-bronze' ||
+     /3(?:ème|e)\s*\/\s*4/.test(m.stage||''));
+  assert.equal(display(bronze),true);
+});
