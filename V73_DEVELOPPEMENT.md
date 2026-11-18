@@ -110,3 +110,11 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Correctif d'interface dans `app.js` : titre « Classement général provisoire » lorsque `finalTable.finished` est faux ; aucun podium ni surlignage de médaillés avant la fin de toutes les rencontres. Une fois le calendrier achevé, titre final et médailles reviennent.
 - Aucun changement de calcul de points, de résultats, d'affectation d'équipe ou de Firebase. Test de non-régression ajouté dans `tests/v73.test.cjs`.
 - À revoir dans une évolution ultérieure : présenter explicitement le classement provisoire par niveau de qualification, éviter de faire passer une position inter-poules pour une place définitive.
+
+## Étape 12 — retours ergonomie iPhone 16 (18 novembre 2026)
+- Test sur format 393×852 : « Mon club » au lieu de « Mon équipe » ; le changement U10/U11 réinitialisait l’onglet « Poules », « Finales » ou « Statistiques » sur « Matchs » ; les finales fictives sans horaire s’affichaient avant les matchs de poule.
+- **Libellé** : navigation mobile spectateur toujours « Mon équipe ».
+- **Onglet conservé** : `viewerActiveTab` déplacé au niveau de `MultiTournamentShell`, transmis à `TournamentApp` et mis à jour lors des clics dans les navigations spectateur desktop, mobile et menu « Plus ». Il reste en mémoire lors du changement de catégorie. Les raccourcis de l’accueil continuent d’ouvrir volontairement l’écran demandé ; un ancien raccourci est effacé lorsqu’on choisit une autre catégorie.
+- **Ordre des matchs** : ajout de `csvViewerMatchOrder`, qui trie d'abord les matchs avec horaire valide `HH:mm`, puis les rencontres sans horaire. Cette correction ne change pas les horaires ni l’ordre enregistré dans Firebase. La vue chronologique et la vue par terrain l’emploient.
+- Deux tests de non-régression ajoutés dans `tests/v73.test.cjs` : continuité d’onglet et priorité aux matchs planifiés.
+- Scripts relus sur GitHub, syntaxe JavaScript contrôlée ; validation réelle sur Mac/iPhone **à refaire après téléchargement du nouvel artefact**.
