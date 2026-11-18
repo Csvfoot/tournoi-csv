@@ -2365,9 +2365,41 @@ function MultiTournamentShell() {
             setPublicationNotice('Une connexion Firebase active est nécessaire pour publier ou masquer une journée.');
             return;
         }
+        // Diagnostic non destructif sur toutes les catégories de la journée.
+        // Ne jamais publier des créneaux contradictoires ou des données non chargées.
+        if (!currentlyPublic) {
+            const selected = catalog.filter(e => e.date === date);
+            const missing = selected.filter(e => !loadedDocs[e.id]);
+            if (missing.length) {
+                setPublicationNotice('Publication bloquée : attendre le chargement complet des ' + missing.length + ' catégorie(s).');
+                return;
+            }
+            const all = selected.flatMap(e => {
+                const data = records[e.id] || {};
+                const eventMatches = (data.matches || []).filter(m => m.kind !== 'reservation' && m.kind !== 'réservation');
+                const reserved = (data.config && data.config.reservedSlots || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }));
+                return eventMatches.map(m => ({ ...m, eventId: e.id, kind: 'match' })).concat(reserved);
+            });
+            const missingSchedule = all.filter(m => m.kind === 'match' && (!m.fieldId || !m.startTime || !m.endTime)).length;
+            const invalidScores = all.filter(m => m.kind === 'match' && m.status === 'finished' &&
+                (!Number.isFinite(Number(m.score1)) || !Number.isFinite(Number(m.score2)) ||
+                 m.score1 == null || m.score2 == null)).length;
+            let conflicts = 0;
+            for (let i = 0; i < all.length; i++) {
+                for (let j = i + 1; j < all.length; j++) {
+                    if (planningConflict(all[i], all[j])) conflicts++;
+                }
+            }
+            if (conflicts || missingSchedule || invalidScores) {
+                setPublicationNotice('⚠ Publication bloquée : ' + conflicts + ' conflit(s), ' +
+                    missingSchedule + ' match(s) sans terrain/horaire, ' + invalidScores +
+                    ' score(s) terminés incohérents. Corriger le planning général avant publication.');
+                return;
+            }
+        }
         if (!window.confirm(currentlyPublic
             ? `Masquer toute la journée du ${csvReadableDay(date)} aux spectateurs ?`
-            : `Publier toutes les catégories du ${csvReadableDay(date)} pour les spectateurs ?`))
+            : `Vérification terminée. Publier toutes les catégories du ${csvReadableDay(date)} pour les spectateurs ?`))
             return;
         const next = catalog.map(e => e.date === date ? { ...e, published: !currentlyPublic } : e);
         try {
