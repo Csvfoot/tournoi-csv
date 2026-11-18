@@ -5765,13 +5765,21 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         userRole === 'viewer' && (React.createElement("nav", { "aria-label": "Navigation spectateur", className: "xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
             React.createElement("div", { className: "flex items-stretch justify-around gap-1 px-2 pt-2" }, [
                 { id: 'matches', icon: '📅', text: 'Matchs' },
-                { id: 'myTeam', icon: '👟', text: 'Mon équipe' },
+                { id: 'myTeam', icon: '👟', text: teams.some(t => t.id === viewerTeamId) ? 'Mon club' : 'Mon équipe' },
                 { id: 'standings', icon: '📊', text: 'Poules' },
                 ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []),
                 { id: 'more', icon: '☰', text: 'Plus' }
             ].map(tab => (React.createElement("button", { type: "button", key: tab.id, "aria-current": activeTab === tab.id ? 'page' : undefined, onClick: () => {
-                    if (tab.id === 'myTeam')
-                        setTeamPickerOpen(true);
+                    if (tab.id === 'myTeam') {
+                        const savedTeam = teams.find(t => t.id === viewerTeamId);
+                        if (savedTeam) {
+                            setSelectedTeamSchedule(savedTeam);
+                            setTeamPickerOpen(false);
+                        } else {
+                            setTeamPickerOpen(true);
+                        }
+                        setViewerMoreOpen(false);
+                    }
                     else if (tab.id === 'more')
                         setViewerMoreOpen(v => !v);
                     else {
@@ -6051,7 +6059,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             React.createElement("div", null,
                                 React.createElement("h3", { className: "font-bold text-white text-sm sm:text-base" }, selectedTeamSchedule.name),
                                 React.createElement("span", { className: "text-xs text-amber-400 font-medium" }, "Calendrier officiel"))),
-                        React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "text-slate-400 hover:text-white p-1" }, "\u2715")),
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("button", { type: "button", onClick: () => { setSelectedTeamSchedule(null); setTeamPickerOpen(true); }, className: "min-h-[44px] px-3 text-xs rounded-lg border border-amber-500/50 bg-red-950 text-amber-200 font-bold" }, "Changer d’équipe"),
+                            React.createElement("button", { type: "button", "aria-label": "Fermer le calendrier", onClick: () => setSelectedTeamSchedule(null), className: "min-w-[44px] min-h-[44px] text-slate-200 text-xl" }, "\u2715"))),
                     (() => {
                         const teamMatches = sortedMatchesForTeam(matches, selectedTeamSchedule.id);
                         const analysis = teamScheduleDiagnostics(teamMatches);
