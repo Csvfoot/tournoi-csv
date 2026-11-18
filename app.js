@@ -1638,42 +1638,50 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
 }
 // V6.9 — La page de garde utilise le catalogue PUBLIC existant, jamais une copie de données.
 // Elle est réservée au raccourci spectateur : les liens QR datés gardent l'accès direct.
-function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline, onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing }) {
-    const canEnter = events.length > 0;
-    return React.createElement("main", { className: "csv-welcome", role: "main", "aria-label": "Accueil CSV Spectateur" },
-        React.createElement("div", { className: "csv-welcome-glow", "aria-hidden": "true" }),
-        React.createElement("section", { className: "csv-welcome-content" },
-            React.createElement("header", { className: "csv-welcome-header" },
-                React.createElement("div", { className: "csv-welcome-logo" }, React.createElement(ClubLogo, { className: "csv-welcome-blason" })),
-                React.createElement("span", { className: "csv-welcome-eyebrow" }, "CS LA VERPILLIÈRE"),
-                React.createElement("h1", { className: "csv-welcome-title" }, "Bienvenue au", React.createElement("span", null, " Tournoi CSV")),
-                React.createElement("p", { className: "csv-welcome-subtitle" }, "Suivez les rencontres et les résultats de votre journée, simplement.")),
-            React.createElement("div", { className: "csv-welcome-program" },
-                React.createElement("div", { className: "csv-welcome-date-caption" }, "📅 JOURNÉE DU TOURNOI"),
-                dates.length > 1 ? React.createElement("label", { className: "csv-welcome-date-select-wrap" },
-                    React.createElement("span", { className: "sr-only" }, "Choisir une journée publiée"),
-                    React.createElement("select", { className: "csv-welcome-date-select", value: day || '', onChange: e => onChooseDay(e.target.value), "aria-label": "Journée publiée" }, dates.map(date => React.createElement("option", { value: date, key: date }, csvReadableDay(date))))) :
-                    React.createElement("div", { className: "csv-welcome-date-text" }, day ? csvReadableDay(day) : "Programme à venir"),
-                canEnter ? React.createElement("div", { className: "csv-welcome-categories", role: "group", "aria-label": "Catégorie du tournoi" },
-                    events.map(event => React.createElement("button", { type: "button", key: event.id, onClick: () => onChooseCategory(event.id),
-                        "aria-pressed": event.id === activeId, className: "csv-welcome-category" + (event.id === activeId ? " csv-welcome-category-selected" : "") }, event.category))) :
-                    React.createElement("p", { className: "csv-welcome-empty", role: "status" }, isLoading ? "⏳ Récupération des journées publiées…" : "Aucune journée publiée disponible pour le moment.")),
-            React.createElement("nav", { className: "csv-welcome-actions", "aria-label": "Accès rapides spectateur" },
-                React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-primary", disabled: !canEnter || isLoading, onClick: () => onOpen('program') },
-                    React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "📅"),
-                    React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Voir le programme"), React.createElement("small", null, "Horaires et terrains")),
-                    React.createElement("span", { className: "csv-welcome-button-arrow", "aria-hidden": "true" }, "›")),
-                React.createElement("div", { className: "csv-welcome-secondary-grid" },
-                    React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-secondary", disabled: !canEnter || isLoading, onClick: () => onOpen('team') },
-                        React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "👟"),
-                        React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Mon équipe"), React.createElement("small", null, "Tous ses matchs"))),
-                    React.createElement("button", { type: "button", className: "csv-welcome-button csv-welcome-button-secondary", disabled: !canEnter || isLoading, onClick: () => onOpen('results') },
-                        React.createElement("span", { className: "csv-welcome-button-symbol", "aria-hidden": "true" }, "🏆"),
-                        React.createElement("span", { className: "csv-welcome-button-copy" }, React.createElement("strong", null, "Résultats"), React.createElement("small", null, "Scores et classements"))))),
-            React.createElement("footer", { className: "csv-welcome-footer" },
-                React.createElement("span", null, "⚽ Bonne journée à toutes les équipes !"),
-                !isLoading && !canEnter && React.createElement("button", { type: "button", className: "csv-welcome-refresh", disabled: refreshing, onClick: onRefresh }, refreshing ? "Actualisation…" : "↻ Actualiser le programme"),
-                offline && React.createElement("span", { className: "csv-welcome-offline" }, "Dernier programme enregistré sur cet appareil"))));
+// V7.4 — Accueil spectator : même design que la maquette, vraies données Firebase.
+function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
+    onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing, records, fields }) {
+    const available = events.length > 0;
+    const active = events.find(e => e.id === activeId) || events[0] || null;
+    const rec = active && records ? records[active.id] : null;
+    const config = rec && rec.config || {};
+    const teams = rec && Array.isArray(rec.teams) ? rec.teams : [];
+    const matches = rec && Array.isArray(rec.matches) ? rec.matches : [];
+    return React.createElement('main',{className:'csv-v74-welcome',role:'main','aria-label':'Accueil CSV Spectateur'},
+        React.createElement('div',{className:'csv-v74-welcome-inner'},
+            React.createElement('div',{className:'csv-v74-public-note'}, '⚽ CLUB SPORTIF LA VERPILLIÈRE · 1939'),
+            React.createElement('header',{className:'csv-v74-welcome-header'},
+                React.createElement(ClubLogo,{className:'w-14 h-14 sm:w-20 sm:h-20'}),
+                React.createElement('div',null,
+                    React.createElement('small',null,'CLUB SPORTIF LA VERPILLIÈRE · 1939'),
+                    React.createElement('h1',null,'TOURNOI CSV'))),
+            React.createElement('nav',{className:'csv-v74-quicknav','aria-label':'Navigation rapide'},
+                [['🏠 Accueil',null],['⭐ Mon équipe','team'],['📅 Calendrier','program'],['🏆 Résultats','results']]
+                    .map(([label,action])=>React.createElement('button',{
+                        key:label,type:'button',disabled:action&&!available,
+                        className:action?'':'csv-v74-active',
+                        onClick:()=>action&&onOpen(action)},label))),
+            React.createElement('div',{className:'csv-v74-welcome-choices'},
+                React.createElement('div',null,
+                    React.createElement('strong',null,'📅 JOURNÉE DU TOURNOI'),
+                    dates.length>1 ? React.createElement('select',{value:day||'',onChange:e=>onChooseDay(e.target.value),'aria-label':'Choisir la journée'},
+                        dates.map(d=>React.createElement('option',{key:d,value:d},csvReadableDay(d)))):
+                        React.createElement('span',null,day?csvReadableDay(day):'Programme à venir')),
+                React.createElement('div',{className:'csv-v74-category-pills'},
+                    events.map(e=>React.createElement('button',{type:'button',key:e.id,
+                        'aria-pressed':e.id===activeId,onClick:()=>onChooseCategory(e.id),
+                        className:e.id===activeId?'csv-v74-category-active':''},e.category)))),
+            offline&&React.createElement('p',{className:'csv-v74-welcome-status'},'📴 Programme hors ligne : dernières informations enregistrées sur cet appareil.'),
+            isLoading&&React.createElement('p',{className:'csv-v74-welcome-status'},'⏳ Synchronisation du programme…'),
+            available&&active ? React.createElement(CsvVisualHome,{
+                tournament:active,matches,teams,fields:fields||[],config,
+                onNavigate:()=>onOpen('program'),onChooseTeam:()=>onOpen('team')}) :
+                React.createElement('div',{className:'csv-v74-panel'},
+                    React.createElement('h2',null,'Aucune journée publiée pour le moment'),
+                    React.createElement('p',null,'Le programme sera disponible après publication par les organisateurs.'),
+                    React.createElement('button',{type:'button',className:'csv-v74-link',disabled:refreshing,onClick:onRefresh},
+                        refreshing?'Actualisation…':'↻ Actualiser le programme'))
+        ));
 }
 
 function MultiTournamentShell() {
@@ -3272,6 +3280,7 @@ function MultiTournamentShell() {
         const welcomeLoading = netOnline && !catalogSynced && hubStatus !== 'error';
         return React.createElement(CsvSpectatorWelcome, {
             day: viewerDay, dates: publishedDays, events: publicEvents,
+            records, fields: sharedFields,
             activeId: current ? current.id : '',
             isLoading: welcomeLoading, offline: !netOnline || hubStatus === 'error',
             onChooseDay: selectPublicDay,
@@ -4053,7 +4062,7 @@ function CsvSpectatorSummary({ matches, teams, category }) {
 function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
     var _a, _b, _c, _d;
     // Conserve l'onglet spectateur lors d'un changement de catégorie.
-    const viewerTabStorageKey = 'csv_spectator_selected_tab_v73';
+    const viewerTabStorageKey = 'csv_spectator_selected_tab_v74';
     const [activeTab, setActiveTabState] = useState(() => {
         if (hubIsEditor) return requestedOrganizerTab || 'dashboard';
         try {
