@@ -1,4 +1,26 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
+// V7.3 - Logo d'equipe facultatif (spectateur et organisateur).
+// Priorite au logo HTTPS valide ; en son absence, ancienne pastille de couleur.
+function CsvTeamBadge({team, large=false}) {
+    const dot = React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: team?.color || '#c44454' } });
+    const src = typeof team?.logoUrl === 'string' ? team.logoUrl.trim() : '';
+    let safeUrl = '';
+    try {
+        if (src === './icon-512.png' || (/^\.\/logos\/[a-zA-Z0-9_./-]+\.(png|jpe?g|webp)$/i.test(src) && !src.includes('..'))) safeUrl = src;
+        else if (src.length <= 1500 && /^https:\/\//i.test(src)) {
+            const u = new URL(src);
+            if (!u.username && !u.password && /\.(png|jpe?g|webp)$/i.test(u.pathname)) safeUrl = u.href;
+        }
+    } catch (_) {}
+    if (!safeUrl) return dot;
+    const size = large ? 36 : 24;
+    return React.createElement('span', { className: 'relative inline-flex flex-shrink-0 items-center justify-center', style: { width: size, height: size } },
+        dot,
+        React.createElement('img', { src: safeUrl, alt: '', loading: 'lazy', decoding: 'async', referrerPolicy: 'no-referrer',
+            style: { position: 'absolute', width: '100%', height: '100%', objectFit: 'contain' },
+            onError: e => { e.currentTarget.style.display = 'none'; } }));
+}
+
 const CSV_APP_VERSION = '7.2';
 // V7.1 sécurité calendrier : données saisies à ne jamais écraser.
 // Fonction pure, également utilisée pour les changements de poules.
@@ -5864,7 +5886,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 React.createElement("div", { className: "bg-[#150709] border border-amber-500/60 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[94dvh] overflow-y-auto overscroll-contain" },
                     React.createElement("div", { className: "flex items-center justify-between pb-3 border-b border-red-950" },
                         React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-8 h-8 rounded-lg flex items-center justify-center font-black text-slate-950 text-xs shadow-md", style: { backgroundColor: selectedTeamSchedule.color } }, selectedTeamSchedule.name.substring(0, 2).toUpperCase()),
+                            React.createElement(CsvTeamBadge, { team: selectedTeamSchedule, large: true }),
                             React.createElement("div", null,
                                 React.createElement("h3", { className: "font-bold text-white text-sm sm:text-base" }, selectedTeamSchedule.name),
                                 React.createElement("span", { className: "text-xs text-amber-400 font-medium" }, "Calendrier officiel"))),
@@ -6023,12 +6045,12 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                             m.stage || 'Match')),
                                     React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                                         React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
-                                            React.createElement("span", { className: "w-2 h-2 rounded-full flex-shrink-0", style: { backgroundColor: t1.color } }),
+                                            React.createElement(CsvTeamBadge, { team: t1 }),
                                             React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t1.name)),
                                         React.createElement("div", { className: "bg-[#18080a] px-2 py-0.5 rounded border border-red-900 font-mono font-black text-amber-300 text-xs sm:text-sm flex-shrink-0 whitespace-nowrap min-w-[48px] text-center shadow-inner" }, m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'),
                                         React.createElement("div", { className: "flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right" },
                                             React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t2.name),
-                                            React.createElement("span", { className: "w-2 h-2 rounded-full flex-shrink-0", style: { backgroundColor: t2.color } }))),
+                                            React.createElement(CsvTeamBadge, { team: t2 }))),
                                     React.createElement("div", { className: "flex justify-between items-center pt-1 border-t border-red-950/60 text-[9px] sm:text-[10px]" },
                                         React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● En direct' : m.status === 'finished' ? 'Terminé' : 'À venir'),
                                         userRole === 'editor' && (React.createElement("div", { className: "flex items-center gap-1" },
@@ -6066,12 +6088,12 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● Live' : m.status === 'finished' ? 'Terminé' : 'À venir'))),
                         React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                             React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
-                                React.createElement("span", { className: "w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t1.color } }),
+                                React.createElement(CsvTeamBadge, { team: t1 }),
                                 React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t1.name)),
                             React.createElement("div", { className: "bg-[#0b0304] px-2.5 py-1 rounded border border-red-950 font-mono font-black text-white text-xs sm:text-base flex-shrink-0 whitespace-nowrap min-w-[54px] text-center shadow-md" }, m.score1 !== null && m.score2 !== null ? `${m.score1} - ${m.score2}` : 'VS'),
                             React.createElement("div", { className: "flex items-center justify-end gap-1.5 flex-1 min-w-0 text-right" },
                                 React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t2.name),
-                                React.createElement("span", { className: "w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t2.color } }))),
+                                React.createElement(CsvTeamBadge, { team: t2 }))),
                         userRole === 'editor' && (React.createElement("button", { type: "button", className: "sm:hidden mt-2 min-h-[44px] w-full rounded-lg border border-amber-600/30 bg-amber-950/30 text-amber-200 text-xs font-bold touch-manipulation", onClick: e => { e.stopPropagation(); setEditingMatch(JSON.parse(JSON.stringify(m))); setGoalTeamId(m.team1Id || ''); setCardTeamId(m.team1Id || ''); } }, "\u270F\uFE0F Saisir ou modifier ce match")),
                         userRole === 'editor' && m.mvp && (React.createElement("div", { className: "mt-1.5 pt-1 border-t border-red-950/70 text-[11px] text-amber-300" },
                             "\u2B50 Homme du Match : ",
@@ -6111,7 +6133,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             const currentGrp = t.group || activeGroupNames[0];
                             return (React.createElement("div", { key: t.id, className: "bg-[#0b0304] border border-red-950 p-2 rounded-xl flex items-center justify-between gap-1.5" },
                                 React.createElement("div", { className: "flex items-center gap-1.5 min-w-0" },
-                                    React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: t.color } }),
+                                    React.createElement(CsvTeamBadge, { team: t }),
                                     React.createElement("span", { className: "font-bold text-white text-xs truncate" }, t.name)),
                                 React.createElement("select", { value: currentGrp, onChange: (e) => handleAssignTeamToGroup(t.id, e.target.value), className: "bg-[#18080a] border border-red-900/60 text-[10px] font-bold text-amber-300 rounded px-1.5 py-1 focus:outline-none focus:border-amber-500" }, activeGroupNames.map(grp => (React.createElement("option", { key: grp, value: grp }, grp))))));
                         }))))),
@@ -6413,7 +6435,7 @@ function StandingsTable({ standings }) {
                     React.createElement("span", { className: `inline-flex items-center justify-center w-5 h-5 rounded ${idx === 0 ? 'bg-amber-400 text-slate-950 font-black' : idx === 1 ? 'bg-red-900 text-amber-200' : 'text-slate-500'}` }, idx + 1)),
                 React.createElement("td", { className: "py-2.5 px-2" },
                     React.createElement("div", { className: "flex items-center gap-2" },
-                        React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: r.team.color } }),
+                        React.createElement(CsvTeamBadge, { team: r.team }),
                         React.createElement("span", { className: "font-bold text-white truncate" }, r.team.name))),
                 React.createElement("td", { className: "py-2.5 px-1 text-center font-black text-amber-300 bg-amber-500/10" }, r.points),
                 React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-300" }, r.played),
