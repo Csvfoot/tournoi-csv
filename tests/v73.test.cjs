@@ -264,3 +264,55 @@ test('Programme: les matchs programmés passent avant les finales sans heure', (
   assert.equal(rows.slice(2).every(m=>!m.startTime),true);
   assert.match(app, /visibleMatches\.slice\(\)\s*\.sort\(csvViewerMatchOrder\)/);
 });
+
+
+test('Arbre V7.3 : tours visibles, 3e place séparée et navigation mobile', () => {
+  const start=app.indexOf('function CsvV73Bracket(');
+  const end=app.indexOf('\nfunction TournamentApp(',start);
+  assert.ok(start>=0 && end>start);
+  const ReactMock={
+    Fragment:'fragment',
+    useState:()=>['first',()=>{}],
+    createElement:(type,props,...children)=>({type,props:props||{},children})
+  };
+  const ctx=vm.createContext({React:ReactMock,CsvTeamBadge:function TestBadge(){}});
+  vm.runInContext(app.slice(start,end)+'\nthis.drawBracket=CsvV73Bracket;',ctx);
+  const input=[
+    {id:'q1',group:'Phase Finale Principale',stage:'Quart de Finale 1',status:'pending',placeholder1:'1e Poule A',placeholder2:'2e Poule B'},
+    {id:'q2',group:'Phase Finale Principale',stage:'Quart de Finale 2',status:'pending'},
+    {id:'s1',group:'Phase Finale Principale',stage:'Demi-Finale 1',status:'pending'},
+    {id:'f1',group:'Phase Finale Principale',stage:'Grande Finale',status:'pending'},
+    {id:'bronze',group:'Phase Finale Principale',stage:'Match 3ème / 4ème place',status:'pending'},
+    {id:'class1',group:'Tournoi Classement',stage:'Classement 3e de poule',status:'pending'}
+  ];
+  const output=ctx.drawBracket({matches:input,getTeam:id=>({name:id})});
+  const nodes=[];
+  const visit=x=>{
+    if(Array.isArray(x)){for(const v of x)visit(v);return;}
+    if(x && typeof x==='object' && 'type' in x){nodes.push(x);visit(x.children);}
+  };
+  visit(output);
+  const matching=className=>nodes.filter(n=>n.props.className===className);
+  assert.equal(matching('csv-v73-bracket-mobile-nav').length,1);
+  assert.equal(matching('csv-v73-bracket-desktop').length,1);
+  assert.equal(matching('csv-v73-bracket-mobile').length,1);
+  assert.equal(matching('csv-v73-bracket-extras').length,2,'3e place et classements restent séparés');
+  assert.ok(matching('csv-v73-bracket-match').length>=6);
+  const text=JSON.stringify(output);
+  assert.match(text,/1e Poule A/);
+  assert.match(text,/Match pour la 3ᵉ place/);
+  assert.match(text,/Quarts de finale/);
+  assert.match(text,/Demi-finales/);
+  assert.match(text,/Grande finale/);
+  assert.match(app,/activeTab === 'bracket' && React\.createElement\(CsvV73Bracket, \{ matches, getTeam \}\)/);
+});
+test('Arbre V7.3 : styles responsive branchés sur les écrans spectateur', () => {
+  const css=fs.readFileSync('experience-v73.css','utf8');
+  const spectator=fs.readFileSync('spectateur.html','utf8');
+  const preview=fs.readFileSync('previsualisation-v73.html','utf8');
+  assert.match(css,/\.csv-v73-bracket-desktop/);
+  assert.match(css,/\.csv-v73-bracket-mobile-nav/);
+  assert.match(css,/@media\(max-width:767px\)/);
+  assert.match(spectator,/experience-v73\.css/);
+  assert.match(preview,/experience-v73\.css/);
+});
