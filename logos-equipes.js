@@ -20,6 +20,52 @@
       throw Error('Logo refusé : URL HTTPS sans identifiants, image PNG/JPG/WebP uniquement.');
     return url.href;
   }
+  // Image locale : import visuel sûr, réduction client et téléchargement WebP.
+  // AUCUN transfert d'identifiant GitHub/Firebase et AUCUN téléversement automatique.
+  const prepared = new Map();
+  function logoFilePath(team) {
+    const clean = value => String(value || '').replace(/[^a-z0-9_-]/gi,'-').slice(0,52);
+    return './logos/' + clean(S.active?.id) + '-' + clean(team.id) + '.webp';
+  }
+  async function optimizeLogoFile(file) {
+    if (!file || !['image/png','image/jpeg','image/webp'].includes(file.type))
+      throw Error('Sélectionne un PNG, JPG ou WebP (pas de SVG ou GIF).');
+    if (file.size > 6*1024*1024) throw Error('Image trop volumineuse (maximum 6 Mo).');
+    const objectUrl = URL.createObjectURL(file);
+    let img;
+    try {
+      img = await new Promise((resolve,reject)=>{
+        const element=new Image();
+        element.onload=()=>resolve(element);
+        element.onerror=()=>reject(Error('Image illisible.'));
+        element.src=objectUrl;
+      });
+      const w=img.naturalWidth,h=img.naturalHeight;
+      if (!w||!h||w>6000||h>6000) throw Error('Dimensions de l’image non autorisées.');
+      const ratio=Math.min(1,512/Math.max(w,h));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(w*ratio));
+      canvas.height=Math.max(1,Math.round(h*ratio));
+      const ctx=canvas.getContext('2d');
+      if (!ctx) throw Error('Conversion non prise en charge sur cet appareil.');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      const toBlob=quality=>new Promise(resolve=>canvas.toBlob(resolve,'image/webp',quality));
+      let blob=await toBlob(.8);
+      if (blob?.size>125000) blob=await toBlob(.55);
+      if (!blob||blob.type!=='image/webp'||blob.size>125000)
+        throw Error('Logo trop complexe après optimisation : utilise une image plus simple.');
+      return blob;
+    } finally {URL.revokeObjectURL(objectUrl);}
+  }
+  async function checkHostedLogo(url) {
+    if(!url || demo || !url.startsWith('./logos/'))return;
+    const res=await fetch(url,{method:'HEAD',cache:'no-store',credentials:'omit'});
+    if(!res.ok)throw Error('Ce logo n’est pas encore publié dans le dossier logos/ du site. Télécharge le WebP et ajoute-le au dépôt avant de l’enregistrer.');
+    const type=res.headers.get('content-type')||'';
+    if(type && !/^image\/(webp|png|jpeg)\b/i.test(type))
+      throw Error('Le fichier en ligne n’est pas reconnu comme une image.');
+  }
   function imageBadge(team, url) {
     const badge=text('div','badge','');
     const initials=String(team.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x.charAt(0)).join('').toUpperCase();
@@ -86,7 +132,39 @@
       const edit=text('div','logo-edit','');const id='logo-'+String(team.id).replace(/[^a-z0-9_-]/gi,'');
       const lbl=text('label','',"Adresse HTTPS de l’image (facultatif)");lbl.htmlFor=id;
       const input=document.createElement('input');input.type='text';input.inputMode='url';input.id=id;input.className='logo-field';input.placeholder='https://exemple.fr/blason.png';input.maxLength=1500;input.value=team.logoUrl||'';input.setAttribute('aria-label','Logo de '+team.name);
-      edit.append(lbl,input);
+      const file=document.createElement('input');
+      file.type='file';file.accept='image/png,image/jpeg,image/webp';
+      file.setAttribute('aria-label','Choisir une image pour '+team.name);
+      file.className='file-picker';
+      const pick=text('label','pick-file','📷 Choisir une image');
+      pick.append(file);
+      const download=text('button','download-logo','⬇ Télécharger le logo optimisé');
+      download.type='button';download.disabled=true;
+      download.addEventListener('click',()=>{
+        const item=prepared.get(String(S.active.id)+':'+String(team.id));
+        if(!item)return;
+        const link=document.createElement('a');
+        link.href=item.preview;link.download=item.path.split('/').pop();
+        document.body.append(link);link.click();link.remove();
+        message('Logo prêt : '+link.download+'. Il faudra l’ajouter dans le dossier logos/ du dépôt avant de sauvegarder son adresse.',true);
+      });
+      file.addEventListener('change',async()=>{
+        const selection=file.files?.[0];if(!selection)return;
+        try {
+          message('Préparation de '+selection.name+'…');
+          const blob=await optimizeLogoFile(selection);
+          const key=String(S.active.id)+':'+String(team.id);
+          const previous=prepared.get(key);if(previous)URL.revokeObjectURL(previous.preview);
+          const preview=URL.createObjectURL(blob);const path=logoFilePath(team);
+          prepared.set(key,{blob,preview,path});
+          input.value=path;download.disabled=false;
+          const next=imageBadge(team,'');
+          const img=document.createElement('img');img.src=preview;img.alt='';next.append(img);
+          badge.replaceWith(next);badge=next;
+          message('Logo optimisé ('+Math.round(blob.size/1024)+' Ko). Télécharge-le puis publie-le dans logos/ avant l’enregistrement Firebase.',true);
+        }catch(e){message(e.message);}
+      });
+      edit.append(lbl,input,pick,download);
       const actions=text('div','actions','');const save=text('button','',demo?'Simuler':'Enregistrer');save.type='button';
       const clear=text('button','clear','Effacer');clear.type='button';
       clear.addEventListener('click',()=>{input.value='';const next=imageBadge(team,'');badge.replaceWith(next);badge=next;});
@@ -95,6 +173,7 @@
         if(S.busy)return;
         let url;try{url=safeLogo(input.value);}catch(e){message(e.message);input.focus();return;}
         const old=typeof team.logoUrl==='string'?team.logoUrl:'';
+        try{await checkHostedLogo(url);}catch(e){message(e.message);return;}
         if(old===url){message('Aucun changement pour '+team.name+'.',true);return;}
         if(demo){team.logoUrl=url;const found=S.demoRecords[S.active.id].find(t=>t.id===team.id);if(found)found.logoUrl=url;renderTeams();message('Simulation validée pour '+team.name+'. Rien envoyé à Firebase.',true);return;}
         if(!S.user||!S.user.emailVerified){message('Connexion administrateur vérifiée requise.');return;}
