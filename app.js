@@ -666,9 +666,13 @@ const DEFAULT_CLOUD_CONFIG = {
   "projectId": "tournoi-cs-la-verpilliere",
   "authDomain": "tournoi-cs-la-verpilliere.firebaseapp.com"
 };
-const loadCloudConfig = () => ({ ...DEFAULT_CLOUD_CONFIG });
+// La prévisualisation V7.3 est strictement isolée : aucune configuration Firebase
+// ne doit être retournée, même si le SDK est chargé par erreur.
+const CSV_V73_ISOLATED_PREVIEW = window.CSV_V73_ISOLATED_PREVIEW === true;
+const loadCloudConfig = () => CSV_V73_ISOLATED_PREVIEW ? null : ({ ...DEFAULT_CLOUD_CONFIG });
 // Production : aucune connexion aux émulateurs n'est autorisée.
 const csvConnectLocalEmulators = () => {
+  if (CSV_V73_ISOLATED_PREVIEW) throw new Error('Prévisualisation isolée : Firebase interdit');
   if (!firebase.apps.length || firebase.app().options.projectId !== 'tournoi-cs-la-verpilliere')
     throw new Error('Projet Firebase officiel non reconnu');
   return firebase.firestore();
@@ -1957,7 +1961,7 @@ function MultiTournamentShell() {
         return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
     }, []);
     useEffect(() => {
-        if (!('serviceWorker' in navigator))
+        if (CSV_V73_ISOLATED_PREVIEW || !('serviceWorker' in navigator))
             return;
         navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Mode hors connexion non installé :', err));
     }, []);
@@ -3986,7 +3990,7 @@ function MultiTournamentShell() {
                 React.createElement("p", { className: "text-sm text-slate-300" }, "Ouvre une premi\u00E8re fois cette journ\u00E9e avec Internet pour enregistrer ses matchs sur cet appareil.")),
             isViewer && current && !((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id)) && (hubStatus === 'loading' || (hubStatus === 'online' && !loadedDocs[current.id])) && React.createElement("div", { role: "status", className: "max-w-lg mx-auto text-center text-amber-200 text-sm p-8" }, "\u23F3 Chargement du calendrier de cette journ\u00E9e\u2026"),
             isViewer && current && hubStatus === 'error' && !csvCachedTournament(current.id) && React.createElement("div", { role: "alert", className: "max-w-lg mx-auto text-center text-rose-200 text-sm p-8" }, "Connexion aux r\u00E9sultats indisponible. V\u00E9rifie ta connexion Internet et actualise la page."),
-            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
+            current && (CSV_V73_ISOLATED_PREVIEW && csvCachedTournament(current.id) || !isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
                     var _a;
                     const data = eventData(e);
                     return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
