@@ -397,3 +397,56 @@ test('Renommer une poule conserve scores et met à jour les sources des finales'
   assert.equal(JSON.stringify({teams,matches}),before,'Aucune mutation des données originales');
   assert.match(app,/csvRenameGroupReferences\(teams, matches, oldName, fresh\)/);
 });
+
+
+test('Classement de poule: 0–0, victoire, différence de buts, matchs de finales exclus', () => {
+  const start=app.indexOf('const standingsFor =');
+  const end=app.indexOf('const resultOf =',start);
+  assert.ok(start>=0&&end>start);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(start,end)+'\nthis.standings=standingsFor;',ctx);
+  const teams=[
+    {id:'A',name:'Club A',group:'Poule A'},
+    {id:'B',name:'Club B',group:'Poule A'},
+    {id:'C',name:'Club C',group:'Poule A'},
+    {id:'D',name:'Club D',group:'Poule A'}
+  ];
+  const matches=[
+    {id:'m1',stage:'Journée 1',group:'Poule A',team1Id:'A',team2Id:'B',status:'finished',score1:2,score2:1},
+    {id:'m2',stage:'Journée 1',group:'Poule A',team1Id:'C',team2Id:'D',status:'finished',score1:0,score2:0},
+    {id:'m3',stage:'Journée 2',group:'Poule A',team1Id:'A',team2Id:'C',status:'pending',score1:null,score2:null},
+    {id:'ko',stage:'Quart de Finale 1',group:'Phase Finale Principale',team1Id:'B',team2Id:'C',status:'finished',score1:10,score2:0}
+  ];
+  const standing=Array.from(ctx.standings(teams,matches,'Poule A',{pointsWin:3,pointsDraw:1,pointsLoss:0}));
+  const get=id=>standing.find(r=>r.team.id===id);
+  assert.equal(get('A').points,3);
+  assert.equal(get('A').gf,2);
+  assert.equal(get('A').ga,1);
+  assert.equal(get('A').gd,1);
+  assert.equal(get('B').points,0);
+  assert.equal(get('B').gf,1,'Les 10 buts de la finale ne doivent pas compter dans la poule');
+  assert.equal(get('C').points,1,'Un 0–0 donne 1 point');
+  assert.equal(get('D').points,1,'Un 0–0 donne 1 point');
+  assert.equal(standing[0].team.id,'A','Classement trié par les points');
+});
+test('Classement: renommer une poule conserve le résultat et les points', () => {
+  const start=app.indexOf('const csvRenameGroupReferences =');
+  const end=app.indexOf('const resultOf =',start);
+  assert.ok(start>=0 && end>start);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(start,end)+'\nthis.rename=csvRenameGroupReferences;this.standings=standingsFor;',ctx);
+  const teams=[{id:'a',name:'A',group:'Poule A'},{id:'b',name:'B',group:'Poule A'}];
+  const fixtures=[{id:'m',group:'Poule A',stage:'Journée 1',team1Id:'a',team2Id:'b',status:'finished',score1:3,score2:1}];
+  const renamed=ctx.rename(teams,fixtures,'Poule A','Poule Or');
+  const standing=ctx.standings(renamed.teams,renamed.matches,'Poule Or',{pointsWin:3,pointsDraw:1});
+  assert.equal(standing[0].team.id,'a');
+  assert.equal(standing[0].points,3);
+  assert.equal(standing[0].gf,3);
+  assert.equal(standing[1].ga,3);
+});
+test('Mon équipe : un accès direct identique depuis la navigation PC et mobile', () => {
+  assert.match(app,/const openMyTeamSchedule = \(\) =>/);
+  assert.match(app,/tab\.id === 'myTeam' \? openMyTeamSchedule\(\) : chooseViewerTab\(tab\.id\)/);
+  assert.match(app,/if \(tab\.id === 'myTeam'\) \{\s*openMyTeamSchedule\(\);/);
+  assert.match(app,/const savedTeam = teams\.find\(t => t\.id === viewerTeamId\)/);
+});
