@@ -2964,3 +2964,68 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 @media(min-width:680px){.csv-welcome-content{gap:27px}.csv-welcome-program{padding:22px 35px}.csv-welcome-secondary-grid{gap:14px}.csv-welcome-button{padding:19px 22px}}
 @media(max-width:380px){.csv-welcome-content{gap:15px}.csv-welcome-logo{height:79px;width:79px}.csv-welcome-blason{width:66px;height:66px}.csv-welcome-title{font-size:29px}.csv-welcome-program{padding:14px}.csv-welcome-secondary-grid{gap:7px}.csv-welcome-button{padding:11px 10px;gap:7px;min-height:75px}.csv-welcome-button-symbol{font-size:22px}.csv-welcome-button-copy strong{font-size:13px}.csv-welcome-button-copy small{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.csv-welcome-button{transition:none}}
+
+
+/* ================== CSV V7.4 — identité graphique Tournoi ================== */
+:root { --csv-gold:#ffca43; --csv-red:#621c30; --csv-ink:#18080f; }
+.csv-v74-home { display:grid; gap:22px; padding:8px 0 26px; }
+.csv-v74-eyebrow { font-size:11px;letter-spacing:2.4px;font-weight:900;color:var(--csv-gold);text-transform:uppercase; }
+.csv-v74-hero { display:flex;align-items:end;justify-content:space-between;gap:20px; }
+.csv-v74-hero h1 {font-size:clamp(30px,4.9vw,53px);line-height:1.04;color:#fff8ef;font-weight:900;letter-spacing:-1.6px;}
+.csv-v74-hero p {color:#cbb1ba;font-size:14px;margin-top:13px;line-height:1.6;}
+.csv-v74-tag {border:1px solid #c89133;background:#502018;color:#ffe09c;border-radius:99px;padding:10px 18px;font-size:12px;font-weight:900;white-space:nowrap;}
+.csv-v74-home-grid {display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:19px;}
+.csv-v74-panel {border:1px solid #74334b;border-radius:23px;background:linear-gradient(160deg,#34121f,#200d16 68%);padding:24px;min-width:0;box-shadow:0 20px 55px rgba(0,0,0,.14);}
+.csv-v74-panel-feature {background:linear-gradient(145deg,#652139,#341322 70%,#250c18);}
+.csv-v74-panel h2 {font-size:clamp(18px,2.1vw,25px);color:#fff7f6;font-weight:800;letter-spacing:-.3px;margin-bottom:12px;}
+.csv-v74-panel h3 {font-size:15px;font-weight:800;color:#ffcf67;margin:18px 0 10px;}
+.csv-v74-panel p {font-size:13px;line-height:1.6;color:#cdb4bf;}
+.csv-v74-panel-eyebrow {font-size:11px;font-weight:900;letter-spacing:1.3px;color:#efb9c8;margin-bottom:15px;}
+.csv-v74-fixture {padding:13px 0;border-bottom:1px solid #7f405444;display:grid;gap:7px;}
+.csv-v74-fixture-details {font-size:11px;color:#d6afbe;}
+.csv-v74-fixture-main {display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:center;color:#fff;font-size:12px;font-weight:750;}
+.csv-v74-fixture-main span:last-child{text-align:right;}
+.csv-v74-fixture-main strong {background:#ffca43;color:#2b1112;border-radius:10px;padding:8px 12px;font-size:17px;white-space:nowrap;}
+.csv-v74-metrics,.csv-v74-mini-metrics {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px;}
+.csv-v74-metrics>div,.csv-v74-mini-metrics>div {background:#230d17;border:1px solid #754152;border-radius:14px;padding:13px;display:grid;gap:3px;}
+.csv-v74-metrics strong,.csv-v74-mini-metrics strong {font-size:24px;font-weight:900;color:#ffca43;}
+.csv-v74-metrics small,.csv-v74-mini-metrics small {font-size:10px;color:#cdb2bd;}
+.csv-v74-mini-metrics {grid-template-columns:repeat(4,minmax(0,1fr));margin:12px 0;}
+.csv-v74-link {display:block;width:100%;text-align:center;margin-top:15px;background:#492a34;border:1px solid #7d4b5b;border-radius:12px;padding:13px;color:#fff;font-size:13px;font-weight:850;min-height:44px;}
+.csv-v74-link:hover,.csv-v74-link:focus-visible{background:#ffca43;color:#271010;}
+.csv-v74-muted {color:#ad949f!important;font-size:12px!important;}
+.csv-v74-practical{white-space:pre-wrap;}
+.csv-v74-sponsors{display:flex;flex-wrap:wrap;gap:10px;}
+.csv-v74-sponsor{background:#210d15;border:1px solid #633348;padding:10px 12px;display:flex;align-items:center;gap:8px;border-radius:12px;color:#ffebd4;font-size:12px;}
+.csv-v74-sponsor img{width:44px;height:40px;object-fit:contain;border-radius:8px;background:#fff;}
+.csv-v74-team-summary{background:linear-gradient(130deg,#462034,#24101d);border:1px solid #8c4b5d;border-radius:16px;padding:14px;}
+.csv-v74-team-name{display:flex;align-items:center;gap:12px;}
+.csv-v74-team-name h3{color:#fff;font-size:17px;font-weight:850;}
+.csv-v74-team-name p{color:#ffcb67;font-size:12px;}
+.csv-v74-final-visual{background:linear-gradient(135deg,#3d1426,#160a13);border:1px solid #966338;border-radius:22px;padding:22px;}
+.csv-v74-final-visual>h2{font-size:24px;font-weight:900;color:#ffcd53;}
+.csv-v74-rounds{display:flex;align-items:stretch;overflow-x:auto;gap:18px;margin-top:20px;padding-bottom:10px;scroll-snap-type:x proximity;}
+.csv-v74-round{min-width:235px;flex:1;display:flex;flex-direction:column;gap:15px;scroll-snap-align:start;}
+.csv-v74-round h3{font-size:13px;font-weight:900;color:#ffce58;text-transform:uppercase;text-align:center;padding-bottom:8px;border-bottom:1px solid #a75f44;}
+.csv-v74-round-match{border:1px solid #8b455b;border-radius:13px;background:#170a13;padding:12px;display:grid;gap:8px;}
+.csv-v74-round-subtitle{font-size:10px;color:#e5aec2;}
+.csv-v74-round-team{display:flex;align-items:center;gap:9px;color:#fff;font-size:12px;font-weight:700;}
+.csv-v74-round-team span{flex:1;min-width:0;}
+.csv-v74-round-team strong{font-size:15px;color:#ffda80;}
+.csv-v74-bronze{margin-top:20px;max-width:430px;}
+.csv-v74-bronze h3{color:#d6ad74;font-size:14px;font-weight:900;margin-bottom:9px;}
+.csv-v74-podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:25px;}
+.csv-v74-podium-place{border:1px solid #8b5f42;border-radius:15px;padding:18px 12px;display:grid;text-align:center;gap:8px;background:#2d1420;}
+.csv-v74-podium-place strong{font-weight:900;color:#ffd16d;font-size:14px;}
+.csv-v74-podium-place span{color:#fff;font-size:12px;overflow-wrap:anywhere;}
+@media(max-width:800px){
+ .csv-v74-home-grid{grid-template-columns:1fr;}
+ .csv-v74-panel{padding:18px;}
+ .csv-v74-hero{align-items:start;flex-direction:column;gap:10px;}
+ .csv-v74-hero h1{letter-spacing:-.7px;}
+ .csv-v74-podium{grid-template-columns:1fr;}
+ .csv-v74-fixture-main{gap:5px;font-size:11px;}
+ .csv-v74-fixture-main strong{padding:7px;}
+ .csv-v74-final-visual{padding:14px;}
+}
+@media(prefers-reduced-motion:reduce){.csv-v74-home *, .csv-v74-final-visual *{scroll-behavior:auto!important;animation:none!important;}}
