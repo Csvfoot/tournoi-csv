@@ -6330,7 +6330,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 const finalTable = buildFinalStandings(teams, matches, activeGroupNames, config);
                 return (React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
                     React.createElement("div", null,
-                        React.createElement("h2", { className: "text-xl font-black text-amber-300" }, "\uD83C\uDFC6 Classement final du tournoi"),
+                        React.createElement("h2", { className: "text-xl font-black text-amber-300" }, finalTable.finished ? "\uD83C\uDFC6 Classement final du tournoi" : "\uD83D\uDCCA Classement général provisoire"),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, finalTable.finished ? 'Tous les matchs du calendrier sont terminés.' :
                             'Classement provisoire : les positions évolueront jusqu’à la fin des matchs.'),
                         React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Qualifications, finales et matchs de classement pris en compte. Les \u00E9quipes d\u00E9plac\u00E9es conservent leurs points de poule.")),
@@ -6343,8 +6343,8 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                     React.createElement("th", { className: "py-3 px-2" }, "Poule"),
                                     React.createElement("th", { className: "py-3 px-2 text-center" }, "Pts poule"),
                                     React.createElement("th", { className: "py-3 px-2" }, "Indication"))),
-                            React.createElement("tbody", { className: "divide-y divide-red-950/60" }, finalTable.rows.map(r => (React.createElement("tr", { key: r.team.id, className: r.position <= 3 ? 'bg-amber-500/5' : '' },
-                                React.createElement("td", { className: "py-3 px-2 font-black text-amber-300" }, r.position === 1 ? '🥇' : r.position === 2 ? '🥈' : r.position === 3 ? '🥉' : `${r.position}e`),
+                            React.createElement("tbody", { className: "divide-y divide-red-950/60" }, finalTable.rows.map(r => (React.createElement("tr", { key: r.team.id, className: finalTable.finished && r.position <= 3 ? 'bg-amber-500/5' : '' },
+                                React.createElement("td", { className: "py-3 px-2 font-black text-amber-300" }, finalTable.finished && r.position === 1 ? '🥇' : finalTable.finished && r.position === 2 ? '🥈' : finalTable.finished && r.position === 3 ? '🥉' : `${r.position}e`),
                                 React.createElement("td", { className: "py-3 px-2 font-bold text-white" },
                                     React.createElement(CsvTeamBadge, { team: r.team }),
                                     r.team.name),
