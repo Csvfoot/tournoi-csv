@@ -324,6 +324,25 @@ const alphabetPoolName = i => `Poule ${String.fromCharCode(65 + i)}`;
 // Le classement utilise l'affectation ACTUELLE des équipes, mais conserve
 // leurs résultats passés, même si les rencontres furent jouées dans une autre poule.
 // Chaque rencontre est comptée une seule fois PAR équipe : aucun doublon.
+// Renommer une poule doit aussi réécrire les sources de qualification du tableau.
+// Fonction pure : les scores, horaires, événements et autres poules restent intacts.
+const csvRenameGroupReferences = (teamList, fixtureList, oldName, newName) => {
+    const teams = teamList.map(t => t.group === oldName ? { ...t, group: newName } : t);
+    const matches = fixtureList.map(m => {
+        const next = { ...m };
+        if (m.group === oldName) next.group = newName;
+        for (const side of [1, 2]) {
+            const source = m['source' + side];
+            if (!source || source.kind !== 'rank' || source.group !== oldName) continue;
+            next['source' + side] = { ...source, group: newName };
+            const oldLabel = (Number(source.position) + 1) + 'e ' + oldName;
+            if (!m['placeholder' + side] || m['placeholder' + side] === oldLabel)
+                next['placeholder' + side] = (Number(source.position) + 1) + 'e ' + newName;
+        }
+        return next;
+    });
+    return { teams, matches };
+};
 const standingsFor = (teamList, fixtureList, group, rules) => {
     const members = teamList.filter(t => (t.group || 'Poule A') === group);
     const rows = {};
@@ -4435,8 +4454,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             return;
         }
         const updatedGroups = activeGroupNames.map(g => g === oldName ? fresh : g);
-        const updatedTeams = teams.map(t => t.group === oldName ? { ...t, group: fresh } : t);
-        const updatedMatches = matches.map(m => m.group === oldName ? { ...m, group: fresh } : m);
+        const { teams: updatedTeams, matches: updatedMatches } = csvRenameGroupReferences(teams, matches, oldName, fresh);
         const newCfg = { ...config, autoGroups: false, customGroups: updatedGroups };
         setConfig(newCfg);
         setTeams(updatedTeams);
