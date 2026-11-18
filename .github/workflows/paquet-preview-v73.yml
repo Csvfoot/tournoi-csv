@@ -1,0 +1,69 @@
+name: V7.3 - Préparer aperçu isolé (sans déploiement)
+on:
+  push:
+    branches:
+      - develop-v73
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  previsualisation:
+    name: Tests et paquet HTML sans Firebase
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Récupérer les fichiers V7.3
+        uses: actions/checkout@v4
+      - name: Installer Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vérifier les scripts et protections
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app.js
+          node --check preview-v73-boot.js
+          node --check tests/v73.test.cjs
+          node --test tests/v73.test.cjs
+      - name: Préparer une arborescence publiable sur un hébergement distinct
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-preview-v73
+          cp previsualisation-v73.html dist-preview-v73/index.html
+          cp preview-v73-boot.js app.js experience-v73.js experience-v73.css \
+             saisie-v73.css styles.css icon-512.png \
+             controle-visuel-v73.html reglages-publics-v73.html \
+             dist-preview-v73/
+          if grep -Eqi 'firebase-(app|auth|firestore).*compat' dist-preview-v73/index.html; then
+            echo "ERREUR: Firebase ne doit pas être chargé dans la page de prévisualisation" >&2
+            exit 1
+          fi
+          if ! grep -Fq "connect-src 'none'" dist-preview-v73/index.html; then
+            echo "ERREUR: restriction réseau absente" >&2
+            exit 1
+          fi
+          if ! grep -Fq 'CSV_V73_ISOLATED_PREVIEW' dist-preview-v73/app.js; then
+            echo "ERREUR: garde-fou cloud absent" >&2
+            exit 1
+          fi
+          printf '%s\n' \
+            'TOURNOI CSV V7.3 — Prévisualisation sans Firebase' \
+            'Ce paquet contient le véritable écran spectateur avec des données fictives.' \
+            'Utiliser uniquement un hébergement HTTPS DISTINCT du domaine du tournoi officiel.' \
+            'Ne pas déployer sous https://csvfoot.github.io/tournoi-csv/.' \
+            'Entrée de la prévisualisation : index.html' \
+            'Contrôle des paramètres : controle-visuel-v73.html' \
+            'Éditeur public : reglages-publics-v73.html' \
+            'Pour un essai local : python -m http.server 8000 --directory dist-preview-v73' \
+            'Le HTML est conçu pour fonctionner sans Firestore et sans stockage persistant.' \
+            'Avant de valider : tester mobile, desktop, équipes, calendriers, poules et partenaires.' \
+            > dist-preview-v73/LISEZ-MOI.txt
+      - name: Conserver le paquet de test comme artefact téléchargeable
+        uses: actions/upload-artifact@v4
+        with:
+          name: tournoi-csv-v73-preview-isolee
+          path: dist-preview-v73/
+          retention-days: 14
+          if-no-files-found: error
