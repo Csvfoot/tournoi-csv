@@ -6201,7 +6201,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     React.createElement("h3", { className: "text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDFC6 Phase Finale Principale (Titre)"),
                     React.createElement("div", { className: "flex flex-col md:flex-row gap-6 justify-around" },
                         React.createElement("div", { className: "flex-1 space-y-3" },
-                            React.createElement("div", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider text-center" }, "Huiti\u00E8mes, Quarts & Demi-Finales"),
+                            React.createElement("div", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider text-center" }, "Autres matchs de la phase finale"),
                             matches.filter(m => { var _a, _b, _c; return m.group === 'Phase Finale Principale' && (((_a = m.stage) === null || _a === void 0 ? void 0 : _a.includes('Demi')) || ((_b = m.stage) === null || _b === void 0 ? void 0 : _b.includes('Quart')) || ((_c = m.stage) === null || _c === void 0 ? void 0 : _c.includes('Huitième')) || m.id === 'ko-bronze'); }).map(m => {
                                 const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
                                 const t2 = m.team2Id ? getTeam(m.team2Id) : { name: m.placeholder2 || 'En attente' };
