@@ -699,7 +699,7 @@ const planningTime = value => `${String(Math.floor(value / 60)).padStart(2, '0')
 const csvViewerMatchOrder = (a, b) => {
     const minute = m => {
         const value = String(m.startTime || '');
-        if (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return 99999;
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return 99999;
         const [h, min] = value.split(':').map(Number);
         return h * 60 + min;
     };
