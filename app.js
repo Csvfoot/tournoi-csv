@@ -5654,6 +5654,27 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { setActiveTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
             React.createElement("button", { type: "button", onClick: () => setViewerMoreOpen(false), className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs" }, "Fermer")),
         React.createElement("main", { className: "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
+            userRole === 'viewer' && activeTab === 'matches' && React.createElement("section", {
+                className: "mb-4 rounded-2xl border border-amber-500/30 bg-[#1d0a10] p-3 sm:p-5 space-y-3",
+                "aria-label": "Résumé du tournoi"
+            },
+                React.createElement("div", { className: "flex items-center justify-between gap-2 flex-wrap" },
+                    React.createElement("div", null,
+                        React.createElement("h2", { className: "text-lg sm:text-xl font-black text-amber-300" }, "⚽ Suivre le tournoi"),
+                        React.createElement("p", { className: "text-xs text-slate-300" }, "Scores et calendrier actualisés automatiquement")),
+                    React.createElement("button", {
+                        type: "button", onClick: () => setTeamPickerOpen(true),
+                        className: "min-h-[46px] rounded-xl bg-amber-500 text-[#180606] font-black px-4 text-xs sm:text-sm"
+                    }, "👟 Trouver mon équipe")),
+                React.createElement("div", { className: "grid grid-cols-3 gap-2 sm:gap-3" }, [
+                    { label: "En direct", value: matches.filter(m => m.status === 'live').length, color: "text-emerald-300" },
+                    { label: "À venir", value: matches.filter(m => m.status !== 'finished' && m.status !== 'live').length, color: "text-amber-300" },
+                    { label: "Terminés", value: matches.filter(m => m.status === 'finished').length, color: "text-white" }
+                ].map(item => React.createElement("div", {
+                    key: item.label, className: "rounded-xl bg-[#2b1119] border border-red-900/60 p-3 text-center"
+                },
+                    React.createElement("strong", { className: 'block text-2xl sm:text-3xl font-black '+item.color }, item.value),
+                    React.createElement("span", { className: "block mt-1 text-xs text-slate-300 font-bold" }, item.label))))),
             activeTab === 'dashboard' && userRole === 'editor' && (React.createElement("section", { className: "space-y-4", "aria-label": "Tableau de bord organisateur" },
                 React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
                     React.createElement("div", null,
