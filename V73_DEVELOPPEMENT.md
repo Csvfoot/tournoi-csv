@@ -118,3 +118,13 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - **Ordre des matchs** : ajout de `csvViewerMatchOrder`, qui trie d'abord les matchs avec horaire valide `HH:mm`, puis les rencontres sans horaire. Cette correction ne change pas les horaires ni l’ordre enregistré dans Firebase. La vue chronologique et la vue par terrain l’emploient.
 - Deux tests de non-régression ajoutés dans `tests/v73.test.cjs` : continuité d’onglet et priorité aux matchs planifiés.
 - Scripts relus sur GitHub, syntaxe JavaScript contrôlée ; validation réelle sur Mac/iPhone **à refaire après téléchargement du nouvel artefact**.
+
+## Étape 13 — arbre des finales responsive (18 novembre 2026)
+- Nouvelle interface `CsvV73Bracket` directement branchée sur l'onglet `Finales` de l'application réelle, sans dépendance nouvelle. Elle lit les matchs existants : aucune création de qualification, aucun score ou horaire fictif supplémentaire.
+- Ordinateur : colonnes par tour (huitièmes si applicables, quarts, demies, finale), cartes équipe / logo / score / statut et indicateurs de connexion graphiques. Tablette : colonnes compactes.
+- Mobile (jusqu'à 767 px) : boutons tactiles de 44 px pour choisir le tour à voir ; un seul tour affiché à la fois pour éviter un défilement horizontal de l'arbre.
+- Match pour la troisième place dans un panneau séparé, matchs de classement dans un autre ; les poules et les résultats ne changent pas.
+- `experience-v73.css` enrichi pour les écrans et `tests/v73.test.cjs` complété de contrôles de la structure rendue et des styles responsive.
+- Vérification directe de création du composant avec React simulé : navigation mobile présente, colonnes desktop présentes, bronze et classements séparés, cartes des rencontres rendues.
+- **À valider visuellement dans le navigateur et sur iPhone** après téléchargement du paquet GitHub Actions : espacement des colonnes, lisibilité des équipes, absence de débordement et passage entre tours.
+- Cette étape est uniquement dans `develop-v73`. `main` et Firebase sont inchangés.
