@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#21070d">
+  <title>Tournoi CSV — Contrôle visuel des réglages V7.3</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,sans-serif;color:#fff3ec;background:#15090e}
+    *{box-sizing:border-box}
+    body{margin:0}
+    main{max-width:1040px;margin:auto;padding:20px 14px 70px}
+    h1{font-size:clamp(26px,5vw,38px);margin:10px 0}
+    h2{font-size:19px;margin:20px 0 12px}
+    p{line-height:1.55}
+    .eyebrow{color:#f4c85a;font-weight:800;font-size:12px;letter-spacing:.08em}
+    .hint{color:#d5beb6;font-size:13px}
+    a{color:#f4ca64}
+    .layout{display:grid;grid-template-columns:1.2fr .8fr;gap:15px;margin-top:18px}
+    .card{border:1px solid #6b3b48;border-radius:17px;padding:16px;background:#260f19;min-width:0}
+    .card.soft{background:#1a0b12}
+    .card h2:first-child{margin-top:0}
+    .row{display:flex;justify-content:space-between;gap:9px;align-items:center;padding:11px;border:1px solid #59333e;border-radius:11px;margin:7px 0;overflow-wrap:anywhere}
+    .ok{color:#a9ebc5}.bad{color:#ff9ca5}.missing{color:#e9bd71}
+    .pill{font-size:11px;font-weight:800;padding:5px 9px;border-radius:999px;background:#492330;color:#ffd4c2}
+    .logo{width:42px;height:42px;object-fit:contain;display:block;flex-shrink:0}
+    .sponsors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .partner{padding:11px;background:#3b1824;border-radius:12px;display:flex;align-items:center;gap:9px;overflow-wrap:anywhere;min-width:0}
+    .partner strong{font-size:13px}
+    .partner small{font-size:11px;color:#f5d58f;display:block}
+    button{min-height:45px;border:1px solid #f4c85a;border-radius:10px;background:#f4c85a;color:#210b15;font-weight:900;padding:10px 15px;cursor:pointer}
+    button:focus-visible,a:focus-visible{outline:3px solid #fff;outline-offset:3px}
+    #report{white-space:pre-wrap;font-size:12px;line-height:1.5;background:#12070c;padding:12px;border-radius:9px;overflow-wrap:anywhere}
+    @media(max-width:780px){.layout{grid-template-columns:1fr}}
+    @media(max-width:350px){.sponsors{grid-template-columns:1fr}}
+  </style>
+  <script defer src="./experience-v73.js?v=7.3-dev3"></script>
+</head>
+<body><main>
+  <div class="eyebrow">⚽ TOURNOI CSV • BRANCHE V7.3</div>
+  <h1>Contrôle visuel des réglages publics</h1>
+  <p class="hint">Ce panneau lit <strong>le vrai fichier de configuration publique chargé par cette page</strong>, sans données fictives. Il ne charge pas Firebase et ne permet aucune écriture. Il ne remplace pas les tests du calendrier, de l'authentification ou des règles de sécurité.</p>
+  <p><a href="./reglages-publics-v73.html">Éditer les réglages</a> · <a href="./spectateur.html">Retour spectateur</a></p>
+  <div class="layout">
+    <section class="card"><h2>👀 Aperçu de la configuration chargée</h2>
+      <div id="announcement" class="row" aria-live="polite"></div>
+      <h2>☕ Services pratiques</h2><div id="services"></div>
+      <h2>🤝 Partenaires</h2><div id="sponsors" class="sponsors"></div>
+    </section>
+    <section class="card soft">
+      <h2>🔎 Contrôles automatiques</h2>
+      <div id="checks" aria-live="polite"></div>
+      <button type="button" id="recheck">Relancer les contrôles</button>
+      <h2>Rapport de validation</h2>
+      <p class="hint">Le rapport ne contient que la configuration publique et les résultats des vérifications, jamais de mots de passe ni de jetons.</p>
+      <pre id="report"></pre>
+    </section>
+  </div>
+</main>
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const txt = (x,n=300) => typeof x === "string" ? x.trim().slice(0,n) : "";
+  function isHttps(s) {
+    if (!s) return true;
+    try { const u=new URL(s);return u.protocol==="https:"&&!u.username&&!u.password; }
+    catch (_) { return false; }
+  }
+  function isImage(s) {
+    if (!s) return true;
+    if (/^\.\/logos\/[a-z0-9_./-]+\.(?:png|jpe?g|webp)$/i.test(s)&&!s.includes("..")) return true;
+    if (!isHttps(s)) return false;
+    try { return /\.(?:png|jpe?g|webp)$/i.test(new URL(s).pathname); } catch (_) { return false; }
+  }
+  function el(tag, cls, value) { const node=document.createElement(tag);if(cls)node.className=cls;if(value!=null)node.textContent=value;return node; }
+  function draw() {
+    const cfg=window.CSV_V73_EXPERIENCE, checks=[];
+    const announcement=$("announcement"),services=$("services"),sponsors=$("sponsors"),list=$("checks");
+    for (const node of [announcement,services,sponsors,list]) node.replaceChildren();
+    const good=Boolean(cfg&&typeof cfg==="object");
+    checks.push(["Configuration publique chargée",good]);
+    if(!good) {
+      announcement.textContent="Configuration indisponible : expérience non chargée.";
+      $("report").textContent="ÉCHEC : fichier experience-v73.js absent ou invalide.";
+      return;
+    }
+    const sv=Array.isArray(cfg.services)?cfg.services:[];
+    const sp=Array.isArray(cfg.sponsors)?cfg.sponsors:[];
+    checks.push(["Annonce ≤ 260 caractères",typeof cfg.announcement==="string"&&cfg.announcement.length<=260]);
+    checks.push(["Nombre de services ≤ 8",Array.isArray(cfg.services)&&sv.length<=8]);
+    checks.push(["Nombre de partenaires ≤ 12",Array.isArray(cfg.sponsors)&&sp.length<=12]);
+    checks.push(["Données publiques figées en mémoire",Object.isFrozen(cfg)]);
+    announcement.textContent=txt(cfg.announcement,260)||"📢 Aucune annonce renseignée";
+    if(!sv.length)services.appendChild(el("p","hint","Aucun service configuré actuellement."));
+    for (const [i,s] of sv.entries()){
+      const okay=s&&txt(s.label,61)&&txt(s.detail,161)&&s.label.length<=60&&s.detail.length<=160;
+      checks.push(["Service "+(i+1)+" : nom et détail valides",Boolean(okay)]);
+      const card=el("div","row");
+      card.appendChild(el("span","",txt(s.icon,3)+" "+txt(s.label,60)+" — "+txt(s.detail,160)));
+      services.appendChild(card);
+    }
+    if(!sp.length)sponsors.appendChild(el("p","hint","Aucun partenaire configuré actuellement."));
+    for(const [i,s] of sp.entries()){
+      const okay=Boolean(s&&txt(s.name,81)&&s.name.length<=80);
+      checks.push(["Partenaire "+(i+1)+" : nom valide",okay]);
+      checks.push(["Partenaire "+(i+1)+" : lien HTTPS",Boolean(s&&isHttps(s.website))]);
+      checks.push(["Partenaire "+(i+1)+" : logo autorisé",Boolean(s&&isImage(s.logoUrl))]);
+      const card=el("div","partner");
+      if(s&&s.logoUrl&&isImage(s.logoUrl)){
+        const img=el("img","logo");img.alt="";img.loading="lazy";img.referrerPolicy="no-referrer";
+        img.src=s.logoUrl;img.onerror=()=>img.remove();card.appendChild(img);
+      }
+      const meta=el("span");meta.appendChild(el("strong","",txt(s?.name,80)));
+      if(s?.tier)meta.appendChild(el("small","",txt(s.tier,45)));
+      card.appendChild(meta);sponsors.appendChild(card);
+    }
+    for(const [name,ok] of checks){
+      const row=el("div","row");row.append(el("span","",name),el("span",ok?"ok":"bad",ok?"✓":"✕"));list.appendChild(row);
+    }
+    const failed=checks.filter(x=>!x[1]).map(x=>x[0]);
+    const report={version:cfg.version,configuration:"experience-v73.js (chargée sur cette page)",valid:failed.length===0,verified:checks.length,failed,announcements:cfg.announcement?1:0,services:sv.length,sponsors:sp.length,firebase:"non utilisé"};
+    $("report").textContent=JSON.stringify(report,null,2);
+  }
+  $("recheck").addEventListener("click",draw);
+  window.addEventListener("DOMContentLoaded",draw);
+})();
+</script></body></html>
