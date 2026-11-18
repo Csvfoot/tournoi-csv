@@ -240,3 +240,27 @@ test('Classement général: aucune médaille ni podium avant la fin des matchs',
   assert.match(app, /finalTable\.finished && r\.position === 3 \? '🥉'/);
   assert.match(app, /finalTable\.finished && r\.position <= 3 \?/);
 });
+
+test('Navigation spectateur: le même onglet est conservé lorsqu’on change de catégorie', () => {
+  assert.match(app, /const \[viewerActiveTab, setViewerActiveTab\] = useState\('matches'\)/);
+  assert.match(app, /viewerActiveTab: viewerActiveTab, onViewerTabChange: setViewerActiveTab/);
+  assert.match(app, /const chooseViewerTab = id => \{ setActiveTab\(id\); if \(onViewerTabChange\) onViewerTabChange\(id\); \}/);
+  assert.match(app, /setActiveTab\(viewerActiveTab \|\| 'matches'\)/);
+  assert.match(app, /id: 'myTeam', icon: '👟', text: 'Mon équipe'/);
+});
+test('Programme: les matchs programmés passent avant les finales sans heure', () => {
+  const start = app.indexOf('const csvViewerMatchOrder =');
+  const end = app.indexOf('\n};', start);
+  assert.ok(start >= 0 && end > start);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(start,end+3)+'\nthis.order=csvViewerMatchOrder;',ctx);
+  const rows=[
+    {id:'quart',stage:'Quart de Finale 1'},
+    {id:'poule-2',startTime:'09:20',stage:'Journée 2'},
+    {id:'poule-1',startTime:'09:00',stage:'Journée 1'},
+    {id:'finale',stage:'Grande Finale'}
+  ].sort(ctx.order);
+  assert.deepEqual(rows.slice(0,2).map(m=>m.id),['poule-1','poule-2']);
+  assert.equal(rows.slice(2).every(m=>!m.startTime),true);
+  assert.match(app, /visibleMatches\.slice\(\)\s*\.sort\(csvViewerMatchOrder\)/);
+});
