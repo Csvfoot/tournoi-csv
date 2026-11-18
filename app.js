@@ -21,6 +21,69 @@ function CsvTeamBadge({team, large=false}) {
             onError: e => { e.currentTarget.style.display = 'none'; } }));
 }
 
+/* V7.3 : informations pratiques et partenaires, lecture seule.
+   Source publique: experience-v73.js. Aucune donnée Firebase modifiée. */
+function CsvPublicExtras({tournament,fields}) {
+    const cfg=window.CSV_V73_EXPERIENCE || {};
+    const limited=(x,n)=>typeof x==='string'?x.trim().slice(0,n):'';
+    const validLink=value=>{
+        try {
+            const u=new URL(limited(value,1200));
+            return u.protocol==='https:' && !u.username && !u.password?u.href:'';
+        }catch(_){return '';}
+    };
+    const safeImage=value=>{
+        const x=limited(value,1200);
+        if(/^\.\/logos\/[a-z0-9_./-]+\.(?:png|jpe?g|webp)$/i.test(x)&&!x.includes('..'))return x;
+        const u=validLink(x);if(!u)return '';
+        try{return /\.(?:png|jpe?g|webp)$/i.test(new URL(u).pathname)?u:'';}catch(_){return '';}
+    };
+    const sponsors=Array.isArray(cfg.sponsors)
+       ?cfg.sponsors.slice(0,12).filter(x=>x&&limited(x.name,80)).map(x=>({
+          name:limited(x.name,80),tier:limited(x.tier,45),logo:safeImage(x.logoUrl),
+          website:validLink(x.website)
+       })): [];
+    const services=Array.isArray(cfg.services)
+       ?cfg.services.slice(0,8).filter(x=>x&&limited(x.label,60)&&limited(x.detail,160)).map(x=>({
+          label:limited(x.label,60),detail:limited(x.detail,160),icon:limited(x.icon,3)
+       })): [];
+    const allFields=Array.isArray(fields)?fields:[];
+    const names=allFields.map(f=>limited(f?.name,70)).filter(Boolean);
+    let niceDay='';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(tournament?.date||'')) {
+        try{niceDay=new Date(tournament.date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
+        catch(_){}
+    }
+    const announcement=limited(cfg.announcement,260);
+    return React.createElement('section',{className:'csv-extras-wrap space-y-3 mb-4',"aria-label":"Informations du tournoi"},
+        React.createElement('details',{className:'rounded-2xl border border-amber-700/30 bg-[#1b0a10] p-3 sm:p-4'},
+            React.createElement('summary',{className:'text-sm font-black text-amber-300 cursor-pointer min-h-[36px] flex items-center'},"ℹ️ Infos pratiques · terrains & journée"),
+            React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 text-sm'},
+                niceDay&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"📅 Date"),niceDay),
+                tournament?.category&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"🏆 Catégorie"),limited(tournament.category,50)),
+                names.length>0&&React.createElement('div',{className:'rounded-xl bg-[#2a1019] p-3 sm:col-span-2'},React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},"🏟️ Terrains"),names.join(' · ')),
+                services.map((item,i)=>React.createElement('div',{key:item.label+i,className:'rounded-xl bg-[#2a1019] p-3'},
+                  React.createElement('span',{className:'text-amber-300 font-bold block text-xs'},item.icon?item.icon+' ':'',item.label),
+                  React.createElement('span',{className:'text-slate-100'},item.detail))))),
+        announcement&&React.createElement('p',{className:'rounded-xl border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-100 font-medium'},'📢 '+announcement),
+        sponsors.length>0&&React.createElement('div',{className:'rounded-2xl border border-red-800/50 bg-[#210c13] p-3 sm:p-4'},
+            React.createElement('h3',{className:'font-black text-amber-300 text-sm mb-3'},"🤝 Les partenaires du tournoi"),
+            React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2'},
+                sponsors.map((item,i)=>{
+                    const inside=React.createElement(React.Fragment,null,
+                        item.logo?React.createElement('img',{src:item.logo,alt:'',loading:'lazy',decoding:'async',referrerPolicy:'no-referrer',
+                            onError:e=>e.currentTarget.style.display='none',className:'w-12 h-12 object-contain flex-shrink-0'}):
+                            React.createElement('span',{className:'rounded-lg bg-[#5e1c2a] w-12 h-12 flex items-center justify-center font-black text-amber-300 flex-shrink-0'},"★"),
+                        React.createElement('span',{className:'min-w-0 text-left'},
+                            React.createElement('strong',{className:'block text-xs sm:text-sm text-white break-words'},item.name),
+                            item.tier&&React.createElement('small',{className:'block text-amber-300 text-[11px]'},item.tier)));
+                    const cls='flex items-center gap-2 rounded-xl border border-amber-700/20 bg-[#30141e] p-2 min-h-[64px]';
+                    return item.website
+                       ?React.createElement('a',{key:item.name+i,href:item.website,target:'_blank',rel:'noopener noreferrer',referrerPolicy:'no-referrer',className:cls+' hover:border-amber-500'},inside)
+                       :React.createElement('div',{key:item.name+i,className:cls},inside);
+                }))));
+}
+
 const CSV_APP_VERSION = '7.2';
 // V7.1 sécurité calendrier : données saisies à ne jamais écraser.
 // Fonction pure, également utilisée pour les changements de poules.
@@ -5675,6 +5738,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 },
                     React.createElement("strong", { className: 'block text-2xl sm:text-3xl font-black '+item.color }, item.value),
                     React.createElement("span", { className: "block mt-1 text-xs text-slate-300 font-bold" }, item.label))))),
+            userRole === 'viewer' && activeTab === 'matches' && React.createElement(CsvPublicExtras,{tournament,fields}),
             activeTab === 'dashboard' && userRole === 'editor' && (React.createElement("section", { className: "space-y-4", "aria-label": "Tableau de bord organisateur" },
                 React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
                     React.createElement("div", null,
