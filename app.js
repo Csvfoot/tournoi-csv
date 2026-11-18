@@ -3386,7 +3386,7 @@ function MultiTournamentShell() {
         try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) { }
     };
     if (CSV_HOME_MODE === 'spectator' && !hubIsEditor && spectatorWelcome) {
-        const welcomeLoading = netOnline && !catalogSynced && hubStatus !== 'error';
+        const welcomeLoading = !CSV_V73_ISOLATED_PREVIEW && netOnline && !catalogSynced && hubStatus !== 'error';
         return React.createElement(CsvSpectatorWelcome, {
             day: viewerDay, dates: publishedDays, events: publicEvents,
             activeId: current ? current.id : '',
