@@ -3882,6 +3882,30 @@ function MultiTournamentShell() {
 }
 // V7.4 — Résumé public compact des matchs (ne déclenche aucune écriture).
 // V7.4 — Fiche « Mon équipe » avec résultats et classement.
+// V7.4 — Affichage TV dédié, lecture seule, rafraîchi par le flux Firebase existant.
+function CsvTvBoard({ tournament, matches, teams, onClose }) {
+    const club = id => teams.find(t=>t.id===id)||{name:'À déterminer'};
+    const list = matches.filter(m=>m.status==='live').concat(matches.filter(m=>m.status!=='finished'&&m.status!=='live')
+        .slice().sort((a,b)=>String(a.startTime||'99:99').localeCompare(String(b.startTime||'99:99')))).slice(0,8);
+    const latest=matches.filter(m=>m.status==='finished').slice().reverse().slice(0,5);
+    const fixture = m => React.createElement('div',{className:'csv-v74-tv-fixture',key:m.id},
+        React.createElement('small',null,(m.startTime||'--:--')+' · '+(m.fieldName||'Terrain')),
+        React.createElement('div',null,
+            React.createElement('span',null,club(m.team1Id).name),
+            React.createElement('strong',null,m.score1!=null&&m.score2!=null?m.score1+' – '+m.score2:m.status==='live'?'● LIVE':'VS'),
+            React.createElement('span',null,club(m.team2Id).name)));
+    return React.createElement('section',{className:'csv-v74-tv-board',role:'dialog','aria-modal':true,'aria-label':'Écran TV des matchs'},
+        React.createElement('div',{className:'csv-v74-tv-top'},
+            React.createElement('div',null,React.createElement('h1',null,'⚽ TOURNOI CSV'),React.createElement('p',null,'Le football se vit ici · '+tournament.category)),
+            React.createElement('button',{type:'button',onClick:onClose,'aria-label':'Fermer écran TV'},'✕ Fermer')),
+        React.createElement('div',{className:'csv-v74-tv-columns'},
+            React.createElement('article',null,
+                React.createElement('h2',null,'🟢 En direct & prochains matchs'),
+                list.length?list.map(fixture):React.createElement('p',null,'Aucun match en cours ou à venir.')),
+            React.createElement('article',null,
+                React.createElement('h2',null,'🏁 Derniers résultats'),
+                latest.length?latest.map(fixture):React.createElement('p',null,'Résultats à venir.'))));
+}
 function CsvTeamOverview({ team, teams, matches, config, groups }) {
     if (!team) return null;
     const group = team.group || (groups && groups[0]) || 'Poule A';
@@ -5921,6 +5945,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         userRole === 'viewer' && viewerMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2", style: { bottom: 'calc(85px + env(safe-area-inset-bottom, 0px))' }, role: "region", "aria-label": "Autres vues spectateur" },
             [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { setActiveTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
             React.createElement("button", { type: "button", onClick: () => setViewerMoreOpen(false), className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs" }, "Fermer")),
+        userRole === 'viewer' && React.createElement("div", { className: "max-w-7xl mx-auto w-full px-3 sm:px-6 pt-2 flex justify-end gap-2" },
+            React.createElement("button", { type: "button", onClick: () => csvSetTvMode(true),
+                className: "min-h-[42px] px-4 rounded-xl bg-[#33141f] border border-amber-800 text-amber-300 text-xs font-bold" }, "📺 Écran TV")),
+        csvTvMode && React.createElement(CsvTvBoard, { tournament, matches, teams, onClose: () => csvSetTvMode(false) }),
         React.createElement("main", { className: "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
             activeTab === 'dashboard' && userRole === 'editor' && (React.createElement("section", { className: "space-y-4", "aria-label": "Tableau de bord organisateur" },
                 React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
@@ -6231,7 +6259,6 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 onChooseTeam: () => setTeamPickerOpen(true)
             }),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
-                userRole === 'viewer' && React.createElement(CsvSpectatorSummary, { matches, teams, category: tournament.category }),
                 userRole === 'viewer' && (Boolean(config.practicalInfo) || (Array.isArray(config.sponsors) && config.sponsors.length > 0)) &&
                     React.createElement("section", { className: "rounded-2xl border border-red-900/60 bg-[#150709] p-4 space-y-3" },
                         React.createElement("h2", { className: "text-sm font-black text-amber-300" }, "📍 Infos & partenaires du CSV"),
