@@ -116,6 +116,40 @@
     const team=arr(data.teams).find(t=>t.id===id);
     return team ? safe(team.name,'Équipe') : safe(placeholder,'À déterminer');
   }
+  // V7.3 : logo facultatif des équipes, sans changement du modèle Firebase.
+  // Ne jamais insérer directement une URL dans du HTML : l'image est créée via le DOM.
+  function teamLogo(team) {
+    if (!team || typeof team.logoUrl !== 'string') return '';
+    const src = team.logoUrl.trim();
+    if (!src || src.length > 1500) return '';
+    try {
+      const u = new URL(src, location.href);
+      if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname))) return '';
+      if (src.startsWith('/') && !src.startsWith('//')) return '';
+      if (!/^https:\/\//i.test(src) && !/^\.\/logos\/[a-zA-Z0-9_./-]+\.(?:png|webp|jpg|jpeg)$/i.test(src)) return '';
+      return u.href;
+    } catch (_) { return ''; }
+  }
+  function teamBadge(team) {
+    const badge = E('span', 'csv-team-badge');
+    const dot = E('span', 'team-dot');
+    dot.style.setProperty('--team-color', color(team));
+    badge.append(dot);
+    const logo = teamLogo(team);
+    if (logo) {
+      const img = E('img', 'csv-team-logo');
+      img.src = logo; img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => img.remove(), { once: true });
+      badge.append(img);
+    }
+    return badge;
+  }
+  function teamNameCell(team) {
+    const cell = E('span', 'standings-name csv-team-name');
+    cell.append(teamBadge(team), E('span', 'csv-team-text', safe(team?.name)));
+    return cell;
+  }
   function makeMatchCard(m, data, kind) {
     const wrap=E('article','match-card');
     const meta=E('div','match-meta');
@@ -126,11 +160,9 @@
     const teamA=arr(data.teams).find(t=>t.id===m.team1Id);
     const teamB=arr(data.teams).find(t=>t.id===m.team2Id);
     const a=E('div','team home');
-    const dotA=E('span','team-dot'); dotA.style.setProperty('--team-color',color(teamA));
-    add(a,dotA,E('span','',teamName(m.team1Id,data,m.placeholder1)));
+    add(a,teamBadge(teamA),E('span','',teamName(m.team1Id,data,m.placeholder1)));
     const b=E('div','team away');
-    const dotB=E('span','team-dot'); dotB.style.setProperty('--team-color',color(teamB));
-    add(b,E('span','',teamName(m.team2Id,data,m.placeholder2)),dotB);
+    add(b,E('span','',teamName(m.team2Id,data,m.placeholder2)),teamBadge(teamB));
     const scored = statusDone(m) || (inProgress(m) && m.score1 != null && m.score2 != null);
     const scoreboard=E('div','score'+(scored?'':' pending'),scored ? `${m.score1} – ${m.score2}` : 'VS');
     add(mid,a,scoreboard,b);
@@ -182,7 +214,7 @@
       card.append(columns);
       group.rows.slice(0,6).forEach((r,i)=>{
         const row=E('div','standings-row');
-        add(row,E('span','rank'+(i<2?' lead':''),i+1), E('span','standings-name',safe(r.team.name)),
+        add(row,E('span','rank'+(i<2?' lead':''),i+1), teamNameCell(r.team),
           E('span','stat',r.played),E('span','stat',r.gf),E('span','stat',r.gd>0?'+'+r.gd:r.gd),E('span','stat points',r.points));
         card.append(row);
       });
@@ -204,7 +236,7 @@
     card.append(columns);
     for(const [i,r] of group.rows.entries()) {
       const row=E('div','standings-row');
-      add(row,E('span','rank'+(i<2?' lead':''),i+1),E('span','standings-name',safe(r.team.name)),
+      add(row,E('span','rank'+(i<2?' lead':''),i+1),teamNameCell(r.team),
         E('span','stat',r.played),E('span','stat',r.gf),
         E('span','stat',r.gd>0?'+'+r.gd:r.gd),E('span','stat points',r.points));
       card.append(row);
