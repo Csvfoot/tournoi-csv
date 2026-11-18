@@ -53,3 +53,11 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Aperçu instantané, vérification des liens HTTPS et des logos, limites de champs et export local du fichier `experience-v73.js` uniquement après validation.
 - Aucun accès Firebase, aucun changement de scores, aucune publication et aucun secret requis. L'export est un téléchargement : la mise en ligne éventuelle reste une opération distincte.
 - À vérifier sur navigateur réel : ouverture de l'éditeur, modification d'un service et d'un partenaire, rejet d'URL non HTTPS, téléchargement du fichier, puis intégration manuelle du fichier exporté dans une branche de test.
+
+## Étape 5 — navigation mobile « Mon équipe » (18 novembre 2026)
+- Le bouton « Mon équipe » de la barre de navigation spectateur ouvre directement le calendrier si une équipe valide a déjà été sélectionnée et mémorisée sur cet appareil.
+- Lorsqu'aucune équipe reconnue n'est mémorisée, le sélecteur d'équipe existant s'ouvre comme auparavant.
+- Le calendrier affiche un bouton « Changer d'équipe » pour revenir au sélecteur, et un bouton de fermeture accessible de 44 px.
+- Aucune modification des matchs, scores, Firebase ou droits organisateur ; l'identifiant d'équipe reste enregistré seulement en local comme auparavant.
+- app.js relu sur GitHub après commit ; analyse syntaxique JavaScript réussie.
+- **Tests à réaliser** : première sélection, deuxième ouverture, changement d'équipe, sélection supprimée du tournoi, rechargement de la page et affichage mobile.
