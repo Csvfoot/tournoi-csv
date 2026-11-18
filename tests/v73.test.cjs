@@ -316,3 +316,29 @@ test('Arbre V7.3 : styles responsive branchés sur les écrans spectateur', () =
   assert.match(spectator,/experience-v73\.css/);
   assert.match(preview,/experience-v73\.css/);
 });
+
+
+test('Planification: détecter conflits de terrain, équipe, réservation et rotation', () => {
+  const minuteStart=app.indexOf('const planningMinutes =');
+  const minuteEnd=app.indexOf('const planningTime =',minuteStart);
+  const conflictStart=app.indexOf('const planningKey =');
+  const conflictEnd=app.indexOf('// V6.0 — diagnostic commun',conflictStart);
+  assert.ok(minuteStart>=0&&minuteEnd>minuteStart&&conflictStart>minuteEnd&&conflictEnd>conflictStart);
+  const ctx=vm.createContext({});
+  vm.runInContext(app.slice(minuteStart,minuteEnd) + '\n'+
+    app.slice(conflictStart,conflictEnd)+
+    '\nthis.conflict=planningConflict;this.rotation=planningRotationConflict;',ctx);
+  const match=(id,field,start,end,team1,team2,eventId='u10')=>({
+    id,kind:'match',eventId,fieldId:field,startTime:start,endTime:end,team1Id:team1,team2Id:team2
+  });
+  const first=match('one','f1','09:00','09:15','a','b');
+  assert.equal(ctx.conflict(first,match('two','f1','09:10','09:25','c','d')),true,'terrain occupé');
+  assert.equal(ctx.conflict(first,match('three','f2','09:10','09:25','c','d')),false,'terrains différents');
+  assert.equal(ctx.conflict(first,match('four','f2','09:10','09:25','b','d')),true,'même équipe simultanée');
+  assert.equal(ctx.conflict(first,match('five','f2','09:10','09:25','b','d','u11')),false,'IDs locaux aux catégories');
+  assert.equal(ctx.conflict(first,match('six','f1','09:15','09:30','c','d')),false,'créneaux contigus');
+  assert.equal(ctx.rotation(first,match('seven','f1','09:17','09:30','c','d'),()=>5),true,'rotation de 5 min');
+  assert.equal(ctx.rotation(first,match('eight','f1','09:17','09:30','c','d'),()=>0),false,'rotation zéro valide');
+  assert.equal(ctx.conflict(first,{kind:'réservation',eventId:'u10',startTime:'09:10',endTime:'09:20'}),true,'réservation bloque le créneau');
+  assert.equal(ctx.conflict(first,match('missing','f1',null,null,'c','d')),false,'match non programmé');
+});
