@@ -4377,11 +4377,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [newCustomGroupName, setNewCustomGroupName] = useState('');
     // V7.4 — Renseignements publics, intégrés à la configuration existante.
     const csvSaveInfo = (field, value) => {
-        if (userRole !== 'editor' || !requireHub()) return;
-        const updated = { ...config, [field]: String(value || '').slice(0, 1600) };
-        setConfig(updated);
-        broadcastUpdate(updated, fields, teams, matches);
-        showToast('Informations pratiques enregistrées.');
+        if (userRole !== 'editor' || !requireHub() || field !== 'practicalInfo') return;
+        if (!dbRef.current || cloudStatus !== 'online') {
+            showToast('Connexion Firebase nécessaire pour enregistrer les informations.', 'error'); return;
+        }
+        const cleanValue = String(value || '').slice(0, 1600);
+        dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id))
+            .set({ config: { practicalInfo: cleanValue }, updatedAt: new Date().toISOString() }, { merge: true })
+            .then(() => showToast('Informations pratiques enregistrées.'))
+            .catch(err => showToast('Informations non enregistrées : ' + err.message, 'error'));
     };
     const csvSaveSponsors = raw => {
         if (userRole !== 'editor' || !requireHub()) return;
@@ -4391,10 +4395,13 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 logoUrl: csvSafeLogoUrl(parts[1] || ''),
                 url: /^https:\/\//i.test(parts[2] || '') ? parts[2].slice(0, 250) : '' };
         }).filter(x => x.name).slice(0, 20);
-        const updated = { ...config, sponsors };
-        setConfig(updated);
-        broadcastUpdate(updated, fields, teams, matches);
-        showToast('Partenaires enregistrés.');
+        if (!dbRef.current || cloudStatus !== 'online') {
+            showToast('Connexion Firebase nécessaire pour enregistrer les sponsors.', 'error'); return;
+        }
+        dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id))
+            .set({ config: { sponsors }, updatedAt: new Date().toISOString() }, { merge: true })
+            .then(() => showToast('Partenaires enregistrés.'))
+            .catch(err => showToast('Partenaires non enregistrés : ' + err.message, 'error'));
     };
     const [csvSponsorDraft, csvSetSponsorDraft] = useState(() =>
         Array.isArray(config.sponsors) ? config.sponsors.map(x => [x.name || '', x.logoUrl || '', x.url || ''].join(' | ')).join('\n') : '');
@@ -5592,10 +5599,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             showToast('Logo refusé : utilise une URL HTTPS ou une image PNG/JPEG/WebP légère.', 'error');
             return;
         }
+        if (!dbRef.current || cloudStatus !== 'online') {
+            showToast('Connexion Firebase nécessaire pour enregistrer le logo.', 'error'); return;
+        }
         const updated = teams.map(t => t.id === teamId ? { ...t, logoUrl } : t);
         setTeams(updated);
-        broadcastUpdate(config, fields, updated, matches);
-        showToast(logoUrl ? 'Logo du club enregistré.' : 'Logo retiré.');
+        dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id))
+            .set({ teams: updated, updatedAt: new Date().toISOString() }, { merge: true })
+            .then(() => showToast(logoUrl ? 'Logo du club enregistré.' : 'Logo retiré.'))
+            .catch(err => showToast('Logo non enregistré : ' + err.message, 'error'));
     };
     const csvUploadTeamLogo = (teamId, file) => {
         if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 3000000) {
