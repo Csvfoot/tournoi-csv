@@ -1,7 +1,7 @@
 {
   "name": "Tournoi CSV — Spectateur",
   "short_name": "CSV Spectateur",
-  "description": "Application spectateur des tournois du CSV — V7.1",
+  "description": "Application spectateur des tournois du CSV — V7.3",
   "start_url": "./spectateur.html",
   "scope": "./",
   "display": "standalone",
