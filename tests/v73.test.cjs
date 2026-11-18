@@ -151,6 +151,8 @@ test('Prévisualisation: configuration Cloud neutralisée pour le vrai code appl
   assert.match(app,/if \(CSV_V73_ISOLATED_PREVIEW\) throw new Error/);
   assert.match(app,/CSV_V73_ISOLATED_PREVIEW \|\| !\('serviceWorker' in navigator\)/);
   assert.match(app,/CSV_V73_ISOLATED_PREVIEW && csvCachedTournament\(current.id\)/);
+  assert.match(app,/const welcomeLoading = !CSV_V73_ISOLATED_PREVIEW/);
+  assert.match(app,/if \(CSV_V73_ISOLATED_PREVIEW\) \{\s*if \(options.manual\)/);
 });
 test('Prévisualisation: page non connectée, CSP strict et scripts valides', () => {
   assert.match(previewHtml,/connect-src 'none'/);
