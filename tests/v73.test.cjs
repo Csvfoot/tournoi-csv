@@ -232,3 +232,11 @@ test('Finales: le filtre visuel affiche le match pour la troisième place même 
      /3(?:ème|e)\s*\/\s*4/.test(m.stage||''));
   assert.equal(display(bronze),true);
 });
+
+test('Classement général: aucune médaille ni podium avant la fin des matchs', () => {
+  assert.match(app, /finalTable\.finished \? "\\uD83C\\uDFC6 Classement final du tournoi" : "\\uD83D\\uDCCA Classement général provisoire"/);
+  assert.match(app, /finalTable\.finished && r\.position === 1 \? '🥇'/);
+  assert.match(app, /finalTable\.finished && r\.position === 2 \? '🥈'/);
+  assert.match(app, /finalTable\.finished && r\.position === 3 \? '🥉'/);
+  assert.match(app, /finalTable\.finished && r\.position <= 3 \?/);
+});
