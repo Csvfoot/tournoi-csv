@@ -379,7 +379,12 @@
           doc=>{
             if(doc.exists) {
               const d=doc.data()||{};
-              state.records.set(event.id,{teams:arr(d.teams),matches:arr(d.matches),config:d.config||{}});
+              const logos=d.teamLogos&&typeof d.teamLogos==='object'&&!Array.isArray(d.teamLogos)?d.teamLogos:{};
+              const teams=arr(d.teams).map(t=>({
+                ...t,logoUrl:Object.prototype.hasOwnProperty.call(logos,String(t.id))
+                  ?String(logos[String(t.id)]||''):String(t.logoUrl||'')
+              }));
+              state.records.set(event.id,{teams,matches:arr(d.matches),config:d.config||{}});
             } else state.records.set(event.id,{teams:[],matches:[],config:{}});
             state.missing.delete(event.id);
             state.fromCache=Boolean(doc.metadata?.fromCache);
