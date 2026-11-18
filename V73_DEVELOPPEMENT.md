@@ -47,3 +47,9 @@ Aucun changement de règles Firebase et aucune publication de la V7.3 ne sont in
 - Validation des liens HTTPS sans identifiants ; logos HTTPS PNG/JPG/WebP ou chemin `./logos/` ; texte ajouté au DOM par React, sans HTML brut.
 - Prévisualisation autonome avec **données fictives**, testée à 1280 et 390 px : changement U10/U11, ajout de partenaire, rejet de `javascript:`, vérification des réglages et absence d'erreur JS ou de débordement.
 - **À faire avant production** : renseignement de vrais partenaires et informations pratiques, vérification de l'intégration au React réel, cache/service worker, contrôles Firestore de `teamLogos`, tests sur téléphones/TV et sauvegarde.
+
+## Étape 4 — éditeur de réglages publics (18 novembre 2026)
+- `reglages-publics-v73.html` : formulaire pour annonces, services et partenaires, chargé à partir de `experience-v73.js` réellement présent sur la branche.
+- Aperçu instantané, vérification des liens HTTPS et des logos, limites de champs et export local du fichier `experience-v73.js` uniquement après validation.
+- Aucun accès Firebase, aucun changement de scores, aucune publication et aucun secret requis. L'export est un téléchargement : la mise en ligne éventuelle reste une opération distincte.
+- À vérifier sur navigateur réel : ouverture de l'éditeur, modification d'un service et d'un partenaire, rejet d'URL non HTTPS, téléchargement du fichier, puis intégration manuelle du fichier exporté dans une branche de test.
