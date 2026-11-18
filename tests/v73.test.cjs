@@ -72,3 +72,13 @@ test('Navigation spectateur: sélection mémorisée et ouverture directe sont pr
   assert.match(app, /const savedTeam = teams\.find\(t => t\.id === viewerTeamId\)/);
   assert.match(app, /Changer d’équipe/);
 });
+
+test('Contrôle visuel: script valide, données réelles et absence de Firebase', () => {
+  const html = fs.readFileSync('controle-visuel-v73.html', 'utf8');
+  const scripts = [...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/g)].map(x => x[1]).filter(Boolean);
+  assert.ok(scripts.length > 0, 'Script de contrôle présent');
+  for (const script of scripts) new vm.Script(script);
+  assert.match(html, /window\\.CSV_V73_EXPERIENCE/);
+  assert.doesNotMatch(html, /firebase-app-compat|firebase-firestore-compat/);
+  assert.doesNotMatch(html, /\\.innerHTML\\s*=/);
+});
