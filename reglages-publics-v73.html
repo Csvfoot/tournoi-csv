@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#21070d">
+<title>Tournoi CSV — Réglages publics V7.3 (développement)</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#12080e;color:#fff2e7}
+*{box-sizing:border-box}body{margin:0}main{max-width:1150px;margin:auto;padding:20px 15px 80px}
+a{color:#f5c65b}h1{margin:.3em 0;font-size:clamp(24px,4vw,37px)}h2{font-size:20px}p{line-height:1.5}
+.muted,small{color:#d6bcb6}.eyebrow{color:#f5c65b;font-weight:800;letter-spacing:.08em;font-size:12px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:22px}
+.panel{border:1px solid #67404a;background:#241018;border-radius:18px;padding:18px;min-width:0}
+label{display:block;font-weight:700;font-size:13px;margin:12px 0}
+input,textarea,select{display:block;width:100%;min-width:0;padding:12px;margin-top:6px;background:#13090e;color:#fff;border:1px solid #88616a;border-radius:10px;font:inherit}
+textarea{min-height:95px;resize:vertical}
+input:focus,textarea:focus,button:focus-visible{outline:3px solid #f7c65c;outline-offset:2px}
+button{border:1px solid #a36b67;border-radius:10px;background:#56212e;color:#fff;padding:11px 14px;font-weight:800;min-height:43px;cursor:pointer}
+button.primary{color:#260d15;background:#f5c65b;border-color:#f5c65b}
+button.secondary{background:#2e1822}.actions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}
+.item{padding:12px;border:1px solid #65414e;border-radius:12px;margin:12px 0;background:#321722}
+.item-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.item-head strong{font-size:14px}.item-head button{font-size:12px}
+.status{padding:12px;background:#332218;border-radius:12px;border:1px solid #79583e;line-height:1.5}
+.status.ok{background:#14291e;border-color:#4b9a6b}.status.error{background:#3c151e;border-color:#dc6770}
+.preview{background:#160911;border:1px solid #664047;border-radius:15px;padding:15px;margin:12px 0}
+.preview h3{margin:0 0 12px;color:#f4c650;font-size:16px}
+.preview-card{border-radius:11px;padding:12px;background:#321721;margin:8px 0;overflow-wrap:anywhere}
+.preview-sponsors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.preview-sponsor{display:flex;align-items:center;gap:9px;min-width:0}
+.preview-sponsor img{width:46px;height:46px;object-fit:contain}
+.preview-sponsor span{overflow-wrap:anywhere}.hint{font-size:12px;color:#d4b9b4}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.panel{padding:14px}}
+@media(max-width:350px){.preview-sponsors{grid-template-columns:1fr}}
+</style><script defer src="./experience-v73.js?v=7.3-dev3"></script></head>
+<body><main>
+<div class="eyebrow">⚽ TOURNOI CSV • V7.3 • OUTIL DE DÉVELOPPEMENT</div>
+<h1>Réglages publics & aperçu</h1>
+<p class="muted">Prépare les annonces, services et partenaires à partir de la <strong>configuration réellement chargée</strong>. L'aperçu se met à jour immédiatement. Aucune modification du tournoi, de Firebase ou du site publié.</p>
+<p><a href="./spectateur.html">← Retour au spectateur</a></p>
+<div class="grid"><section class="panel" aria-label="Éditeur des réglages">
+<h2>1. Modifier les informations</h2>
+<label>Annonce publique (260 caractères maximum)<textarea id="announcement" maxlength="260" placeholder="Aucune annonce actuellement"></textarea></label>
+<h2>Services pratiques</h2><p class="hint">Buvette, restauration, accueil, parking… uniquement les services confirmés.</p>
+<div id="services"></div><button type="button" id="addService" class="secondary">+ Ajouter un service</button>
+<h2>Partenaires</h2><p class="hint">Nom, mention et logo facultatif. Lien du partenaire en HTTPS uniquement.</p>
+<div id="sponsors"></div><button type="button" id="addSponsor" class="secondary">+ Ajouter un partenaire</button>
+<div class="actions"><button type="button" id="validate" class="primary">✓ Vérifier les réglages</button><button type="button" id="reset" class="secondary">↺ Recharger la configuration</button></div>
+<div id="status" class="status" role="status" aria-live="polite">Chargement des réglages…</div>
+</section><section class="panel" aria-label="Prévisualisation réelle">
+<h2>2. Aperçu spectateur</h2><p class="hint">Ce volet reflète exactement les éléments publics optionnels. Date, terrains, poules et matchs proviennent normalement du tournoi actif : ils ne sont pas inventés ici.</p>
+<div id="preview" aria-live="polite"></div>
+<h2>3. Préparer l'enregistrement</h2>
+<p class="muted">Le fichier exporté est <code>experience-v73.js</code>. Le téléchargement ne publie rien : il faudra ensuite remplacer ce fichier sur la branche de développement, vérifier le résultat et valider explicitement toute mise en ligne.</p>
+<div class="actions"><button type="button" id="download" class="primary">⬇ Télécharger les réglages validés</button></div>
+<p class="hint">🔐 Cet écran n'offre aucun accès à Firebase et ne contient aucun identifiant. Il ne donne pas de droits d'administration, même s'il est ouvert publiquement.</p>
+</section></div></main>
+<script>
+(function(){
+"use strict";
+const byId=id=>document.getElementById(id);
+const initial=()=>window.CSV_V73_EXPERIENCE||{announcement:"",services:[],sponsors:[]};
+const escText=x=>String(x==null?"":x);
+const trim=(x,max)=>escText(x).trim().slice(0,max);
+const https=(value)=>{if(!value)return true;try{const u=new URL(value);return u.protocol==="https:"&&!u.username&&!u.password;}catch(_){return false;}};
+const imagePath=(value)=>{if(!value)return true;if(/^\.\/logos\/[a-z0-9_./-]+\.(png|jpe?g|webp)$/i.test(value)&&!value.includes(".."))return true;if(!https(value))return false;try{return /\.(png|jpe?g|webp)$/i.test(new URL(value).pathname);}catch(_){return false;}};
+const input=(parent,label,value,max,kind)=>{const l=document.createElement("label");l.textContent=label;const el=document.createElement("input");el.type="text";el.maxLength=max;el.value=escText(value);el.dataset.kind=kind;l.appendChild(el);parent.appendChild(l);el.addEventListener("input",render);return el;};
+function addRow(type,data){
+const target=byId(type),max=type==="services"?8:12;if(target.children.length>=max){setStatus("Limite atteinte : "+max+" éléments.",true);return;}
+const item=document.createElement("div");item.className="item";item.dataset.type=type;
+const head=document.createElement("div");head.className="item-head";
+const title=document.createElement("strong");title.textContent=type==="services"?"Service":"Partenaire";
+const del=document.createElement("button");del.type="button";del.textContent="Supprimer";del.className="secondary";del.addEventListener("click",()=>{item.remove();render();});
+head.append(title,del);item.appendChild(head);
+if(type==="services"){
+input(item,"Nom (60 max)",data.label||"",60,"label");
+input(item,"Détail (160 max)",data.detail||"",160,"detail");
+input(item,"Emoji (facultatif)",data.icon||"",4,"icon");
+}else{
+input(item,"Nom (80 max)",data.name||"",80,"name");
+input(item,"Mention (45 max)",data.tier||"",45,"tier");
+input(item,"Logo HTTPS ou ./logos/ (facultatif)",data.logoUrl||"",1200,"logoUrl");
+input(item,"Site HTTPS (facultatif)",data.website||"",1200,"website");
+}
+target.appendChild(item);render();
+}
+function readRows(type){return [...byId(type).children].map(row=>Object.fromEntries([...row.querySelectorAll("input")].map(el=>[el.dataset.kind,el.value.trim()])));}
+function snapshot(){return {version:1,announcement:byId("announcement").value.trim(),services:readRows("services"),sponsors:readRows("sponsors")};}
+function validate(data){const errors=[];
+if(data.services.length>8||data.sponsors.length>12)errors.push("Trop d'éléments.");
+data.services.forEach((s,i)=>{if(!s.label||!s.detail)errors.push("Service "+(i+1)+" : nom et détail obligatoires.");});
+data.sponsors.forEach((s,i)=>{if(!s.name)errors.push("Partenaire "+(i+1)+" : nom obligatoire.");if(!https(s.website))errors.push("Partenaire "+(i+1)+" : site HTTPS invalide.");if(!imagePath(s.logoUrl))errors.push("Partenaire "+(i+1)+" : adresse du logo invalide.");});
+return errors;}
+function setStatus(msg,error){const s=byId("status");s.className="status "+(error?"error":"ok");s.textContent=msg;}
+const div=(className,text)=>{const el=document.createElement("div");el.className=className;el.textContent=text;return el;};
+function render(){
+const data=snapshot(),errors=validate(data),target=byId("preview");target.replaceChildren();
+const info=div("preview","");const h=document.createElement("h3");h.textContent="ℹ️ Infos pratiques";info.appendChild(h);
+info.appendChild(div("preview-card","📅 Date / 🏟️ Terrains : informations du tournoi actif (non simulées)"));
+if(data.announcement)info.appendChild(div("preview-card","📣 "+data.announcement));
+data.services.filter(x=>x.label&&x.detail).forEach(x=>info.appendChild(div("preview-card",(x.icon?x.icon+" ":"")+x.label+" — "+x.detail)));
+target.appendChild(info);
+if(data.sponsors.length){
+const section=div("preview","");const sh=document.createElement("h3");sh.textContent="🤝 Nos partenaires";section.appendChild(sh);
+const grid=div("preview-sponsors","");
+data.sponsors.filter(x=>x.name).forEach(s=>{
+const item=div("preview-card preview-sponsor","");if(imagePath(s.logoUrl)&&s.logoUrl){const img=document.createElement("img");img.src=s.logoUrl;img.alt="";img.loading="lazy";img.onerror=()=>{img.remove();};item.appendChild(img);}
+const text=document.createElement("span");const name=document.createElement("strong");name.textContent=s.name;text.appendChild(name);if(s.tier){text.appendChild(document.createElement("br"));text.appendChild(document.createTextNode(s.tier));}item.appendChild(text);grid.appendChild(item);
+});section.appendChild(grid);target.appendChild(section);
+}
+if(errors.length){setStatus(errors.join(" "),true);}else{setStatus("✓ Réglages cohérents — "+data.services.length+" service(s), "+data.sponsors.length+" partenaire(s). Aucun changement enregistré sur le serveur.",false);}
+return errors.length===0;
+}
+function load(){byId("announcement").value=trim(initial().announcement,260);byId("services").replaceChildren();byId("sponsors").replaceChildren();(Array.isArray(initial().services)?initial().services:[]).slice(0,8).forEach(s=>addRow("services",s));(Array.isArray(initial().sponsors)?initial().sponsors:[]).slice(0,12).forEach(s=>addRow("sponsors",s));render();}
+byId("announcement").addEventListener("input",render);
+byId("addService").addEventListener("click",()=>addRow("services",{}));
+byId("addSponsor").addEventListener("click",()=>addRow("sponsors",{}));
+byId("validate").addEventListener("click",render);
+byId("reset").addEventListener("click",load);
+byId("download").addEventListener("click",()=>{
+if(!render())return;
+const data=snapshot();
+const body="/* Tournoi CSV V7.3 — configuration publique vérifiée, sans secrets. */\nwindow.CSV_V73_EXPERIENCE = Object.freeze("+JSON.stringify(data,null,2)+");\n";
+const file=new Blob([body],{type:"text/javascript;charset=utf-8"});const url=URL.createObjectURL(file);const a=document.createElement("a");a.href=url;a.download="experience-v73.js";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);setStatus("✓ Configuration exportée localement. Aucun déploiement ni enregistrement Firebase.",false);
+});
+window.addEventListener("DOMContentLoaded",load);
+})();
+</script></body></html>
