@@ -3090,3 +3090,15 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 
 /* La categorie est déjà sélectionnable dans l'accueil : pas de deuxième pastille redondante. */
 .csv-v74-welcome .csv-v74-hero > .csv-v74-tag{display:none;}
+
+/* V7.4 : phases finales complètes, sans doublons, lisibles au toucher. */
+.csv-v74-swipe-hint {display:none;font-size:11px;color:#ffca67;font-weight:800;margin:12px 0 4px;}
+.csv-v74-rounds:focus-visible{outline:2px solid #ffca43;outline-offset:3px;border-radius:10px;}
+.csv-v74-ranking-matches{margin-top:24px;border-top:1px solid #86505d;padding-top:20px;}
+.csv-v74-ranking-matches h3{font-size:17px;font-weight:900;color:#ffcc61;margin-bottom:14px;}
+.csv-v74-ranking-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+@media(max-width:800px){
+ .csv-v74-swipe-hint {display:block;}
+ .csv-v74-rounds {scroll-padding-left:10px;}
+ .csv-v74-ranking-grid{grid-template-columns:1fr;}
+}
