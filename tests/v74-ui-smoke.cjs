@@ -37,6 +37,15 @@ const fixture = {
      status:'pending',startTime:'16:00',score1:null,score2:null}
   ]
 };
+const realLogic = [
+  ['const standingsFor =', '// Résultat d\'une rencontre'],
+  ['const resultOf =', 'const buildFinalStandings'],
+  ['const sortedMatchesForTeam =', 'const teamScheduleDiagnostics']
+].map(([start,end]) => {
+  const i = source.indexOf(start), j = source.indexOf(end,i+1);
+  assert(i>=0 && j>i, 'Fonction métier inaccessible: '+start);
+  return source.slice(i,j);
+}).join('\n');
 const deps = String.raw`
 const React=window.React, ReactDOM=window.ReactDOM;
 const csvSafeLogoUrl=src=>typeof src==='string'&&src.startsWith('https:')?src:'';
@@ -48,15 +57,9 @@ function ClubLogo(){return React.createElement('span',{style:{
   display:'inline-flex',fontSize:34,alignItems:'center',justifyContent:'center'
 }},'⚽');}
 const csvReadableDay=s=>s;
-const resultOf=m=>!m||m.status!=='finished'||m.score1==null||m.score2==null?null:
-  Number(m.score1)>Number(m.score2)?{winner:m.team1Id,loser:m.team2Id}:
-  Number(m.score2)>Number(m.score1)?{winner:m.team2Id,loser:m.team1Id}:null;
-const sortedMatchesForTeam=(list,id)=>list.filter(m=>m.team1Id===id||m.team2Id===id);
-const standingsFor=(teams,matches,group,rules)=>teams.filter(t=>(t.group||'Poule A')===group).map(team=>({
-  team,played:matches.filter(m=>m.status==='finished'&&(m.team1Id===team.id||m.team2Id===team.id)).length,
-  points:3,gf:2,gd:1
-}));
-`;
+const planningMinutes = value => /^\d{1,2}:\d{2}$/.test(String(value||''))
+  ? Number(value.split(':')[0])*60+Number(value.split(':')[1]) : -1;
+` + realLogic;
 const react = fs.readFileSync(path.join(root, 'node_modules/react/umd/react.production.min.js'), 'utf8');
 const reactDom = fs.readFileSync(path.join(root, 'node_modules/react-dom/umd/react-dom.production.min.js'), 'utf8');
 const documentHtml = [
