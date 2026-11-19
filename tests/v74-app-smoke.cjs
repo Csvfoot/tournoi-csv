@@ -35,7 +35,13 @@ async function main(){
       return x.includes('Le football se vit ici.') ||
         x.includes('JOURNÉE DU TOURNOI') || x.includes('Aucune journée publiée');
     },{timeout:30000});loaded=true; }catch(e){}
-    const text=(await page.locator('body').innerText()).slice(0,400);
+    // L'application peut afficher immédiatement le squelette avant la réponse Firebase.
+    // Observer son état stabilisé, sans écrire dans le projet Firebase.
+    await page.waitForTimeout(12000);
+    const text=(await page.locator('body').innerText()).slice(0,1200);
+    const stillSyncing = text.includes('Synchronisation du programme') ||
+        text.includes('Récupération des journées publiées');
+    console.log('Synchronisation Firebase encore affichée après 12 s:', stillSyncing);
     fs.mkdirSync(path.join(root,'test-artifacts'),{recursive:true});
     await page.screenshot({path:path.join(root,'test-artifacts','v74-page-spectateur-reelle.png'),fullPage:true});
     console.log('Entrée HTML:',response.status(),'| Interface chargée:',loaded);
