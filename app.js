@@ -4264,6 +4264,16 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         }
     });
     const [teamPickerOpen, setTeamPickerOpen] = useState(false);
+    const csvOpenMyTeam = () => {
+        // Un seul clic suffit lorsque le club est déjà mémorisé pour cette catégorie.
+        const savedTeam = teams.find(t => t.id === viewerTeamId);
+        if (savedTeam) {
+            setSelectedTeamSchedule(savedTeam);
+            setTeamPickerOpen(false);
+        } else {
+            setTeamPickerOpen(true);
+        }
+    };
     // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
     useEffect(() => {
         if (hubIsEditor || !requestedViewerAction) return;
@@ -4282,7 +4292,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         setViewerMoreOpen(false);
         setScheduleViewMode('chrono');
         setMobileMatchFilter(action === 'results' ? 'finished' : 'upcoming');
-        if (action === 'team') setTeamPickerOpen(true);
+        if (action === 'team') csvOpenMyTeam();
         if (action === 'tv') csvSetTvMode(true);
     }, [requestedViewerAction, hubIsEditor]);
     const [newPlayerInputs, setNewPlayerInputs] = useState({});
@@ -6004,7 +6014,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     group.tabs.map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => chooseOrganizerTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold transition ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                         tab.icon,
                         " ",
-                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'home', icon: '🏠', text: 'Accueil' }, { id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => setActiveTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
+                        tab.text))))) : React.createElement("nav", { "aria-label": "Rubriques spectateur", className: "flex flex-wrap gap-2" }, [{ id: 'home', icon: '🏠', text: 'Accueil' }, { id: 'myTeam', icon: '⭐', text: 'Mon équipe' }, { id: 'teams', icon: '👥', text: 'Équipes' }, { id: 'matches', icon: '📅', text: 'Matchs' }, { id: 'standings', icon: '📊', text: 'Poules' }, ...(config.format !== 'round_robin' ? [{ id: 'bracket', icon: '🏆', text: 'Finales' }] : []), { id: 'finalStandings', icon: '🥇', text: 'Classement final' }, { id: 'stats', icon: '📈', text: 'Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => tab.id === 'myTeam' ? csvOpenMyTeam() : setActiveTab(tab.id), "aria-current": activeTab === tab.id ? 'page' : undefined, className: 'min-h-[38px] px-3 rounded-lg text-xs font-bold ' + (activeTab === tab.id ? 'bg-amber-500 text-black' : 'text-slate-200 hover:bg-[#35131b]') },
                     tab.icon,
                     " ",
                     tab.text)))))),
@@ -6018,7 +6028,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 { id: 'more', icon: '☰', text: 'Plus' }
             ].map(tab => (React.createElement("button", { type: "button", key: tab.id, "aria-current": activeTab === tab.id ? 'page' : undefined, onClick: () => {
                     if (tab.id === 'myTeam')
-                        setTeamPickerOpen(true);
+                        csvOpenMyTeam();
                     else if (tab.id === 'more')
                         setViewerMoreOpen(v => !v);
                     else {
@@ -6343,7 +6353,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
             activeTab === 'home' && userRole === 'viewer' && React.createElement(CsvVisualHome, {
                 tournament, matches, teams, fields, config, onNavigate: setActiveTab,
-                onChooseTeam: () => setTeamPickerOpen(true)
+                onChooseTeam: csvOpenMyTeam
             }),
             activeTab === 'matches' && (React.createElement("div", { className: "space-y-4 sm:space-y-6" },
                 userRole === 'viewer' && (Boolean(config.practicalInfo) || (Array.isArray(config.sponsors) && config.sponsors.length > 0)) &&
