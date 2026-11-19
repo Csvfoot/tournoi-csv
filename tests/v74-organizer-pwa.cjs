@@ -41,7 +41,7 @@ async function organizer() {
     })
   };
   const state = {
-    userRole: 'editor', requireHub: () => true, dbRef: { current: db }, cloudStatus: 'online',
+    userRole: 'editor', csvHasOwnerSession: () => true, requireHub: () => true, dbRef: { current: db }, cloudStatus: 'online',
     tournament: current, tournamentDocId: id => 'event_' + id,
     showToast: message => notices.push(message), setTeams: () => {}
   };
@@ -63,6 +63,11 @@ async function organizer() {
   }]);
   assert.equal(writes[1].options.merge, true);
 
+  const editor = { ...state, csvHasOwnerSession: () => false };
+  runHandler(editor, logoHelper, logoHandler, 'csvUpdateTeamLogo("a", "https://cdn.example/logo.png");');
+  runHandler(editor, logoHelper, sponsorHandler, 'csvSaveSponsors("Partenaire");');
+  assert.equal(writes.length, 2);
+
   const originalMatch = { id: 'm1', group: 'Poule A', fieldId: 'f1', status: 'pending',
     startTime: '09:00', endTime: '09:15' };
   const updatedMatch = { ...originalMatch, status: 'finished', score1: 2, score2: 1 };
@@ -75,6 +80,18 @@ async function organizer() {
   }, extract('const saveMatchDetails =', '// Statistiques des SCORES'), 'saveMatchDetails();');
   assert.deepEqual(structuredClone(savedMatches[0]), { ...updatedMatch, fieldName: 'Honneur' });
 
+  let scorePayload;
+  runHandler({
+    ...editor, firebase: { apps: [{}], auth: () => ({ currentUser: {} }) },
+    csvIsApprovedOrganizer: () => true, isRemoteUpdate: { current: false },
+    dbRef: { current: { collection: () => ({ doc: () => ({ set: async value => {
+      scorePayload = value;
+    } }) }) } }, savedMatches
+  }, extract('const broadcastUpdate =', 'const timeToMinutes ='),
+  'broadcastUpdate({}, [], [], savedMatches, null, true);');
+  assert.deepEqual(Object.keys(scorePayload).sort(), ['matches', 'updatedAt']);
+  assert.equal(scorePayload.matches[0].score1, 2);
+
   const publicationState = {
     ...state, hubIsEditor: true, current, catalog: [current, other], hubStatus: 'online',
     loadedDocs: { u10: true }, records: { u10: { matches: [updatedMatch] } },
@@ -86,6 +103,8 @@ async function organizer() {
     extract('const planningMinutes =', '\nconst '),
     extract('const planningOverlap =', '// V6.0 — diagnostic commun'),
     extract('const toggleDayPublication =', 'const addTournament ='), 'toggleDayPublication();');
+  await publish({ ...publicationState, csvHasOwnerSession: () => false });
+  assert.equal(writes.length, 2);
   await publish({ ...publicationState, loadedDocs: {} });
   assert.match(notices.at(-1), /chargement complet/);
   await publish({ ...publicationState, records: { u10: { matches: [updatedMatch, { ...updatedMatch, id: 'm2' }] } } });

@@ -48,6 +48,13 @@ const CSV_HOME_MODE = window.CSV_LAUNCH_MODE === 'organizer' ? 'organizer'
 const CSV_APPROVED_ORGANIZER_UID = 'ewjuchE1caWjm9SVWesg3JIkgQ02';
 // CSV_V72_MULTI_ORGANISATEURS : cache volatile, contrôle serveur Firestore obligatoire.
 const csvAuthorizedOrganizerUIDs = new Set();
+function csvIsOwner(user) {
+    return user?.uid === CSV_APPROVED_ORGANIZER_UID && user.emailVerified === true && !user.isAnonymous;
+}
+function csvHasOwnerSession() {
+    return typeof firebase !== 'undefined' && firebase.apps.length > 0 &&
+        csvIsOwner(firebase.auth().currentUser);
+}
 function csvIsApprovedOrganizer(user) {
     return Boolean(user && !user.isAnonymous && user.emailVerified === true &&
         typeof user.uid === 'string' && (user.uid === CSV_APPROVED_ORGANIZER_UID ||
@@ -2363,7 +2370,7 @@ function MultiTournamentShell() {
     };
     const [publicationNotice, setPublicationNotice] = useState('');
     const toggleDayPublication = async () => {
-        if (!hubIsEditor || !current)
+        if (!hubIsEditor || !csvHasOwnerSession() || !current)
             return;
         const date = current.date;
         const currentlyPublic = csvDayIsFullyPublished(catalog, date);
@@ -3436,7 +3443,7 @@ function MultiTournamentShell() {
                                 setEditingEvent({ ...current });
                                 setShowCreate(false);
                             } }, className: "min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200 disabled:opacity-40" }, "\u270E Modifier / Dupliquer"),
-                        React.createElement("button", { type: "button", disabled: !current || hubStatus !== 'online', onClick: toggleDayPublication, className: "min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200 disabled:opacity-40" }, current && csvDayIsFullyPublished(catalog, current.date) ? '🙈 Masquer la journée' : '📣 Publier la journée'),
+                        csvHasOwnerSession() && React.createElement("button", { type: "button", disabled: !current || hubStatus !== 'online', onClick: toggleDayPublication, className: "min-h-[46px] rounded-xl border border-amber-700/60 bg-[#32131b] p-2 text-xs font-bold text-amber-200 disabled:opacity-40" }, current && csvDayIsFullyPublished(catalog, current.date) ? '🙈 Masquer la journée' : '📣 Publier la journée'),
                         React.createElement("button", { type: "button", onClick: () => { setShowBackupPanel(v => !v); setBackupCandidate(null); setBackupNotice(''); }, className: "min-h-[46px] rounded-xl border border-emerald-800/60 bg-[#12302b] p-2 text-xs font-bold text-emerald-100" }, "\uD83D\uDCBE Sauvegarder / Restaurer")),
                     React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 border-t border-amber-900/40 pt-2" },
                         React.createElement("p", { className: "text-[11px] text-slate-400" }, "Gestion des cat\u00E9gories, journ\u00E9es et sauvegardes."),
@@ -4420,7 +4427,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [newCustomGroupName, setNewCustomGroupName] = useState('');
     // V7.4 — Renseignements publics, intégrés à la configuration existante.
     const csvSaveInfo = (field, value) => {
-        if (userRole !== 'editor' || !requireHub() || field !== 'practicalInfo') return;
+        if (userRole !== 'editor' || !csvHasOwnerSession() || !requireHub() || field !== 'practicalInfo') return;
         if (!dbRef.current || cloudStatus !== 'online') {
             showToast('Connexion Firebase nécessaire pour enregistrer les informations.', 'error'); return;
         }
@@ -4431,7 +4438,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             .catch(err => showToast('Informations non enregistrées : ' + err.message, 'error'));
     };
     const csvSaveSponsors = raw => {
-        if (userRole !== 'editor' || !requireHub()) return;
+        if (userRole !== 'editor' || !csvHasOwnerSession() || !requireHub()) return;
         const sponsors = String(raw || '').split('\n').map(x => {
             const parts = x.split('|').map(p => p.trim());
             return { name: (parts[0] || '').slice(0, 80),
@@ -4692,7 +4699,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             unsubscribe(); };
     }, [tournament.id]);
     // Émission des mises à jour vers le Cloud
-    const broadcastUpdate = (newConfig, newFields, newTeams, newMatches, auditEvent = null) => {
+    const broadcastUpdate = (newConfig, newFields, newTeams, newMatches, auditEvent = null, scoreUpdate = false) => {
         // Garde-fou ergonomique : le contrôle véritable reste dans les règles Firestore.
         if (userRole !== 'editor' || !csvIsApprovedOrganizer(firebase.apps.length ? firebase.auth().currentUser : null)) {
             showToast('Écriture refusée : connexion organisateur autorisée requise.', 'error');
@@ -4708,9 +4715,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             try {
                 const clean = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
                 const payload = {
-                    config: clean(csvCleanPublicConfig(newConfig || config)),
-                    fields: clean(newFields || fields),
-                    teams: clean(newTeams || teams),
+                    ...((!scoreUpdate || csvHasOwnerSession()) ? {
+                        config: clean(csvCleanPublicConfig(newConfig || config)),
+                        fields: clean(newFields || fields),
+                        teams: clean(newTeams || teams)
+                    } : {}),
                     matches: clean(newMatches || matches),
                     updatedAt: new Date().toISOString()
                 };
@@ -5641,7 +5650,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         showToast(`Équipe "${newTeam.name}" inscrite !`);
     };
     const csvUpdateTeamLogo = (teamId, value) => {
-        if (userRole !== 'editor' || !requireHub()) return;
+        if (userRole !== 'editor' || !csvHasOwnerSession() || !requireHub()) return;
         const logoUrl = csvSafeLogoUrl(value);
         if (value && !logoUrl) {
             showToast('Logo refusé : utilise une URL HTTPS ou une image PNG/JPEG/WebP légère.', 'error');
@@ -5668,6 +5677,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             .catch(err => showToast('Logo non enregistré : ' + err.message, 'error'));
     };
     const csvUploadTeamLogo = (teamId, file) => {
+        if (!csvHasOwnerSession()) return;
         if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 3000000) {
             showToast('Image PNG/JPEG/WebP de moins de 3 Mo nécessaire.', 'error'); return;
         }
@@ -5862,7 +5872,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         }
         const auditEvent = csvMatchAudit(tournament.id, originalMatch, savedMatch, 'Feuille de match — Calendrier & Scores');
         setMatches(updated);
-        broadcastUpdate(config, fields, teams, updated, auditEvent);
+        broadcastUpdate(config, fields, teams, updated, auditEvent, true);
         setEditingMatch(null);
         showToast('Score et match enregistrés !');
     };
@@ -6110,7 +6120,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("span", { className: "text-slate-300" }, m.status === 'live' ? '🟢 En direct' : 'À venir'));
                         })))),
             activeTab === 'config' && userRole === 'editor' && (React.createElement("div", { className: "space-y-6" },
-                React.createElement("section", { className: "rounded-2xl border border-amber-700/50 bg-[#150709] p-4 space-y-3" },
+                csvHasOwnerSession() && React.createElement("section", { className: "rounded-2xl border border-amber-700/50 bg-[#150709] p-4 space-y-3" },
                     React.createElement("h2", { className: "text-base font-black text-amber-300" }, "🏪 Partenaires & informations pratiques"),
                     React.createElement("p", { className: "text-xs text-slate-300" }, "Visible par les spectateurs de cette catégorie. Pour chaque sponsor : Nom | URL HTTPS du logo | URL HTTPS du site (une ligne par partenaire)."),
                     React.createElement("label", { className: "text-xs text-amber-200 block" }, "Sponsors et partenaires",
@@ -6288,7 +6298,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                         React.createElement("span", { className: "text-[10px] text-amber-400 font-medium" },
                                             "\u00C9quipe #",
                                             idx + 1))),
-                                userRole === 'editor' && React.createElement("div", { className: "mt-2 flex flex-wrap gap-2 items-center" },
+                                userRole === 'editor' && csvHasOwnerSession() && React.createElement("div", { className: "mt-2 flex flex-wrap gap-2 items-center" },
                                     React.createElement("label", { className: "cursor-pointer rounded-lg border border-amber-700/50 px-3 py-2 text-xs text-amber-300" },
                                         "📷 Importer logo",
                                         React.createElement("input", { type: "file", accept: "image/png,image/jpeg,image/webp", className: "sr-only", onChange: e => { csvUploadTeamLogo(t.id, e.target.files && e.target.files[0]); e.target.value = ''; } })),
