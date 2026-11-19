@@ -3087,3 +3087,6 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-fixture-main > .csv-v74-club{font-size:12px;}
 .csv-v74-tv-fixture .csv-v74-club{font-size:inherit;}
 @media(max-width:520px){.csv-v74-club{gap:4px;}.csv-v74-fixture-main > .csv-v74-club{font-size:10px;}}
+
+/* La categorie est déjà sélectionnable dans l'accueil : pas de deuxième pastille redondante. */
+.csv-v74-welcome .csv-v74-hero > .csv-v74-tag{display:none;}
