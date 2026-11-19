@@ -3993,7 +3993,7 @@ function CsvTeamOverview({ team, teams, matches, config, groups }) {
                 React.createElement('h3',null,team.name),
                 React.createElement('p',null,group+(position >= 0 ? ' · '+(position+1)+'e au classement' : '')))),
         React.createElement('div',{className:'csv-v74-mini-metrics'},
-            [['Points',row ? row.points : '—'],['Joués',row ? row.played : 0],
+            [['Joués',row ? row.played : 0],['Points',row ? row.points : '—'],
              ['Buts',row ? row.gf : 0],['Diff.',row ? row.gd : 0]].map(([label,value]) =>
                 React.createElement('div',{key:label},
                     React.createElement('strong',null,value),
