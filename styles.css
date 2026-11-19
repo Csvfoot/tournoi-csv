@@ -3004,15 +3004,20 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-team-name p{color:#ffcb67;font-size:12px;}
 .csv-v74-final-visual{background:linear-gradient(135deg,#3d1426,#160a13);border:1px solid #966338;border-radius:22px;padding:22px;}
 .csv-v74-final-visual>h2{font-size:24px;font-weight:900;color:#ffcd53;}
-.csv-v74-rounds{display:flex;align-items:stretch;overflow-x:auto;gap:18px;margin-top:20px;padding-bottom:10px;scroll-snap-type:x proximity;}
-.csv-v74-round{min-width:235px;flex:1;display:flex;flex-direction:column;gap:15px;scroll-snap-align:start;}
+.csv-v74-rounds{display:flex;flex-wrap:wrap;align-items:stretch;justify-content:center;gap:18px;margin-top:20px;}
+.csv-v74-round{min-width:190px;max-width:360px;flex:1 1 0;display:flex;flex-direction:column;justify-content:center;gap:12px;}
 .csv-v74-round h3{font-size:13px;font-weight:900;color:#ffce58;text-transform:uppercase;text-align:center;padding-bottom:8px;border-bottom:1px solid #a75f44;}
 .csv-v74-round-match{border:1px solid #8b455b;border-radius:13px;background:#170a13;padding:12px;display:grid;gap:8px;}
 .csv-v74-round-subtitle{font-size:10px;color:#e5aec2;}
 .csv-v74-round-team{display:flex;align-items:center;gap:9px;color:#fff;font-size:12px;font-weight:700;}
-.csv-v74-round-team span{flex:1;min-width:0;}
+.csv-v74-round-team > :first-child{flex:none;}
+.csv-v74-round-club-name{flex:1;min-width:0;overflow-wrap:anywhere;}
 .csv-v74-round-team strong{font-size:15px;color:#ffda80;}
-.csv-v74-bronze{margin-top:20px;max-width:430px;}
+.csv-v74-bronze{width:100%;max-width:430px;margin:0 auto;}
+@media(min-width:801px){
+ .csv-v74-bronze{order:1;}
+ .csv-v74-rounds:has(.csv-v74-bronze)::after{content:"";flex-basis:100%;height:0;}
+}
 .csv-v74-bronze h3{color:#d6ad74;font-size:14px;font-weight:900;margin-bottom:9px;}
 .csv-v74-podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:25px;}
 .csv-v74-podium-place{border:1px solid #8b5f42;border-radius:15px;padding:18px 12px;display:grid;text-align:center;gap:8px;background:#2d1420;}
@@ -3031,7 +3036,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 @media(prefers-reduced-motion:reduce){.csv-v74-home *, .csv-v74-final-visual *{scroll-behavior:auto!important;animation:none!important;}}
 
 /* V7.4 : grand écran TV et affichage accessible */
-.csv-v74-tv-board{position:fixed;inset:0;z-index:2000;overflow:auto;padding:clamp(20px,3vw,62px);background:radial-gradient(ellipse at 15% 0%,#572037 0%,#1a0813 56%,#0c0610 100%);color:#fff;display:grid;align-content:start;gap:28px;}
+.csv-v74-tv-board{position:fixed;inset:0;z-index:2000;overflow:auto;padding:clamp(20px,3vw,62px);background:var(--csv-club-backdrop);color:#fff;display:grid;align-content:start;gap:28px;}
 .csv-v74-tv-top{display:flex;justify-content:space-between;align-items:start;gap:24px;border-bottom:2px solid #a36d47;padding-bottom:24px;}
 .csv-v74-tv-top h1{font-size:clamp(30px,4vw,66px);font-weight:950;color:#ffcd4b;letter-spacing:-1.4px;}
 .csv-v74-tv-top p{font-size:clamp(13px,1.5vw,21px);color:#dfb7bf;}
@@ -3048,9 +3053,15 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 @media(max-width:850px){.csv-v74-tv-columns{grid-template-columns:1fr;}.csv-v74-tv-top h1{font-size:29px;}.csv-v74-tv-board{padding:14px;gap:18px;}.csv-v74-tv-fixture>div{gap:7px;}.csv-v74-tv-fixture strong{padding:8px;}}
 
 /* V7.4 — véritable page d'accueil de l'application Spectateur */
-.csv-v74-welcome{min-height:100vh;background:radial-gradient(ellipse at 10% 0%,#50172a 0%,#1a0a13 45%,#130810 100%);color:#fff;padding:20px 18px 70px;}
+:root {
+  --csv-club-backdrop:
+    radial-gradient(ellipse at 50% 2%, #ffd25e60, transparent 42%),
+    radial-gradient(ellipse at 0% 40%, #e62336, transparent 64%),
+    linear-gradient(145deg, #b6192b, #640b1c 72%, #381019);
+}
+.csv-club-backdrop { background: var(--csv-club-backdrop); }
+.csv-v74-welcome{min-height:100vh;background:var(--csv-club-backdrop);color:#fff;padding:20px 18px 70px;}
 .csv-v74-welcome-inner{width:min(100%,1320px);margin:auto;}
-.csv-v74-public-note{border-radius:12px;background:#ffce4b;color:#432017;font-size:12px;font-weight:900;letter-spacing:1.2px;text-align:center;padding:12px;margin-bottom:22px;}
 .csv-v74-welcome-header{display:flex;align-items:center;gap:20px;margin:18px 0 25px;}
 .csv-v74-welcome-header small{font-size:10px;letter-spacing:2.6px;color:#ffcc53;font-weight:900;}
 .csv-v74-welcome-header h1{font-size:28px;font-weight:950;color:#fff;letter-spacing:-.7px;}
@@ -3065,7 +3076,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-category-pills button{border:1px solid #673149;background:#2b1420;border-radius:999px;padding:10px 17px;font-size:12px;font-weight:850;color:#e5becf;min-height:44px;}
 .csv-v74-category-pills button:hover,.csv-v74-category-pills .csv-v74-category-active{color:#ffca43;border-color:#ffca43;background:#4d1b2b;}
 .csv-v74-welcome-status{font-size:13px;color:#ffcc70;margin-bottom:12px;}
-@media(max-width:700px){.csv-v74-welcome{padding:12px 12px 90px;}.csv-v74-welcome-header{gap:12px;margin-bottom:15px;}.csv-v74-welcome-header h1{font-size:22px;}.csv-v74-quicknav{gap:5px;}.csv-v74-quicknav button{font-size:12px;padding:10px 12px;flex:1 1 auto;}.csv-v74-public-note{letter-spacing:.2px;font-size:10px;}.csv-v74-category-pills button{padding:8px 13px;}}
+@media(max-width:700px){.csv-v74-welcome{padding:12px 12px 90px;}.csv-v74-welcome-header{gap:12px;margin-bottom:15px;}.csv-v74-welcome-header h1{font-size:22px;}.csv-v74-quicknav{gap:5px;}.csv-v74-quicknav button{font-size:12px;padding:10px 12px;flex:1 1 auto;}.csv-v74-category-pills button{padding:8px 13px;}}
 
 /* V7.4 — contrôles de score tactile, sans dépendre de Tailwind au runtime */
 .csv-v74-score-grid{display:grid;grid-template-columns:minmax(0,1fr) 22px minmax(0,1fr);gap:4px;align-items:center;}
@@ -3092,13 +3103,174 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-welcome .csv-v74-hero > .csv-v74-tag{display:none;}
 
 /* V7.4 : phases finales complètes, sans doublons, lisibles au toucher. */
-.csv-v74-swipe-hint {display:none;font-size:11px;color:#ffca67;font-weight:800;margin:12px 0 4px;}
-.csv-v74-rounds:focus-visible{outline:2px solid #ffca43;outline-offset:3px;border-radius:10px;}
 .csv-v74-ranking-matches{margin-top:24px;border-top:1px solid #86505d;padding-top:20px;}
 .csv-v74-ranking-matches h3{font-size:17px;font-weight:900;color:#ffcc61;margin-bottom:14px;}
 .csv-v74-ranking-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 @media(max-width:800px){
- .csv-v74-swipe-hint {display:block;}
- .csv-v74-rounds {scroll-padding-left:10px;}
+ .csv-v74-rounds {display:grid;grid-template-columns:minmax(0,1fr);gap:20px;}
+ .csv-v74-round {width:100%;min-width:0;max-width:460px;justify-self:center;gap:8px;}
+ .csv-v74-round-match {padding:10px;}
+ .csv-v74-bronze {max-width:460px;}
  .csv-v74-ranking-grid{grid-template-columns:1fr;}
+}
+
+/* Page de garde spectateur et navigation mobile */
+.csv-spectator-intro[open] {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  overflow: auto;
+  text-align: center;
+  color: #fff2db;
+  background: var(--csv-club-backdrop);
+}
+.csv-intro-content { width: min(100%, 740px); }
+.csv-intro-content img {
+  width: clamp(134px, 39vw, 220px);
+  height: auto;
+  margin: 0 auto 16px;
+  clip-path: circle(47%);
+}
+.csv-intro-content h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 7vw, 68px);
+  font-weight: 900;
+  line-height: 1.04;
+  text-transform: uppercase;
+  color: #fff2cc;
+  text-shadow: 0 3px 16px #450610;
+}
+.csv-intro-content h1 span {
+  display: block;
+  margin-top: 9px;
+  color: #ffcf4e;
+  font-size: .58em;
+  letter-spacing: .2em;
+}
+.csv-intro-content p { margin: 14px 0 26px; color: #f0d0c9; }
+.csv-intro-content button {
+  min-height: 44px;
+  border-radius: 12px;
+  padding: 10px 20px;
+  background: #ffca43;
+  color: #34131a;
+  font-weight: 850;
+}
+.csv-v74-inline-view { color: #f8edf2; }
+.csv-intro-content img { animation: csv-intro-logo 1.7s cubic-bezier(.2,.7,.25,1) both; }
+@keyframes csv-intro-logo {
+  0% { opacity: 0; transform: translateY(-65px) scale(.12); }
+  72% { opacity: 1; transform: translateY(0) scale(1.14); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .csv-intro-content img { animation: none; }
+}
+@media (max-width: 700px) {
+  .csv-v74-welcome { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .csv-v74-quicknav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin: 0;
+    padding: 6px max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid #b9815a;
+    background: #572131;
+  }
+  .csv-v74-quicknav button { min-height: 50px; padding: 4px 2px; font-size: clamp(9px, 2.6vw, 12px); line-height: 1.15; }
+  .csv-v74-quicknav button span:first-child { display: block; margin-bottom: 4px; font-size: 18px; }
+}
+
+/* Surfaces spectateur sur le fond rouge et or. */
+.csv-v74-welcome {
+  --csv-panel-surface: #672632;
+  --csv-card-surface: #78303b;
+  --csv-card-border: #bd7b67;
+}
+.csv-v74-welcome :is(.csv-v74-panel, .csv-v74-final-visual, .csv-v74-team-summary) {
+  background: var(--csv-panel-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-welcome .csv-v74-panel-feature { background: linear-gradient(145deg, #903740, #672632); }
+.csv-v74-welcome :is(.csv-v74-round-match, .csv-v74-podium-place, .csv-v74-sponsor,
+  .csv-v74-metrics > div, .csv-v74-mini-metrics > div) {
+  background: var(--csv-card-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-welcome .csv-v74-fixture {
+  margin: 8px 0;
+  padding: 10px;
+  background: var(--csv-card-surface);
+  border: 1px solid var(--csv-card-border);
+  border-radius: 12px;
+}
+.csv-v74-welcome .csv-v74-muted { color: #f0d9e0 !important; }
+.csv-v74-inline-view :is([class~="bg-[#150709]"], [class~="bg-[#16080b]"], [class~="bg-[#211016]"]) {
+  background-color: var(--csv-panel-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-inline-view :is([class~="bg-[#0b0304]"], [class~="bg-[#0c0406]"]) {
+  background-color: var(--csv-card-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-inline-view :is([class~="text-slate-400"], [class~="text-slate-500"]) { color: #f1dae2; }
+
+.csv-v74-welcome-header {
+  justify-content: space-between;
+  padding: clamp(14px, 2.5vw, 34px);
+  border: 1px solid #ffcc5355;
+  border-radius: 20px;
+  background: linear-gradient(105deg, #671723e6, #8b3035dd 62%, #5c1826e6);
+}
+.csv-v74-welcome-brand { display: flex; align-items: center; gap: clamp(12px, 2vw, 28px); }
+.csv-v74-header-logo { width: clamp(58px, 8vw, 116px); aspect-ratio: 1; }
+.csv-v74-welcome-header h1 { font-size: clamp(22px, 3.6vw, 48px); }
+.csv-v74-welcome-header .csv-v74-welcome-choices { margin: 0; gap: 16px; }
+.csv-v74-inline-view .csv-v74-calendar-card { background: var(--csv-card-surface); border-color: var(--csv-card-border); }
+.csv-v74-inline-view .csv-v74-calendar-card[class~="bg-amber-950/20"] { border-color: #ffd16d; background: #842d34; }
+.csv-v74-inline-view .csv-v74-calendar-card [class~="bg-red-950"] { background: #571c27; color: #ffda83; }
+.csv-v74-inline-view .csv-v74-calendar-meta { flex-wrap: wrap; gap: 6px 10px; }
+.csv-v74-inline-view .csv-v74-calendar-meta > div { flex-wrap: wrap; min-width: 0; }
+@media (max-width: 800px) {
+  .csv-v74-welcome-header { align-items: stretch; flex-direction: column; }
+  .csv-v74-welcome-header .csv-v74-welcome-choices { row-gap: 8px; }
+}
+
+.csv-v74-calendar-label { font-size: 11px; line-height: 1.3; }
+@media (min-width: 801px) {
+  .csv-v74-welcome-header .csv-v74-welcome-choices { gap: 18px 24px; }
+  .csv-v74-welcome-header .csv-v74-welcome-choices > div:first-child { font-size: 15px; }
+  .csv-v74-welcome-header .csv-v74-welcome-choices select { font-size: 16px; min-height: 52px; padding: 10px 16px; }
+  .csv-v74-welcome-header .csv-v74-category-pills button { font-size: 16px; min-height: 52px; padding: 10px 20px; }
+}
+
+@media (min-width: 801px) {
+  .csv-v74-inline-view .csv-v74-calendar-meta {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: start;
+    gap: 6px 10px;
+    margin-bottom: 10px;
+  }
+  .csv-v74-inline-view .csv-v74-calendar-time { white-space: nowrap; }
+  .csv-v74-inline-view .csv-v74-calendar-field { color: #f5e1d8; overflow-wrap: anywhere; }
+  .csv-v74-inline-view .csv-v74-calendar-phase { grid-column: 1 / -1; justify-content: space-between; }
+  .csv-v74-inline-view .csv-v74-calendar-teams {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+}
+@media (max-width: 800px) {
+  .csv-v74-calendar-time::after { content: " · "; }
 }

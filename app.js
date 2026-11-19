@@ -1646,8 +1646,26 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
 // V6.9 — La page de garde utilise le catalogue PUBLIC existant, jamais une copie de données.
 // Elle est réservée au raccourci spectateur : les liens QR datés gardent l'accès direct.
 // V7.4 — Accueil spectator : même design que la maquette, vraies données Firebase.
+function csvPlacementStart(match) {
+    const pair = String(match.stage || '').match(/(\d+)(?:ème|e)?\s*[\/–-]\s*(\d+)(?:ème|e)?\s*place/i);
+    if (pair) return Number(pair[1]);
+    const legacy = String(match.id || '').match(/^rank-(\d+)-(\d+)$/);
+    return legacy && Number(legacy[2]) === Number(legacy[1]) + 1 && Number(legacy[1]) >= 5
+        ? Number(legacy[1]) : 0;
+}
+
+function csvCalendarLabel(match) {
+    if (match.id === 'ko-final' || /^grande finale$/i.test(match.stage || '')) return 'Grande finale';
+    if (match.id === 'ko-bronze') return 'Match pour la 3e place';
+    const place = csvPlacementStart(match);
+    if (place) return `Classement · ${place}e–${place + 1}e places`;
+    const stage = match.stage || 'Match';
+    if (match.group === 'Tournoi Consolante') return /consolante/i.test(stage) ? stage : `Consolante · ${stage}`;
+    return /^Poule\s/i.test(match.group || '') ? `${match.group} · ${stage}` : stage;
+}
+
 function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
-    onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing, records, fields, readyRecords }) {
+    onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing, records, fields, readyRecords, section = "home", children, demoFinals }) {
     const available = !isLoading && events.length > 0;
     const active = events.find(e => e.id === activeId) || events[0] || null;
     const rec = active && records ? records[active.id] : null;
@@ -1656,22 +1674,16 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
     const matches = rec && Array.isArray(rec.matches) ? rec.matches : [];
     const recordReady = active && ((readyRecords && readyRecords[active.id]) || (offline && rec));
     const canShow = !!(available && active && rec && recordReady);
+    const showDemo = section === 'finals' && demoFinals;
     return React.createElement('main',{className:'csv-v74-welcome',role:'main','aria-label':'Accueil CSV Spectateur'},
         React.createElement('div',{className:'csv-v74-welcome-inner'},
-            React.createElement('div',{className:'csv-v74-public-note'}, '⚽ CLUB SPORTIF LA VERPILLIÈRE · 1939'),
             React.createElement('header',{className:'csv-v74-welcome-header'},
-                React.createElement(ClubLogo,{className:'w-14 h-14 sm:w-20 sm:h-20'}),
-                React.createElement('div',null,
-                    React.createElement('small',null,'CLUB SPORTIF LA VERPILLIÈRE · 1939'),
-                    React.createElement('h1',null,'TOURNOI CSV'))),
-            React.createElement('nav',{className:'csv-v74-quicknav','aria-label':'Navigation rapide'},
-                [['🏠 Accueil',null],['⭐ Mon équipe','team'],['📅 Calendrier','program'],
-                  ['📊 Classements','standings'],['🏆 Phases finales','finals']]
-                    .map(([label,action])=>React.createElement('button',{
-                        key:label,type:'button',disabled:action&&!canShow,
-                        className:action?'':'csv-v74-active',
-                        onClick:()=>action&&onOpen(action)},label))),
-            React.createElement('div',{className:'csv-v74-welcome-choices'},
+                React.createElement('div',{className:'csv-v74-welcome-brand'},
+                    React.createElement(ClubLogo,{className:'csv-v74-header-logo'}),
+                    React.createElement('div',null,
+                        React.createElement('small',null,'CLUB SPORTIF LA VERPILLIÈRE · 1939'),
+                        React.createElement('h1',null,'TOURNOI'))),
+                React.createElement('div',{className:'csv-v74-welcome-choices'},
                 React.createElement('div',null,
                     React.createElement('strong',null,'📅 JOURNÉE DU TOURNOI'),
                     dates.length>1 ? React.createElement('select',{value:day||'',onChange:e=>onChooseDay(e.target.value),'aria-label':'Choisir la journée'},
@@ -1680,11 +1692,21 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
                 React.createElement('div',{className:'csv-v74-category-pills'},
                     (!isLoading ? events : []).map(e=>React.createElement('button',{type:'button',key:e.id,
                         'aria-pressed':e.id===activeId,onClick:()=>onChooseCategory(e.id),
-                        className:e.id===activeId?'csv-v74-category-active':''},e.category)))),
+                        className:e.id===activeId?'csv-v74-category-active':''},e.category))))),
+            React.createElement('nav',{className:'csv-v74-quicknav','aria-label':'Navigation rapide'},
+                [['🏠 Accueil','home'],['⭐ Mon équipe','team'],['📅 Calendrier','program'],
+                  ['📊 Classements','standings'],['🏆 Phases finales','finals']]
+                    .map(([label,action])=>React.createElement('button',{
+                        key:label,type:'button',disabled:action!=='home'&&!canShow&&!(action==='finals'&&demoFinals),
+                        className:action===section?'csv-v74-active':'',
+                        'aria-current':action===section?'page':undefined,
+                        onClick:()=>{ onOpen(action); window.scrollTo(0, 0); }},
+                        React.createElement('span',{'aria-hidden':true},label.split(' ')[0]),
+                        ' ', React.createElement('span',null,label.slice(label.indexOf(' ')+1))))),
             offline&&React.createElement('p',{className:'csv-v74-welcome-status'},'📴 Programme hors ligne : dernières informations enregistrées sur cet appareil.'),
-            canShow ? React.createElement(CsvVisualHome,{
+            showDemo ? React.createElement(CsvFinalsExample) : canShow && (section === "home" || children) ? (section !== "home" ? children : React.createElement(CsvVisualHome,{
                 tournament:active,matches,teams,fields:fields||[],config,
-                onNavigate:()=>onOpen('program'),onChooseTeam:()=>onOpen('team')}) :
+                onNavigate:()=>onOpen('program'),onChooseTeam:()=>onOpen('team')})) :
                 React.createElement('div',{className:'csv-v74-panel'},
                     React.createElement('h2',null, isLoading ? '⏳ Synchronisation du programme…' :
                         available ? '⏳ Chargement des rencontres officielles…' : 'Aucune journée publiée pour le moment'),
@@ -1790,10 +1812,10 @@ function MultiTournamentShell() {
     // Les QR spectateurs portant ?day= restent verrouillés sur cette seule date.
     // L'adresse générale du site, elle, laisse choisir une journée PUBLIÉE.
     const [viewerDayChoice, setViewerDayChoice] = useState(null);
-    // Afficher l'accueil au lancement de l'icône Spectateur uniquement.
-    // Les liens directs ?day= et ?tournament= accèdent immédiatement au calendrier.
-    const [spectatorWelcome, setSpectatorWelcome] = useState(() => CSV_HOME_MODE === 'spectator' && !params.has('day') && !params.has('tournament'));
-    const [requestedViewerAction, setRequestedViewerAction] = useState(null);
+    const embeddedSpectator = CSV_HOME_MODE === 'spectator';
+    const demoFinals = window.CSV_PRIVATE_PREVIEW === true && params.get('demo') === 'finales';
+    const [spectatorSection, setSpectatorSection] = useState(() =>
+        demoFinals ? 'finals' : params.has('day') || params.has('tournament') ? 'program' : 'home');
     const lockedViewerDay = csvValidDay(params.get('day')) ? params.get('day') : null;
     const publishedDays = [...new Set(catalog.filter(e => csvDayIsPublished(catalog, e.date)).map(e => e.date))].sort();
     const loginTargetDay = organizerLinkPending && !hubIsEditor
@@ -3311,25 +3333,25 @@ function MultiTournamentShell() {
             setHubMessage('Stockage local indisponible sur cet appareil.');
         }
     };
-    // Les actions de l'accueil réutilisent les vues existantes (aucun second calendrier).
-    const openWelcomeDestination = type => {
-        if (!current || !publicEvents.length) return;
-        setRequestedViewerAction({ type, seq: Date.now() });
-        setSpectatorWelcome(false);
-        setPage('tournoi');
-        setShellMoreOpen(false);
-        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) { }
-    };
-    if (CSV_HOME_MODE === 'spectator' && !hubIsEditor && spectatorWelcome) {
+    const tournamentView = current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, spectatorSection: embeddedSpectator ? spectatorSection : null, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
+                    var _a;
+                    const data = eventData(e);
+                    return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
+                        ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
+                }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) });
+    if (embeddedSpectator) {
         const welcomeLoading = netOnline && !catalogSynced && hubStatus !== 'error';
         return React.createElement(CsvSpectatorWelcome, {
-            day: viewerDay, dates: publishedDays, events: publicEvents,
+            day: viewerDay, dates: lockedViewerDay ? [lockedViewerDay] : publishedDays, events: publicEvents,
             records, fields: sharedFields, readyRecords: loadedDocs,
             activeId: current ? current.id : '',
             isLoading: welcomeLoading, offline: !netOnline || hubStatus === 'error',
             onChooseDay: selectPublicDay,
             onChooseCategory: selectTournament,
-            onOpen: openWelcomeDestination,
+            section: spectatorSection,
+            demoFinals,
+            onOpen: setSpectatorSection,
+            children: tournamentView,
             refreshing: catalogRefreshing,
             onRefresh: () => void refreshServerCatalog({ manual: true })
         });
@@ -3340,7 +3362,7 @@ function MultiTournamentShell() {
     // d'écriture réels doivent impérativement être limités par les règles Firestore.
     if (CSV_HOME_MODE === 'organizer' && !hubIsEditor) {
         return React.createElement("main", {
-            className: "min-h-screen flex items-center justify-center bg-[#0e0708] text-slate-100 p-4 sm:p-8",
+            className: "min-h-screen flex items-center justify-center csv-club-backdrop text-slate-100 p-4 sm:p-8",
             style: { minHeight: '100dvh' }
         }, React.createElement("section", {
             role: "region", "aria-label": "Connexion CSV Organisateur",
@@ -3378,7 +3400,7 @@ function MultiTournamentShell() {
             React.createElement("a", { href: "./spectateur.html", className: "block text-center text-xs text-slate-300 underline py-2" }, "Ouvrir plutôt CSV Spectateur")
         ));
     }
-    return React.createElement("div", { className: 'min-h-screen bg-[#0e0708] text-slate-100 ' + (hubIsEditor ? 'pb-24 xl:pb-0' : '') },
+    return React.createElement("div", { className: 'min-h-screen csv-club-backdrop text-slate-100 ' + (hubIsEditor ? 'pb-24 xl:pb-0' : '') },
         hubIsEditor && React.createElement(React.Fragment, null,
             shellMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-0 z-[70] bg-black/65", role: "presentation", onClick: () => setShellMoreOpen(false) },
                 React.createElement("section", { role: "dialog", "aria-modal": "true", "aria-label": "Menu organisateur", onClick: e => e.stopPropagation(), style: { bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }, className: "fixed inset-x-3 max-h-[72dvh] overflow-y-auto rounded-2xl border border-amber-600/50 bg-[#1b0a10] p-4 shadow-2xl space-y-3" },
@@ -3449,7 +3471,6 @@ function MultiTournamentShell() {
                         !offlineReady && React.createElement("button", { type: "button", onClick: activateOffline, className: "min-h-[38px] rounded-lg border border-amber-700/60 px-3 py-1.5 text-xs font-bold text-amber-200" }, "\uD83D\uDCE5 Cache hors ligne (appareil priv\u00E9)"),
                         offlineReady && React.createElement("span", { className: "text-[11px] text-emerald-200" }, "\u2713 Consultation hors connexion pr\u00E9par\u00E9e"))),
                 publicationNotice && hubIsEditor && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, publicationNotice),
-                isViewer && CSV_HOME_MODE === 'spectator' && React.createElement("button", { type: "button", onClick: () => { setSpectatorWelcome(true); setRequestedViewerAction(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[40px] self-start rounded-xl border border-amber-800/50 px-3 py-2 text-xs font-black text-amber-200" }, "🏠 Accueil"),
                 isViewer && React.createElement("div", { className: "space-y-2" },
                     React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300" },
                         React.createElement("span", null, publicEvents.length > 0 ? `📅 Programme de cette journée · ${publicEvents.length} catégorie(s)` : '📅 Aucun programme publié pour cette date'),
@@ -3926,12 +3947,7 @@ function MultiTournamentShell() {
                 React.createElement("p", { className: "text-sm text-slate-300" }, "Ouvre une premi\u00E8re fois cette journ\u00E9e avec Internet pour enregistrer ses matchs sur cet appareil.")),
             isViewer && current && !((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id)) && (hubStatus === 'loading' || (hubStatus === 'online' && !loadedDocs[current.id])) && React.createElement("div", { role: "status", className: "max-w-lg mx-auto text-center text-amber-200 text-sm p-8" }, "\u23F3 Chargement du calendrier de cette journ\u00E9e\u2026"),
             isViewer && current && hubStatus === 'error' && !csvCachedTournament(current.id) && React.createElement("div", { role: "alert", className: "max-w-lg mx-auto text-center text-rose-200 text-sm p-8" }, "Connexion aux r\u00E9sultats indisponible. V\u00E9rifie ta connexion Internet et actualise la page."),
-            current && (!isViewer || (hubStatus === 'online' && loadedDocs[current.id]) || ((!netOnline || hubStatus === 'error') && csvCachedTournament(current.id))) && React.createElement(TournamentApp, { key: current.id + '-' + resetEpoch, tournament: current, tournamentRecord: hubStatus === 'online' && loadedDocs[current.id] ? records[current.id] : null, sharedFields: sharedFields, onFieldsChange: updateSharedFields, otherEvents: otherEvents, onTournamentUpdate: updateRecord, hubReady: cloudReady, hubIsEditor: hubIsEditor, onRoleChange: onRoleChange, requestedViewerAction: requestedViewerAction, organizerLinkPending: organizerLinkPending && !hubIsEditor, onOrganizerLinkHandled: acknowledgeOrganizerLink, onOpenDayEntry: () => { setDateFilter(selectedDate); setPage('dayEntry'); }, onOpenPlanning: () => { setDateFilter(selectedDate); setPage('planning'); }, onOpenBackup: () => { setShowBackupPanel(true); setBackupCandidate(null); setBackupNotice(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }, hubStatus: hubStatus, requestedOrganizerTab: workspaceTab, onOrganizerTabChange: setWorkspaceTab, hubConflictsCount: catalog.filter(e => e.date === selectedDate).flatMap(e => {
-                    var _a;
-                    const data = eventData(e);
-                    return [...(data.matches || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: e.id, kind: 'match' })),
-                        ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).map(m => ({ ...m, eventId: e.id, kind: 'réservation' }))];
-                }).reduce((sum, m, i, arr) => sum + (arr.slice(i + 1).some(o => planningConflict(m, o)) ? 1 : 0), 0) })));
+            tournamentView));
 }
 // V7.4 — Résumé public compact des matchs (ne déclenche aucune écriture).
 // V7.4 — Fiche « Mon équipe » avec résultats et classement.
@@ -4047,7 +4063,7 @@ function CsvVisualHome({ tournament, matches, teams, fields, config, onNavigate,
                     React.createElement('p',{className:'csv-v74-muted'},'Les partenaires du tournoi seront présentés ici.'))));
 }
 // V7.4 — Phases finales en colonnes par tour, avec progression et podium.
-function CsvVisualFinals({ matches, teams }) {
+function CsvVisualFinals({ matches, teams, demo = false }) {
     const rounds = matches.filter(m=>m.group==='Phase Finale Principale'&&m.id!=='ko-bronze'&&!/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
     const roundName = m => /huit/i.test(m.stage||'')?'Huitièmes':
         /quart/i.test(m.stage||'')?'Quarts':/demi/i.test(m.stage||'')?'Demi-finales':
@@ -4059,8 +4075,8 @@ function CsvVisualFinals({ matches, teams }) {
         React.createElement('span',{className:'csv-v74-round-subtitle'},(m.stage||'Match')+' · '+(m.startTime||'--:--')),
         [[m.team1Id,m.placeholder1,m.score1],[m.team2Id,m.placeholder2,m.score2]].map(([id,placeholder,score],i)=>
             React.createElement('div',{className:'csv-v74-round-team',key:i},
-                React.createElement(CsvTeamLogo,{team:club(id,placeholder),size:24}),
-                React.createElement('span',null,club(id,placeholder).name),
+                React.createElement(CsvTeamLogo,{team:club(id,placeholder),size:18}),
+                React.createElement('span',{className:'csv-v74-round-club-name'},club(id,placeholder).name),
                 React.createElement('strong',null,score==null?'–':score))));
     const bronze=matches.find(m=>m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
     const final=matches.find(m=>m.stage==='Grande Finale'||m.id==='ko-final');
@@ -4074,15 +4090,16 @@ function CsvVisualFinals({ matches, teams }) {
         React.createElement('span',null,club(id,placeholder).name));
     return React.createElement('section',{className:'csv-v74-final-visual'},
         React.createElement('h2',null,'🏆 La route vers la finale'),
-        React.createElement('p',{className:'csv-v74-muted'},'Les qualifications et résultats sont issus du calendrier officiel.'),
-        names.length > 1 && React.createElement('p',{className:'csv-v74-swipe-hint'},'↔ Faites défiler pour découvrir la grande finale'),
-        rounds.length?React.createElement('div',{className:'csv-v74-rounds',role:'region',tabIndex:0,'aria-label':'Tableau des tours à faire défiler'},
-            names.map(name=>React.createElement('div',{className:'csv-v74-round',key:name},
-                React.createElement('h3',null,name),
-                rounds.filter(m=>roundName(m)===name).map(tile)))):
+        React.createElement('p',{className:'csv-v74-muted'},demo ? 'Exemple fictif · 8 équipes et 3 tours' : 'Les qualifications et résultats sont issus du calendrier officiel.'),
+        (rounds.length || bronze) ? React.createElement('div',{className:'csv-v74-rounds',role:'region','aria-label':'Tableau des tours'},
+            [...names.filter(name => name !== 'Grande finale'), ...(bronze ? ['3e place'] : []),
+                ...names.filter(name => name === 'Grande finale')].map(name =>
+                name === '3e place' ? React.createElement('div',{className:'csv-v74-bronze',key:name},
+                    React.createElement('h3',null,'🥉 Match pour la 3e place'),tile(bronze)) :
+                    React.createElement('div',{className:'csv-v74-round',key:name},
+                        React.createElement('h3',null,name),
+                        rounds.filter(m=>roundName(m)===name).map(tile)))) :
             React.createElement('p',{className:'csv-v74-muted'},'Les phases finales seront affichées après programmation.'),
-        bronze&&React.createElement('div',{className:'csv-v74-bronze'},
-            React.createElement('h3',null,'🥉 Match pour la 3e place'),tile(bronze)),
         React.createElement('div',{className:'csv-v74-podium'},
             medal('🥇 Champion',finalResult&&finalResult.winner,'En attente de la finale'),
             medal('🥈 Finaliste',finalResult&&finalResult.loser,'En attente de la finale'),
@@ -4096,6 +4113,25 @@ function CsvVisualFinals({ matches, teams }) {
                 React.createElement('h3', null, label),
                 React.createElement('div', { className: 'csv-v74-ranking-grid' }, fixtures.map(tile))) : null;
         }));
+}
+function CsvFinalsExample() {
+    const names = ['CSV La Verpillière', 'Étoile Bleue', 'Les Faucons', 'Racing du Parc',
+        'Olympique des Collines', 'US des Pins', 'Les Aiglons', 'Sporting du Lac'];
+    const teams = names.map((name, id) => ({ id: String(id), name, color: TEAM_COLORS[id % TEAM_COLORS.length] }));
+    const matches = [
+        ['q1', 'Quart de finale 1', '13:00', 0, 1, 3, 1],
+        ['q2', 'Quart de finale 2', '13:00', 2, 3, 2, 0],
+        ['q3', 'Quart de finale 3', '13:25', 4, 5, 2, 1],
+        ['q4', 'Quart de finale 4', '13:25', 6, 7, 0, 1],
+        ['d1', 'Demi-finale 1', '14:15', 0, 2, 2, 0],
+        ['d2', 'Demi-finale 2', '14:15', 4, 7, 1, 2],
+        ['ko-bronze', 'Match pour la 3e place', '15:00', 2, 4, 1, 2],
+        ['ko-final', 'Grande Finale', '15:30', 0, 7, 2, 1]
+    ].map(([id, stage, startTime, home, away, score1, score2]) => ({
+        id, stage, startTime, team1Id: String(home), team2Id: String(away), score1, score2,
+        status: 'finished', group: 'Phase Finale Principale'
+    }));
+    return React.createElement(CsvVisualFinals, { matches, teams, demo: true });
 }
 function CsvSpectatorSummary({ matches, teams, category }) {
     const club = id => (teams.find(t => t.id === id) || {}).name || 'À déterminer';
@@ -4126,17 +4162,20 @@ function CsvSpectatorSummary({ matches, teams, category }) {
                     React.createElement('p',{className:'text-xs text-slate-500'},'Aucun match pour le moment.'))))
     );
 }
-function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, requestedViewerAction, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
+function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsChange, otherEvents, onTournamentUpdate, hubReady, hubIsEditor, onRoleChange, spectatorSection, organizerLinkPending, onOrganizerLinkHandled, onOpenDayEntry, onOpenPlanning, onOpenBackup, hubStatus, hubConflictsCount, requestedOrganizerTab, onOrganizerTabChange }) {
     var _a, _b, _c, _d;
     // Conserve l'onglet spectateur lors d'un changement de catégorie.
     const viewerTabStorageKey = 'csv_spectator_selected_tab_v74';
-    const [activeTab, setActiveTabState] = useState(() => {
+    const [savedActiveTab, setActiveTabState] = useState(() => {
         if (hubIsEditor) return requestedOrganizerTab || 'dashboard';
         try {
             const saved = sessionStorage.getItem(viewerTabStorageKey);
             return ['home', 'matches', 'teams', 'standings', 'bracket', 'finalStandings', 'stats'].includes(saved) ? saved : 'home';
         } catch (err) { return 'home'; }
     });
+    const activeTab = ({
+        team: 'myTeam', standings: 'standings', finals: 'bracket', program: 'matches'
+    })[spectatorSection] || savedActiveTab;
     const setActiveTab = tab => {
         setActiveTabState(tab);
         if (!hubIsEditor) {
@@ -4274,7 +4313,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     });
     const [newTeamName, setNewTeamName] = useState('');
     const [selectedColor, setSelectedColor] = useState(TEAM_COLORS[0]);
-    const [selectedTeamSchedule, setSelectedTeamSchedule] = useState(null);
+    const [teamScheduleModal, setSelectedTeamSchedule] = useState(null);
     const [viewerTeamId, setViewerTeamId] = useState(() => {
         try {
             return localStorage.getItem('cslv_viewer_team_' + tournament.id) || '';
@@ -4294,25 +4333,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             setTeamPickerOpen(true);
         }
     };
-    // Accès depuis la page de garde : ouvre les écrans existants et garde les mêmes données.
-    useEffect(() => {
-        if (hubIsEditor || !requestedViewerAction) return;
-        // Les changements de catégorie recréent TournamentApp : ne pas rejouer
-        // une action de l'accueil déjà consommée sur une autre catégorie.
-        const actionKey = 'csv_viewer_last_action_v73';
-        const token = String(requestedViewerAction.seq || '') + ':' + String(requestedViewerAction.type || '');
-        try {
-            if (sessionStorage.getItem(actionKey) === token) return;
-            sessionStorage.setItem(actionKey, token);
-        } catch (err) { /* Le parcours reste utilisable sans stockage. */ }
-        const action = requestedViewerAction.type;
-        setActiveTab(action === 'standings' ? 'standings' :
-            action === 'finals' && config.format !== 'round_robin' ? 'bracket' : 'matches');
-        setViewerMoreOpen(false);
-        setScheduleViewMode('chrono');
-        setMobileMatchFilter(action === 'results' ? 'finished' : 'upcoming');
-        if (action === 'team') csvOpenMyTeam();
-    }, [requestedViewerAction, hubIsEditor]);
+    const inlineTeamSchedule = spectatorSection === 'team';
+    const savedViewerTeam = teams.find(team => team.id === viewerTeamId);
+    const selectedTeamSchedule = inlineTeamSchedule ? savedViewerTeam : teamScheduleModal;
     const [newPlayerInputs, setNewPlayerInputs] = useState({});
     useEffect(() => {
         try {
@@ -4356,10 +4379,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             /(?:quart|demi|finale|huitième|classement)/i.test(String(m.stage || '')) ||
             String(m.id || '').startsWith('ko-');
         const phaseDiff = Number(knockout(a)) - Number(knockout(b));
-        if (phaseDiff) return phaseDiff;
+        if (userRole === 'editor' && phaseDiff) return phaseDiff;
         const minutes = m => /^\d{1,2}:\d{2}$/.test(String(m.startTime || ''))
             ? timeToMinutes(m.startTime) : Number.POSITIVE_INFINITY;
-        return minutes(a) - minutes(b) || String(a.fieldName || '').localeCompare(String(b.fieldName || ''), 'fr') ||
+        const fieldOrder = m => {
+            const index = fields.findIndex(field => field.id === m.fieldId);
+            return index < 0 ? fields.length : index;
+        };
+        return minutes(a) - minutes(b) || (userRole === 'viewer' ? fieldOrder(a) - fieldOrder(b) : 0) ||
+            String(a.fieldName || '').localeCompare(String(b.fieldName || ''), 'fr') ||
             String(a.id || '').localeCompare(String(b.id || ''), 'fr');
     };
     const [editingMatch, setEditingMatch] = useState(null);
@@ -5240,13 +5268,13 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 for (let tries = 0; tries < 1800 && start + duration <= 1440; tries++) {
                     if (config.hasLunchBreak && config.lunchStart && config.lunchEnd &&
                         timesOverlap(minutesToTime(start), minutesToTime(start + duration), config.lunchStart, config.lunchEnd)) {
-                        start = Math.max(start + 5, timeToMinutes(config.lunchEnd));
+                        start = Math.max(start + 1, timeToMinutes(config.lunchEnd));
                         continue;
                     }
                     const until = conflicts(fixture, start, start + duration, f.id, mustBeExclusive);
                     if (until === null)
                         break;
-                    start = Math.max(start + 5, until);
+                    start = Math.max(start + 1, until);
                 }
                 if (start + duration > 1440 || conflicts(fixture, start, start + duration, f.id, mustBeExclusive) !== null)
                     continue;
@@ -5304,15 +5332,18 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             }
             frontier = stageEnd(batch) + pause;
         }
-        // Matchs de classement : parallèles sur les différents terrains disponibles,
-        // sauf quand une équipe doit jouer plusieurs rencontres de classement.
+        // Les places chiffrées suivent l’ordre décroissant avant la petite finale.
         if (rankings.length) {
             const wave = [];
-            for (const m of rankings) {
-                const placed = put(m, frontier, false);
+            let nextPlacement = frontier;
+            for (const m of rankings.slice().sort((a, b) => csvPlacementStart(b) - csvPlacementStart(a))) {
+                const numbered = csvPlacementStart(m) > 0;
+                const placed = put(m, numbered ? nextPlacement : frontier, false);
                 if (!placed)
                     return { error: 'Pas assez de créneaux pour les matchs de classement.' };
                 wave.push(placed);
+                if (numbered)
+                    nextPlacement = timeToMinutes(placed.endTime) + pause;
             }
             frontier = stageEnd(wave) + pause;
         }
@@ -5983,9 +6014,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             showToast('Erreur de copie', 'error');
         }
     };
-    return (React.createElement("div", { className: "min-h-screen bg-[#0e0708] text-slate-100 flex flex-col font-sans" },
+    return (React.createElement("div", { className: spectatorSection ? "csv-v74-inline-view" : "min-h-screen text-slate-100 flex flex-col font-sans" },
         notification && (React.createElement("div", { className: `fixed top-4 right-4 z-[10050] px-4 py-3 rounded-xl border text-xs sm:text-sm font-bold shadow-2xl transition animate-bounce ${notification.type === 'error' ? 'bg-rose-950 border-rose-600 text-rose-200' : 'bg-red-950 border-amber-500 text-amber-200'}` }, notification.message)),
-        React.createElement("header", { className: "border-b border-red-950 bg-gradient-to-r from-[#200507] via-[#160507] to-[#1c0608] sticky top-0 z-40 shadow-xl" },
+        !spectatorSection && React.createElement("header", { className: "border-b border-red-950 bg-gradient-to-r from-[#200507] via-[#160507] to-[#1c0608] sticky top-0 z-40 shadow-xl" },
             React.createElement("div", { className: "max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-2" },
                 React.createElement("div", { className: "flex items-center gap-3" },
                     React.createElement(ClubLogo, { className: userRole === 'viewer' ? 'w-9 h-9 sm:w-12 sm:h-12' : 'w-11 h-11 sm:w-12 sm:h-12' }),
@@ -6039,7 +6070,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     tab.icon,
                     " ",
                     tab.text)))))),
-        userRole === 'viewer' && (React.createElement("nav", { "aria-label": "Navigation spectateur", className: "xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
+        !spectatorSection && userRole === 'viewer' && (React.createElement("nav", { "aria-label": "Navigation spectateur", className: "xl:hidden fixed bottom-0 inset-x-0 z-40 border-t border-amber-900/50 bg-[#21090e]/95 backdrop-blur-lg shadow-[0_-8px_26px_rgba(0,0,0,0.5)]", style: { paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' } },
             React.createElement("div", { className: "flex items-stretch justify-around gap-1 px-2 pt-2" }, [
                 { id: 'home', icon: '🏠', text: 'Accueil' },
                 { id: 'matches', icon: '📅', text: 'Matchs' },
@@ -6067,7 +6098,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             React.createElement("button", { type: "button", onClick: () => csvSetTvMode(true),
                 className: "min-h-[42px] px-4 rounded-xl bg-[#33141f] border border-amber-800 text-amber-300 text-xs font-bold" }, "📺 Écran TV")),
         userRole === 'editor' && csvTvMode && React.createElement(CsvTvBoard, { tournament, matches, teams, onClose: () => csvSetTvMode(false) }),
-        React.createElement("main", { className: "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
+        React.createElement(spectatorSection ? "div" : "main", { className: spectatorSection ? "space-y-4" : "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
             activeTab === 'dashboard' && userRole === 'editor' && (React.createElement("section", { className: "space-y-4", "aria-label": "Tableau de bord organisateur" },
                 React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
                     React.createElement("div", null,
@@ -6315,6 +6346,12 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                             React.createElement("textarea", { rows: 3, placeholder: "Un joueur par ligne (ou noms s\u00E9par\u00E9s par virgules / points-virgules)...", "aria-label": `Ajouter plusieurs joueurs à ${t.name}`, value: newPlayerInputs[t.id] || '', onChange: (e) => setNewPlayerInputs(previous => ({ ...previous, [t.id]: e.target.value })), className: "flex-1 min-w-0 bg-[#0b0304] border border-red-900/60 text-xs text-white px-2 py-1 rounded-lg focus:outline-none focus:border-amber-500 resize-y" }),
                             React.createElement("button", { onClick: () => handleAddPlayerToTeam(t.id, newPlayerInputs[t.id]), className: "px-2.5 py-1 bg-gradient-to-r from-red-900 to-red-800 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/30" }, "+")))));
                 })))),
+            inlineTeamSchedule && React.createElement("label", { className: "grid gap-2 text-sm font-bold text-amber-200" },
+                savedViewerTeam ? "Changer d’équipe" : "Choisir mon équipe",
+                React.createElement("select", { value: savedViewerTeam ? viewerTeamId : "", onChange: e => setViewerTeamId(e.target.value), className: "min-h-[50px] w-full max-w-lg rounded-xl border border-red-900 bg-[#0c0406] px-3 text-white" },
+                    React.createElement("option", { value: "", disabled: true }, "Choisir une équipe…"),
+                    teams.slice().sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(t =>
+                        React.createElement("option", { key: t.id, value: t.id }, t.name)))),
             userRole === 'viewer' && teamPickerOpen && React.createElement("div", { className: "fixed inset-0 z-[110] bg-black/90 flex items-center justify-center p-3 sm:p-6" },
                 React.createElement("div", { className: "w-full max-w-lg rounded-2xl border border-amber-500/50 bg-[#16080b] p-4 sm:p-6 space-y-4 shadow-2xl", role: "dialog", "aria-modal": "true", "aria-label": "Choisir son \u00E9quipe" },
                     React.createElement("div", { className: "flex items-center justify-between gap-2" },
@@ -6325,15 +6362,19 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                         React.createElement("option", { value: "" }, "Choisir une \u00E9quipe\u2026"),
                         teams.slice().sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(t => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { type: "button", disabled: !teams.some(t => t.id === viewerTeamId), onClick: () => { setTeamPickerOpen(false); setSelectedTeamSchedule(teams.find(t => t.id === viewerTeamId)); }, className: "min-h-[50px] w-full rounded-xl bg-amber-500 text-[#150506] font-black text-sm disabled:opacity-40" }, "\uD83D\uDCC5 Voir mon calendrier"))),
-            selectedTeamSchedule && (React.createElement("div", { className: "fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5" },
-                React.createElement("div", { className: "bg-[#150709] border border-amber-500/60 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[94dvh] overflow-y-auto overscroll-contain" },
-                    React.createElement("div", { className: "flex items-center justify-between pb-3 border-b border-red-950" },
+            selectedTeamSchedule && (React.createElement("div", { className: inlineTeamSchedule ? "" : "fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5" },
+                React.createElement("div", { className: "bg-[#150709] border border-amber-500/60 rounded-2xl w-full p-4 sm:p-6 space-y-4" + (inlineTeamSchedule ? "" : " max-w-2xl shadow-2xl max-h-[94dvh] overflow-y-auto overscroll-contain") },
+                    React.createElement("div", { className: "flex items-center justify-between gap-2 flex-wrap pb-3 border-b border-red-950" },
                         React.createElement("div", { className: "flex items-center gap-2" },
                             React.createElement(CsvTeamLogo, { team: selectedTeamSchedule, size: 38 }),
                             React.createElement("div", null,
                                 React.createElement("h3", { className: "font-bold text-white text-sm sm:text-base" }, selectedTeamSchedule.name),
                                 React.createElement("span", { className: "text-xs text-amber-400 font-medium" }, "Calendrier officiel"))),
-                        React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "text-slate-400 hover:text-white p-1" }, "\u2715")),
+                        !spectatorSection && userRole === 'viewer' && React.createElement("button", {
+                            type: "button", className: "min-h-[44px] px-2 font-bold text-amber-300 text-sm",
+                            onClick: () => { setSelectedTeamSchedule(null); setTeamPickerOpen(true); }
+                        }, "Changer d’équipe"),
+                        !inlineTeamSchedule && React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "text-slate-400 hover:text-white p-1" }, "\u2715")),
                     (() => {
                         const teamMatches = sortedMatchesForTeam(matches, selectedTeamSchedule.id);
                         const analysis = teamScheduleDiagnostics(teamMatches);
@@ -6370,7 +6411,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                         warning === 'quick' ? ' ⚠' : warning === 'long' ? ' ⏳' : ''))));
                         })));
                     })(),
-                    React.createElement("div", { className: "pt-2 flex justify-end" },
+                    !inlineTeamSchedule && React.createElement("div", { className: "pt-2 flex justify-end" },
                         React.createElement("button", { onClick: () => setSelectedTeamSchedule(null), className: "px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold rounded-xl text-xs" }, "Fermer"))))),
             activeTab === 'home' && userRole === 'viewer' && React.createElement(CsvVisualHome, {
                 tournament, matches, teams, fields, config, onNavigate: setActiveTab,
@@ -6506,15 +6547,14 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                             setGoalTeamId(m.team1Id || '');
                                             setCardTeamId(m.team1Id || '');
                                         }
-                                    }, className: `p-2.5 sm:p-3 rounded-xl border bg-[#0b0304] border-red-950 transition flex flex-col gap-1.5 ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}` },
+                                    }, className: `csv-v74-calendar-card p-2.5 sm:p-3 rounded-xl border bg-[#0b0304] border-red-950 transition flex flex-col gap-1.5 ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}` },
                                     React.createElement("div", { className: "flex justify-between items-center text-[10px] sm:text-[11px] text-slate-400" },
                                         React.createElement("span", { className: "font-mono text-amber-400 font-bold" },
                                             m.startTime || '--:--',
                                             " - ",
                                             m.endTime || '--:--'),
-                                        React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-red-950 text-amber-300" },
-                                            m.group ? `${m.group} • ` : '',
-                                            m.stage || 'Match')),
+                                        React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] csv-v74-calendar-label font-bold bg-red-950 text-amber-300" },
+                                            csvCalendarLabel(m))),
                                     React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                                         React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
                                             React.createElement(CsvTeamLogo, { team: t1, size: 26 }),
@@ -6524,7 +6564,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                             React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t2.name),
                                             React.createElement(CsvTeamLogo, { team: t2, size: 26 }))),
                                     React.createElement("div", { className: "flex justify-between items-center pt-1 border-t border-red-950/60 text-[9px] sm:text-[10px]" },
-                                        React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● En direct' : m.status === 'finished' ? 'Terminé' : 'À venir'),
+                                        React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-amber-100 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● En direct' : m.status === 'finished' ? 'Terminé' : 'À venir'),
                                         userRole === 'editor' && (React.createElement("div", { className: "flex items-center gap-1" },
                                             React.createElement("button", { type: "button", onClick: (e) => { e.preventDefault(); e.stopPropagation(); openMoveMatch(m.id); }, className: "inline-flex items-center justify-center w-8 h-8 sm:w-7 sm:h-7 rounded-md border border-amber-700/30 bg-black/30 text-amber-300 hover:text-amber-100 hover:bg-amber-900/30 text-base cursor-pointer touch-manipulation relative z-10", title: "D\u00E9placer le match (heure ou terrain)", "aria-label": "D\u00E9placer le match" }, "\u2194"),
                                             React.createElement("button", { onClick: (e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }, className: "text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold", title: "Avancer dans l'ordre" }, "\u25B2"),
@@ -6543,22 +6583,21 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 setGoalTeamId(m.team1Id || '');
                                 setCardTeamId(m.team1Id || '');
                             }
-                        }, className: `p-3 sm:p-3.5 rounded-xl border transition flex flex-col justify-between ${m.id === 'ko-final' ? 'bg-amber-950/20 border-amber-500/70' : m.id === 'ko-bronze' ? 'bg-[#211016] border-amber-700/50' : 'bg-[#150709] border-red-950'} ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}` },
-                        React.createElement("div", { className: "flex justify-between items-center text-[10px] sm:text-xs text-slate-400 mb-1.5" },
-                            React.createElement("span", { className: "font-mono text-amber-400 font-bold" },
+                        }, className: `csv-v74-calendar-card p-3 sm:p-3.5 rounded-xl border transition flex flex-col justify-between ${m.id === 'ko-final' ? 'bg-amber-950/20 border-amber-500/70' : m.id === 'ko-bronze' ? 'bg-[#211016] border-amber-700/50' : 'bg-[#150709] border-red-950'} ${userRole === 'editor' ? 'cursor-pointer hover:border-amber-500/50' : ''}` },
+                        React.createElement("div", { className: "csv-v74-calendar-meta flex justify-between items-center text-[10px] sm:text-xs text-slate-400 mb-1.5" },
+                            React.createElement("span", { className: "csv-v74-calendar-time font-mono text-amber-400 font-bold" },
                                 m.startTime || '--:--',
-                                " \u2022 ",
-                                m.fieldName || 'Terrain'),
-                            React.createElement("div", { className: "flex items-center gap-1.5" },
+                                m.endTime ? `–${m.endTime}` : ''),
+                            React.createElement("span", { className: "csv-v74-calendar-field" }, m.fieldName || "Terrain"),
+                            React.createElement("div", { className: "csv-v74-calendar-phase flex items-center gap-1.5" },
                                 userRole === 'editor' && (React.createElement("div", { className: "flex items-center gap-1 mr-1" },
                                     React.createElement("button", { type: "button", onClick: (e) => { e.preventDefault(); e.stopPropagation(); openMoveMatch(m.id); }, className: "inline-flex items-center justify-center w-8 h-8 sm:w-7 sm:h-7 rounded-md border border-amber-700/30 bg-black/30 text-amber-300 hover:text-amber-100 hover:bg-amber-900/30 text-base cursor-pointer touch-manipulation relative z-10", title: "D\u00E9placer le match (heure ou terrain)", "aria-label": "D\u00E9placer le match" }, "\u2194"),
                                     React.createElement("button", { onClick: (e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }, className: "text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs", title: "Monter dans l'ordre chronologique" }, "\u25B2"),
                                     React.createElement("button", { onClick: (e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'down'); }, className: "text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs", title: "Descendre dans l'ordre chronologique" }, "\u25BC"))),
-                                React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-red-950 text-amber-300" },
-                                    m.group ? `${m.group} • ` : '',
-                                    m.stage || 'Match'),
-                                React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-cyan-400 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● Live' : m.status === 'finished' ? 'Terminé' : 'À venir'))),
-                        React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
+                                React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] csv-v74-calendar-label font-bold bg-red-950 text-amber-300" },
+                                    csvCalendarLabel(m)),
+                                React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-amber-100 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● Live' : m.status === 'finished' ? 'Terminé' : 'À venir'))),
+                        React.createElement("div", { className: "csv-v74-calendar-teams flex items-center justify-between gap-1 py-1" },
                             React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
                                 React.createElement(CsvTeamLogo, { team: t1, size: 28 }),
                                 React.createElement("span", { className: "font-bold text-white text-xs sm:text-sm truncate" }, t1.name)),
@@ -6762,7 +6801,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 pinError && React.createElement("p", { role: "alert", className: "text-xs text-rose-400" }, pinError),
                 React.createElement("button", { type: "button", disabled: secureBusy || !secureEmail || !securePassword, onClick: secureFirebaseLogin, className: "w-full min-h-[44px] rounded-lg bg-emerald-700 text-white font-black text-sm disabled:opacity-40" }, secureBusy ? "Connexion…" : "Se connecter"),
                 React.createElement("button", { type: "button", onClick: () => setAdminPinModalOpen(false), className: "w-full min-h-[42px] rounded-lg border border-amber-900 text-slate-300 text-xs" }, "Annuler"))),
-        isShareModalOpen && (React.createElement("div", { className: "fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5" },
+        isShareModalOpen && (React.createElement("div", { className: inlineTeamSchedule ? "" : "fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-5" },
             React.createElement("div", { className: "bg-[#150709] border border-red-900 rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" },
                 React.createElement("div", { className: "flex justify-between items-center pb-3 border-b border-red-950" },
                     React.createElement("h3", { className: "font-bold text-white text-base" }, "Partage du Tournoi"),

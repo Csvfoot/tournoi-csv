@@ -11,7 +11,7 @@
   <meta name="theme-color" content="#21070d">
   <link rel="manifest" href="./manifest-spectateur.webmanifest">
   <!-- CSS généré à la construction : pas de compilation Tailwind dans le navigateur -->
-  <link rel="stylesheet" href="./styles.css?v=7.4">
+  <link rel="stylesheet" href="./styles.css?v=7.4.10">
   <!-- React & ReactDOM 18 -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -25,9 +25,25 @@
   
 </head>
 <body>
-  <div id="root"><main style="min-height:100dvh;display:flex;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle at 50% 18%,#541621,#10070b 80%);color:#f5c578;font:700 14px system-ui;padding:28px"><div><img src="./apple-touch-icon.png" alt="Blason CSV" style="width:88px;height:88px;object-fit:contain;margin:0 auto 20px"><strong style="font-size:20px;display:block;color:#fff2db">Bienvenue au Tournoi CSV</strong><span style="display:block;margin-top:12px;color:#d8bcae;font-weight:400">Chargement des journées publiées…</span></div></main></div>
+  <div id="root"><main style="min-height:100dvh;display:flex;align-items:center;justify-content:center;text-align:center;background:var(--csv-club-backdrop);color:#f5c578;font:700 14px system-ui;padding:28px"><div><img src="./apple-touch-icon.png" alt="Blason du CS La Verpillière" style="width:88px;height:88px;object-fit:contain;clip-path:circle(47%);margin:0 auto 20px"><strong style="font-size:20px;display:block;color:#fff2db">Bienvenue au tournoi</strong><span style="display:block;margin-top:12px;color:#d8bcae;font-weight:400">Chargement des journées publiées…</span></div></main></div>
 
-  <script>window.CSV_LAUNCH_MODE="spectator";</script>
-  <script defer src="./app.js?v=7.4"></script>
+  <dialog id="csv-spectator-intro" class="csv-spectator-intro" aria-labelledby="csv-intro-title">
+    <div class="csv-intro-content">
+      <img src="./apple-touch-icon.png" width="112" height="112" alt="Blason du CS La Verpillière">
+      <h1 id="csv-intro-title">CS La Verpillière <span>1939</span></h1>
+      <p>Retrouvez le calendrier, les scores et les classements du tournoi.</p>
+      <form method="dialog"><button autofocus>Entrer dans le tournoi</button></form>
+    </div>
+  </dialog>
+  <script>
+    window.CSV_LAUNCH_MODE = "spectator";
+    const intro = document.getElementById("csv-spectator-intro");
+    if (typeof intro.showModal === "function") {
+      intro.showModal();
+      const introTimer = setTimeout(() => intro.close(), 5000);
+      intro.addEventListener("close", () => clearTimeout(introTimer), { once: true });
+    }
+  </script>
+  <script defer src="./app.js?v=7.4.10"></script>
 </body>
 </html>

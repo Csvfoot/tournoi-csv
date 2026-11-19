@@ -122,11 +122,11 @@ async function main() {
       await page.getByRole('region', { name: 'Consolante', exact: true }).getByText('Finale consolante · 15:30', { exact: true }).waitFor();
       await page.getByRole('region', { name: 'Matchs de classement', exact: true }).getByText('Match pour la 5e place · 15:00', { exact: true }).waitFor();
       if (safari) {
-        const rounds = page.getByRole('region', { name: 'Tableau des tours à faire défiler' });
+        const rounds = page.getByRole('region', { name: 'Tableau des tours' });
         const overflow = await rounds.evaluate(node => node.scrollWidth > node.clientWidth);
-        assert(overflow, 'Le tableau iPhone doit défiler dans son propre conteneur');
+        assert(!overflow, 'Le tableau iPhone doit tenir dans la largeur disponible');
         await rounds.getByRole('heading', { name: 'Grande finale' }).scrollIntoViewIfNeeded();
-        assert(await rounds.evaluate(node => node.scrollLeft > 0), 'Grande finale accessible par défilement');
+        assert(await rounds.getByRole('heading', { name: 'Grande finale' }).isVisible(), 'Grande finale accessible en descendant');
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
           'La page iPhone doit rester dans la largeur de l’écran');
       }
