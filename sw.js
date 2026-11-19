@@ -1,6 +1,6 @@
 // Tournoi CSV V7.4 - application shell cache. Never cache Firestore/auth API responses.
-const CACHE = 'tournoi-csv-shell-v7.4.15';
-const CORE = ['./','./index.html','./spectateur.html','./organisateur.html','./installer.html','./manifest-spectateur.webmanifest','./manifest-organisateur.webmanifest','./apple-touch-icon-organisateur.png','./icon-192-organisateur.png','./icon-512-organisateur.png','./app.js?v=7.4.15','./styles.css?v=7.4.15','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
+const CACHE = 'tournoi-csv-shell-v7.4.23';
+const CORE = ['./','./index.html','./spectateur.html','./organisateur.html','./installer.html','./manifest-spectateur.webmanifest','./manifest-organisateur.webmanifest','./apple-touch-icon-organisateur.png','./icon-192-organisateur.png','./icon-512-organisateur.png','./app.js?v=7.4.23','./styles.css?v=7.4.23','./renard-galop.webp','./apple-touch-icon.png','./icon-192.png','./icon-512.png','./imprimer.html','./affiche-qr.html','./manifest.webmanifest'];
 const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
