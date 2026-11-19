@@ -4058,6 +4058,7 @@ function CsvVisualFinals({ matches, teams }) {
                 React.createElement('strong',null,score==null?'–':score))));
     const bronze=matches.find(m=>m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
     const final=matches.find(m=>m.stage==='Grande Finale'||m.id==='ko-final');
+    const classification=matches.filter(m=>m.group==='Tournoi Classement'||m.group==='Tournoi Consolante');
     const finalResult=resultOf(final),bronzeResult=resultOf(bronze);
     const medal = (name,id,placeholder)=>React.createElement('div',{className:'csv-v74-podium-place',key:name},
         React.createElement('strong',null,name),
@@ -4065,7 +4066,8 @@ function CsvVisualFinals({ matches, teams }) {
     return React.createElement('section',{className:'csv-v74-final-visual'},
         React.createElement('h2',null,'🏆 La route vers la finale'),
         React.createElement('p',{className:'csv-v74-muted'},'Les qualifications et résultats sont issus du calendrier officiel.'),
-        rounds.length?React.createElement('div',{className:'csv-v74-rounds'},
+        names.length > 1 && React.createElement('p',{className:'csv-v74-swipe-hint'},'↔ Faites défiler pour découvrir la grande finale'),
+        rounds.length?React.createElement('div',{className:'csv-v74-rounds',role:'region',tabIndex:0,'aria-label':'Tableau des tours à faire défiler'},
             names.map(name=>React.createElement('div',{className:'csv-v74-round',key:name},
                 React.createElement('h3',null,name),
                 rounds.filter(m=>roundName(m)===name).map(tile)))):
@@ -4075,7 +4077,10 @@ function CsvVisualFinals({ matches, teams }) {
         React.createElement('div',{className:'csv-v74-podium'},
             medal('🥇 Champion',finalResult&&finalResult.winner,'En attente de la finale'),
             medal('🥈 Finaliste',finalResult&&finalResult.loser,'En attente de la finale'),
-            medal('🥉 Troisième',bronzeResult&&bronzeResult.winner,'En attente de la petite finale')));
+            medal('🥉 Troisième',bronzeResult&&bronzeResult.winner,'En attente de la petite finale')),
+        classification.length > 0 && React.createElement('div',{className:'csv-v74-ranking-matches'},
+            React.createElement('h3',null,'🎖 Matchs de classement et consolante'),
+            React.createElement('div',{className:'csv-v74-ranking-grid'},classification.map(tile))));
 }
 function CsvSpectatorSummary({ matches, teams, category }) {
     const club = id => (teams.find(t => t.id === id) || {}).name || 'À déterminer';
@@ -6625,11 +6630,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                 React.createElement("td", { className: "py-3 px-2 text-slate-400" }, r.exact ? r.description : (r.level > 0 ? 'Phase finale' : 'Classement de poule'))))))))));
             })(),
             activeTab === 'bracket' && (React.createElement("div", { className: "space-y-6" },
-                React.createElement(CsvVisualFinals, { matches, teams }),
-                React.createElement("div", null,
+                userRole === 'viewer' && React.createElement(CsvVisualFinals, { matches, teams }),
+                userRole === 'editor' && React.createElement("div", null,
                     React.createElement("h2", { className: "text-lg font-bold text-white mb-1" }, "Phases Finales & Matchs de Classement"),
                     React.createElement("p", { className: "text-xs text-slate-400" }, "Matchs \u00E0 \u00E9limination directe (en cas d'\u00E9galit\u00E9, tirs au but obligatoires pour d\u00E9partager).")),
-                React.createElement("div", { className: "bg-[#150709] border border-amber-500/50 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
+                userRole === 'editor' && React.createElement("div", { className: "bg-[#150709] border border-amber-500/50 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
                     React.createElement("h3", { className: "text-sm font-black text-amber-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDFC6 Phase Finale Principale (Titre)"),
                     React.createElement("div", { className: "flex flex-col md:flex-row gap-6 justify-around" },
                         React.createElement("div", { className: "flex-1 space-y-3" },
@@ -6666,7 +6671,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                         React.createElement("span", { className: "text-white font-bold" }, t2.name),
                                         React.createElement("span", { className: "font-mono font-black text-amber-300 text-base" }, m.score2 !== null ? `${m.score2} ${m.pens2 !== null ? `(${m.pens2} tab)` : ''}` : '-'))));
                             })))),
-                matches.some(m => m.group === 'Tournoi Consolante' || m.group === 'Tournoi Classement') && (React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
+                userRole === 'editor' && matches.some(m => m.group === 'Tournoi Consolante' || m.group === 'Tournoi Classement') && (React.createElement("div", { className: "bg-[#150709] border border-red-950 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4" },
                     React.createElement("h3", { className: "text-sm font-black text-cyan-400 uppercase tracking-wider flex items-center gap-2" }, "\uD83C\uDF96 Matchs de classement par rang de poule"),
                     React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, matches.filter(m => m.group === 'Tournoi Consolante' || m.group === 'Tournoi Classement').map(m => {
                         const t1 = m.team1Id ? getTeam(m.team1Id) : { name: m.placeholder1 || 'En attente' };
