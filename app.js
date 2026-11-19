@@ -4058,7 +4058,10 @@ function CsvVisualFinals({ matches, teams }) {
                 React.createElement('strong',null,score==null?'–':score))));
     const bronze=matches.find(m=>m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
     const final=matches.find(m=>m.stage==='Grande Finale'||m.id==='ko-final');
-    const classification=matches.filter(m=>m.group==='Tournoi Classement'||m.group==='Tournoi Consolante');
+    const secondaryPhases = [
+        { group: 'Tournoi Consolante', label: 'Consolante' },
+        { group: 'Tournoi Classement', label: 'Matchs de classement' }
+    ];
     const finalResult=resultOf(final),bronzeResult=resultOf(bronze);
     const medal = (name,id,placeholder)=>React.createElement('div',{className:'csv-v74-podium-place',key:name},
         React.createElement('strong',null,name),
@@ -4078,9 +4081,15 @@ function CsvVisualFinals({ matches, teams }) {
             medal('🥇 Champion',finalResult&&finalResult.winner,'En attente de la finale'),
             medal('🥈 Finaliste',finalResult&&finalResult.loser,'En attente de la finale'),
             medal('🥉 Troisième',bronzeResult&&bronzeResult.winner,'En attente de la petite finale')),
-        classification.length > 0 && React.createElement('div',{className:'csv-v74-ranking-matches'},
-            React.createElement('h3',null,'🎖 Matchs de classement et consolante'),
-            React.createElement('div',{className:'csv-v74-ranking-grid'},classification.map(tile))));
+        secondaryPhases.map(({ group, label }) => {
+            const fixtures = matches.filter(match => match.group === group)
+                .sort((a, b) => (a.startTime || '99:99').localeCompare(b.startTime || '99:99'));
+            return fixtures.length ? React.createElement('section', {
+                key: group, className: 'csv-v74-ranking-matches', 'aria-label': label
+            },
+                React.createElement('h3', null, label),
+                React.createElement('div', { className: 'csv-v74-ranking-grid' }, fixtures.map(tile))) : null;
+        }));
 }
 function CsvSpectatorSummary({ matches, teams, category }) {
     const club = id => (teams.find(t => t.id === id) || {}).name || 'À déterminer';

@@ -119,8 +119,8 @@ async function main() {
       await page.getByText('Le football se vit ici.').waitFor();
       await page.evaluate(()=>window.__render('finals','u11'));
       await page.getByText('La route vers la finale').waitFor();
-      await page.getByText('Finale consolante · 15:30', { exact: true }).waitFor();
-      await page.getByText('Match pour la 5e place · 15:00', { exact: true }).waitFor();
+      await page.getByRole('region', { name: 'Consolante', exact: true }).getByText('Finale consolante · 15:30', { exact: true }).waitFor();
+      await page.getByRole('region', { name: 'Matchs de classement', exact: true }).getByText('Match pour la 5e place · 15:00', { exact: true }).waitFor();
       if (safari) {
         const rounds = page.getByRole('region', { name: 'Tableau des tours à faire défiler' });
         const overflow = await rounds.evaluate(node => node.scrollWidth > node.clientWidth);
