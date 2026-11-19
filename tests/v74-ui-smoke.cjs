@@ -37,7 +37,7 @@ const fixture = {
      status:'pending',startTime:'16:00',score1:null,score2:null}
   ]
 };
-const deps = String.raw\`
+const deps = String.raw`
 const React=window.React, ReactDOM=window.ReactDOM;
 const csvSafeLogoUrl=src=>typeof src==='string'&&src.startsWith('https:')?src:'';
 function CsvTeamLogo({team,size=32}) { return React.createElement('span',{style:{
@@ -56,7 +56,7 @@ const standingsFor=(teams,matches,group,rules)=>teams.filter(t=>(t.group||'Poule
   team,played:matches.filter(m=>m.status==='finished'&&(m.team1Id===team.id||m.team2Id===team.id)).length,
   points:3,gf:2,gd:1
 }));
-\`;
+`;
 const react = fs.readFileSync(path.join(root, 'node_modules/react/umd/react.production.min.js'), 'utf8');
 const reactDom = fs.readFileSync(path.join(root, 'node_modules/react-dom/umd/react-dom.production.min.js'), 'utf8');
 const documentHtml = [
