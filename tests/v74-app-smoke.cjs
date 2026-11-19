@@ -51,6 +51,32 @@ async function main(){
     assert(errors.filter(e=>/ReferenceError|TypeError|is not defined|Cannot read properties/.test(e)).length===0,
       'Erreur JavaScript dans la page complète : '+errors.join(' | '));
     await page.close();
+    // Porte d'entrée organisateur sans compte : seul l'écran de connexion doit être accessible.
+    const organizer = await browser.newPage({viewport:{width:390,height:844}});
+    const organizerErrors=[];
+    organizer.on('pageerror',e=>organizerErrors.push(e.message));
+    const orgResponse=await organizer.goto('http://127.0.0.1:'+port+'/organisateur.html',
+      {waitUntil:'domcontentloaded',timeout:45000});
+    assert.equal(orgResponse.status(),200);
+    await organizer.getByRole('heading',{name:'Espace organisateur'}).waitFor({timeout:30000});
+    assert.equal(await organizer.getByRole('textbox',{name:'Adresse e-mail'}).count(),1);
+    assert.equal(await organizer.locator('input[type="password"]').count(),1);
+    assert.equal(await organizer.getByText('Connexion Firebase organisateur obligatoire').count(),1);
+    assert.equal(await organizer.getByRole('button',{name:'Se connecter'}).count(),1);
+    await organizer.screenshot({path:path.join(root,'test-artifacts','v74-organisateur-acces.png'),fullPage:true});
+    assert.equal(organizerErrors.filter(x=>/ReferenceError|TypeError|is not defined/.test(x)).length,0,
+      'Erreur à la porte organisateur '+organizerErrors.join(';'));
+    console.log('OK ouverture organisateur : authentification obligatoire, pas de saisie sans compte');
+    await organizer.close();
+    // Un lien forgé role=editor n'accorde pas de privilège sur le portail public.
+    const forged=await browser.newPage({viewport:{width:390,height:844}});
+    const view=await forged.goto('http://127.0.0.1:'+port+'/spectateur.html?role=editor',
+      {waitUntil:'domcontentloaded',timeout:45000});
+    assert.equal(view.status(),200);
+    await forged.getByRole('main',{name:'Accueil CSV Spectateur'}).waitFor({timeout:30000});
+    assert.equal(await forged.getByRole('heading',{name:'Espace organisateur'}).count(),0);
+    console.log('OK lien public role=editor : reste spectateur');
+    await forged.close();
   }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;server.close();});
