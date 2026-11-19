@@ -1640,13 +1640,15 @@ function DayEntryPanel({ date, events, records, fields, onSave, hubStatus }) {
 // Elle est réservée au raccourci spectateur : les liens QR datés gardent l'accès direct.
 // V7.4 — Accueil spectator : même design que la maquette, vraies données Firebase.
 function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
-    onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing, records, fields }) {
-    const available = events.length > 0;
+    onChooseDay, onChooseCategory, onOpen, onRefresh, refreshing, records, fields, readyRecords }) {
+    const available = !isLoading && events.length > 0;
     const active = events.find(e => e.id === activeId) || events[0] || null;
     const rec = active && records ? records[active.id] : null;
     const config = rec && rec.config || {};
     const teams = rec && Array.isArray(rec.teams) ? rec.teams : [];
     const matches = rec && Array.isArray(rec.matches) ? rec.matches : [];
+    const recordReady = active && ((readyRecords && readyRecords[active.id]) || (offline && rec));
+    const canShow = !!(available && active && rec && recordReady);
     return React.createElement('main',{className:'csv-v74-welcome',role:'main','aria-label':'Accueil CSV Spectateur'},
         React.createElement('div',{className:'csv-v74-welcome-inner'},
             React.createElement('div',{className:'csv-v74-public-note'}, '⚽ CLUB SPORTIF LA VERPILLIÈRE · 1939'),
@@ -1660,7 +1662,7 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
                   ['📊 Classements','standings'],['🏆 Phases finales','finals'],
                   ['📺 Écran TV','tv']]
                     .map(([label,action])=>React.createElement('button',{
-                        key:label,type:'button',disabled:action&&!available,
+                        key:label,type:'button',disabled:action&&!canShow,
                         className:action?'':'csv-v74-active',
                         onClick:()=>action&&onOpen(action)},label))),
             React.createElement('div',{className:'csv-v74-welcome-choices'},
@@ -1670,17 +1672,19 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
                         dates.map(d=>React.createElement('option',{key:d,value:d},csvReadableDay(d)))):
                         React.createElement('span',null,day?csvReadableDay(day):'Programme à venir')),
                 React.createElement('div',{className:'csv-v74-category-pills'},
-                    events.map(e=>React.createElement('button',{type:'button',key:e.id,
+                    (!isLoading ? events : []).map(e=>React.createElement('button',{type:'button',key:e.id,
                         'aria-pressed':e.id===activeId,onClick:()=>onChooseCategory(e.id),
                         className:e.id===activeId?'csv-v74-category-active':''},e.category)))),
             offline&&React.createElement('p',{className:'csv-v74-welcome-status'},'📴 Programme hors ligne : dernières informations enregistrées sur cet appareil.'),
-            isLoading&&React.createElement('p',{className:'csv-v74-welcome-status'},'⏳ Synchronisation du programme…'),
-            available&&active ? React.createElement(CsvVisualHome,{
+            canShow ? React.createElement(CsvVisualHome,{
                 tournament:active,matches,teams,fields:fields||[],config,
                 onNavigate:()=>onOpen('program'),onChooseTeam:()=>onOpen('team')}) :
                 React.createElement('div',{className:'csv-v74-panel'},
-                    React.createElement('h2',null,'Aucune journée publiée pour le moment'),
-                    React.createElement('p',null,'Le programme sera disponible après publication par les organisateurs.'),
+                    React.createElement('h2',null, isLoading ? '⏳ Synchronisation du programme…' :
+                        available ? '⏳ Chargement des rencontres officielles…' : 'Aucune journée publiée pour le moment'),
+                    React.createElement('p',null, isLoading || available ?
+                        'Les matchs et catégories apparaîtront dès que les données seront disponibles.' :
+                        'Le programme sera disponible après publication par les organisateurs.'),
                     React.createElement('button',{type:'button',className:'csv-v74-link',disabled:refreshing,onClick:onRefresh},
                         refreshing?'Actualisation…':'↻ Actualiser le programme'))
         ));
@@ -3314,7 +3318,7 @@ function MultiTournamentShell() {
         const welcomeLoading = netOnline && !catalogSynced && hubStatus !== 'error';
         return React.createElement(CsvSpectatorWelcome, {
             day: viewerDay, dates: publishedDays, events: publicEvents,
-            records, fields: sharedFields,
+            records, fields: sharedFields, readyRecords: loadedDocs,
             activeId: current ? current.id : '',
             isLoading: welcomeLoading, offline: !netOnline || hubStatus === 'error',
             onChooseDay: selectPublicDay,
