@@ -3078,3 +3078,12 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-stepper-input{width:42px;min-width:0;height:48px;border-radius:10px;background:#18080a;border:1px solid #813047;color:#fff;text-align:center;font-family:ui-monospace,monospace;font-size:22px;font-weight:900;appearance:textfield;}
 .csv-v74-stepper-input::-webkit-inner-spin-button,.csv-v74-stepper-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
 @media(min-width:480px){.csv-v74-stepper{gap:6px;}.csv-v74-stepper-input{width:58px;}.csv-v74-stepper-button{width:40px;min-width:40px;}}
+
+/* V7.4 — logos au centre de la lecture des scores */
+.csv-v74-club{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0;overflow-wrap:anywhere;}
+.csv-v74-club-away{justify-content:flex-end;text-align:right;}
+.csv-v74-club > span{min-width:0;}
+.csv-v74-club > img{flex-shrink:0;}
+.csv-v74-fixture-main > .csv-v74-club{font-size:12px;}
+.csv-v74-tv-fixture .csv-v74-club{font-size:inherit;}
+@media(max-width:520px){.csv-v74-club{gap:4px;}.csv-v74-fixture-main > .csv-v74-club{font-size:10px;}}
