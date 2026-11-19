@@ -5626,11 +5626,21 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (!dbRef.current || cloudStatus !== 'online') {
             showToast('Connexion Firebase nécessaire pour enregistrer le logo.', 'error'); return;
         }
-        const updated = teams.map(t => t.id === teamId ? { ...t, logoUrl } : t);
-        setTeams(updated);
-        dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id))
-            .set({ teams: updated, updatedAt: new Date().toISOString() }, { merge: true })
-            .then(() => showToast(logoUrl ? 'Logo du club enregistré.' : 'Logo retiré.'))
+        // Écriture atomique : ne pas écraser les autres modifications d'équipes
+        // effectuées simultanément par un autre organisateur.
+        const docRef = dbRef.current.collection('tournaments').doc(tournamentDocId(tournament.id));
+        dbRef.current.runTransaction(async transaction => {
+            const snapshot = await transaction.get(docRef);
+            if (!snapshot.exists || !Array.isArray(snapshot.data().teams))
+                throw new Error('Les équipes ne sont pas encore synchronisées.');
+            const currentTeams = snapshot.data().teams;
+            if (!currentTeams.some(t => t.id === teamId))
+                throw new Error('Cette équipe n’existe plus sur le serveur.');
+            const updatedTeams = currentTeams.map(t => t.id === teamId ? { ...t, logoUrl } : t);
+            transaction.update(docRef, { teams: updatedTeams, updatedAt: new Date().toISOString() });
+            return updatedTeams;
+        })
+            .then(updated => { setTeams(updated); showToast(logoUrl ? 'Logo du club enregistré.' : 'Logo retiré.'); })
             .catch(err => showToast('Logo non enregistré : ' + err.message, 'error'));
     };
     const csvUploadTeamLogo = (teamId, file) => {
