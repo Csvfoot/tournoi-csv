@@ -26,6 +26,7 @@ jobs:
           node --check sw.js
           node --check tests/v74-version-consistency.cjs
           node tests/v74-version-consistency.cjs
+          node tests/v74-organizer-pwa.cjs
       - name: Installer react et Playwright dans le runner
         run: npm install --no-save --no-package-lock react@18.2.0 react-dom@18.2.0 playwright@1.55.0
       - name: Navigateur Chromium
