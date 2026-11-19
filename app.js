@@ -1666,8 +1666,7 @@ function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
                     React.createElement('h1',null,'TOURNOI CSV'))),
             React.createElement('nav',{className:'csv-v74-quicknav','aria-label':'Navigation rapide'},
                 [['🏠 Accueil',null],['⭐ Mon équipe','team'],['📅 Calendrier','program'],
-                  ['📊 Classements','standings'],['🏆 Phases finales','finals'],
-                  ['📺 Écran TV','tv']]
+                  ['📊 Classements','standings'],['🏆 Phases finales','finals']]
                     .map(([label,action])=>React.createElement('button',{
                         key:label,type:'button',disabled:action&&!canShow,
                         className:action?'':'csv-v74-active',
@@ -4308,13 +4307,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         } catch (err) { /* Le parcours reste utilisable sans stockage. */ }
         const action = requestedViewerAction.type;
         setActiveTab(action === 'standings' ? 'standings' :
-            action === 'finals' && config.format !== 'round_robin' ? 'bracket' :
-            action === 'tv' ? 'home' : 'matches');
+            action === 'finals' && config.format !== 'round_robin' ? 'bracket' : 'matches');
         setViewerMoreOpen(false);
         setScheduleViewMode('chrono');
         setMobileMatchFilter(action === 'results' ? 'finished' : 'upcoming');
         if (action === 'team') csvOpenMyTeam();
-        if (action === 'tv') csvSetTvMode(true);
     }, [requestedViewerAction, hubIsEditor]);
     const [newPlayerInputs, setNewPlayerInputs] = useState({});
     useEffect(() => {
@@ -6066,10 +6063,10 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         userRole === 'viewer' && viewerMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2", style: { bottom: 'calc(85px + env(safe-area-inset-bottom, 0px))' }, role: "region", "aria-label": "Autres vues spectateur" },
             [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { setActiveTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
             React.createElement("button", { type: "button", onClick: () => setViewerMoreOpen(false), className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs" }, "Fermer")),
-        userRole === 'viewer' && React.createElement("div", { className: "max-w-7xl mx-auto w-full px-3 sm:px-6 pt-2 flex justify-end gap-2" },
+        userRole === 'editor' && React.createElement("div", { className: "max-w-7xl mx-auto w-full px-3 sm:px-6 pt-2 flex justify-end gap-2" },
             React.createElement("button", { type: "button", onClick: () => csvSetTvMode(true),
                 className: "min-h-[42px] px-4 rounded-xl bg-[#33141f] border border-amber-800 text-amber-300 text-xs font-bold" }, "📺 Écran TV")),
-        csvTvMode && React.createElement(CsvTvBoard, { tournament, matches, teams, onClose: () => csvSetTvMode(false) }),
+        userRole === 'editor' && csvTvMode && React.createElement(CsvTvBoard, { tournament, matches, teams, onClose: () => csvSetTvMode(false) }),
         React.createElement("main", { className: "flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 sm:py-6 pb-28 xl:pb-6" },
             activeTab === 'dashboard' && userRole === 'editor' && (React.createElement("section", { className: "space-y-4", "aria-label": "Tableau de bord organisateur" },
                 React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
