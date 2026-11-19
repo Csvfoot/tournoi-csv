@@ -8,7 +8,7 @@
   const VIEWS = [
     { id: 'results', label: 'Derniers résultats', eyebrow: 'LES SCORES', caption: 'Rencontres terminées · actualisation automatique' },
     { id: 'standings', label: 'Classements', eyebrow: 'CLASSEMENT DES POULES', caption: 'Points · matchs joués · différence de buts' },
-    { id: 'upcoming', label: 'Prochains matchs', eyebrow: 'À SUIVRE', caption: 'Prochains matchs U10 et U11 · horaires et terrains' },
+    { id: 'upcoming', label: 'Prochains matchs', eyebrow: 'À SUIVRE', caption: 'Prochains matchs · horaires et terrains' },
     { id: 'finals', label: 'Phases finales', eyebrow: 'LE TABLEAU FINAL', caption: 'Qualifications · demi-finales · finale · matchs de classement' }
   ];
   // Configuration cliente déjà publique dans la V7.1 officielle (GitHub Pages).
@@ -40,7 +40,10 @@
   }
   let screenSettings=readSettings();
   const rotationMs=()=>screenSettings.rotationSeconds*1000;
-  const selectedCategories=()=>catParam?[catParam]:screenSettings.categories==='both'?['U10','U11']:[screenSettings.categories];
+  const configuredCategories=()=>catParam?[catParam]:screenSettings.categories==='both'?['U10','U11']:[screenSettings.categories];
+  const selectedCategories=()=>eventParam || fullDay
+    ? [...new Set(state.events.map(e=>categoryOf(e.category)).filter(Boolean))]
+    : configuredCategories();
   const selectedViews=()=>VIEWS.filter(v=>screenSettings.views.includes(v.id));
   const ROOT = document.getElementById('screen-content');
   const STATUS = document.getElementById('screen-connection');
@@ -55,7 +58,9 @@
   const params = new URLSearchParams(location.search);
   const isDemo = document.body.dataset.screenMode === 'demo' || params.get('demo') === '1';
   const dayParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') || '') ? params.get('day') : null;
-  const catParam = /^(U10|U11)$/i.test(params.get('category') || '') ? params.get('category').toUpperCase() : null;
+  const catParam = categoryOf(params.get('category'));
+  const eventParam = params.get('event');
+  const fullDay = params.get('categories') === 'day' || Boolean(dayParam && !catParam && !eventParam);
   const state = {
     events: [], records: new Map(), unsubscribe: [], slides: [], index: 0,
     paused: false, nextAt: Date.now() + rotationMs(), connected: false,
@@ -75,12 +80,12 @@
     return new Date(value + 'T12:00:00').toLocaleDateString('fr-FR', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
   };
   const today = () => { const d = new Date(); return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'); };
-  const categoryOf = v => {
-    const s = String(v || '').toUpperCase().replace(/\s|-/g,'');
-    if (/^U10\b/.test(s) || s === 'U10') return 'U10';
-    if (/^U11\b/.test(s) || s === 'U11') return 'U11';
-    return null;
-  };
+  function categoryOf(value) {
+    const label=String(value || '').trim().toUpperCase().slice(0,60);
+    if (!label) return null;
+    const ageGroup=/^U[\s-]*(\d{1,2})\b/.exec(label);
+    return ageGroup ? 'U'+ageGroup[1] : label;
+  }
   const matchMinutes = v => { const m = /^(\d{1,2}):(\d{2})$/.exec(v || ''); return m ? (+m[1])*60+(+m[2]) : -1; };
   const timeCompare = (a,b) => (matchMinutes(a.startTime) < 0 ? 9999 : matchMinutes(a.startTime)) - (matchMinutes(b.startTime) < 0 ? 9999 : matchMinutes(b.startTime)) || safe(a.id,'').localeCompare(safe(b.id,''));
   const statusDone = m => m && m.status === 'finished' && m.score1 != null && m.score2 != null && Number.isFinite(+m.score1) && Number.isFinite(+m.score2);
@@ -242,25 +247,27 @@
 
   function chunk(values,count) { const out=[];for(let i=0;i<values.length;i+=count)out.push(values.slice(i,i+count));return out.length?out:[[]]; }
   function createSlides(events,records) {
+    if (!events.length) return [];
     const slides=[];
     const categories=selectedCategories();
     for(const view of selectedViews()){
       if(view.id==='standings'||view.id==='upcoming'){
-        const parts=categories.map(category=>{
-          const event=events.find(e=>categoryOf(e.category)===category);
-          const data=event?(records.get(event.id)||{teams:[],matches:[],config:{}}):{teams:[],matches:[],config:{}};
-          const items=view.id==='standings'?rankGroups(data):
-            arr(data.matches).filter(m=>!statusDone(m)&&!phase(m)).sort(timeCompare).slice(0,screenSettings.upcomingLimit);
-          // Une seule page « Prochains matchs » : 2 par catégorie par défaut, configurable sur cet appareil.
-          // Les autres matchs restent dans Firestore et ne sont pas affichés ici.
-          return {category,event,data,pages:view.id==='upcoming'?[items]:chunk(items,2)};
-        });
-        const pageCount=Math.max(1,...parts.map(p=>p.pages.length));
-        for(let page=0;page<pageCount;page++){
-          slides.push({view,dual:true,
-            panels:parts.map(p=>({category:p.category,event:p.event,data:p.data,
-              items:p.pages[page]||[],pageAvailable:page<p.pages.length})),
-            page,pageCount});
+        const entries=(eventParam || fullDay) ? events.map(event=>({category:categoryOf(event.category),event})) :
+          categories.map(category=>({category,event:events.find(e=>categoryOf(e.category)===category)}));
+        for(const batch of chunk(entries,2)){
+          const parts=batch.map(({category,event})=>{
+            const data=event?(records.get(event.id)||{teams:[],matches:[],config:{}}):{teams:[],matches:[],config:{}};
+            const items=view.id==='standings'?rankGroups(data):
+              arr(data.matches).filter(m=>!statusDone(m)&&!phase(m)).sort(timeCompare).slice(0,screenSettings.upcomingLimit);
+            return {category,event,data,pages:view.id==='upcoming'?[items]:chunk(items,2)};
+          });
+          const pageCount=Math.max(1,...parts.map(p=>p.pages.length));
+          for(let page=0;page<pageCount;page++){
+            slides.push({view,dual:true,
+              panels:parts.map(p=>({category:p.category,event:p.event,data:p.data,
+                items:p.pages[page]||[],pageAvailable:page<p.pages.length})),
+              page,pageCount});
+          }
         }
         continue;
       }
@@ -294,7 +301,7 @@
       LABEL.textContent=`${slide.view.label} · ${CATEGORY.textContent}`;
       renderParallel(slide.view,slide.panels,slide.page,slide.pageCount);
     }else{
-      CATEGORY.textContent=categoryOf(slide.event.category)||'U10 - U11';
+      CATEGORY.textContent=categoryOf(slide.event.category)||'Tournoi';
       DAY.textContent=readableDay(slide.event.date);
       LABEL.textContent=`${slide.view.label} · ${CATEGORY.textContent}`;
       renderMatches(slide.view,slide.data,slide.items,slide.view.id,
@@ -305,26 +312,30 @@
     DOTS.replaceChildren();
     state.slides.forEach((s,i)=>{
       const dot=E('span','progress-dot'+(i===state.index?' active':''));
-      dot.title=s.dual?`${s.view.label} · U10 - U11`:`${s.view.label} · ${categoryOf(s.event.category)||''}`;
+      dot.title=s.dual?`${s.view.label} · ${s.panels.map(p=>p.category).join(' - ')}`:`${s.view.label} · ${categoryOf(s.event.category)||''}`;
       DOTS.append(dot);
     });
   }
-  function slideKey(s){return s?`${s.view.id}|${s.dual?'dual':s.event.id}|${s.page}`:'';}
+  function slideKey(s){return s?`${s.view.id}|${s.dual?s.panels.map(p=>p.event?.id || p.category).join(','):s.event.id}|${s.page}`:'';}
   function resetSlides() {
     const previous=slideKey(state.slides[state.index]);
     const slides=createSlides(state.events,state.records);
     state.slides=slides;
     state.index=Math.max(0,slides.findIndex(s=>slideKey(s)===previous));
     if(!slides.length){
-      ROOT.replaceChildren(empty('Aucune catégorie publiée','Le mode Écran Géant attend des catégories U10 ou U11 publiées.'));
+      CATEGORY.textContent='Tournoi';
+      DAY.textContent=dayParam ? readableDay(dayParam) : 'Journée du tournoi';
+      ROOT.replaceChildren(empty('Aucune catégorie publiée', dayParam
+        ? 'Aucun tournoi correspondant au lien pour cette journée.'
+        : 'Les catégories apparaîtront après publication.'));
       DOTS.replaceChildren();
     }else currentSlide();
   }
   function chooseEvents(all) {
     const eligible=arr(all).filter(e=>e && typeof e.id==='string' && /^[a-z0-9_-]{1,70}$/.test(e.id) &&
-      e.published!==false && /^\d{4}-\d{2}-\d{2}$/.test(e.date||'') && categoryOf(e.category) && selectedCategories().includes(categoryOf(e.category)));
+      e.published!==false && /^\d{4}-\d{2}-\d{2}$/.test(e.date||'') && categoryOf(e.category) && (eventParam ? e.id===eventParam : fullDay || configuredCategories().includes(categoryOf(e.category))));
     const dates=[...new Set(eligible.map(e=>e.date))].sort();
-    const picked=dayParam && dates.includes(dayParam) ? dayParam : dates.find(d=>d>=today())||dates[dates.length-1];
+    const picked=dayParam || dates.find(d=>d>=today()) || dates[dates.length-1];
     return eligible.filter(e=>e.date===picked).sort((a,b)=>(categoryOf(a.category)||'').localeCompare(categoryOf(b.category)||''));
   }
   function unsubscribeRecords() {for(const u of state.unsubscribe)try{u();}catch(e){}state.unsubscribe=[];}
@@ -393,8 +404,11 @@
     return {teams,matches,config:{pointsWin:3,pointsDraw:1,pointsLoss:0}};
   }
   function startDemo(){
-    const demoDate='2027-06-05';
-    const events=[{id:'demo-u10',category:'U10',date:demoDate,published:true},{id:'demo-u11',category:'U11',date:demoDate,published:true}].filter(e=>selectedCategories().includes(categoryOf(e.category)));
+    const demoDate=dayParam || '2027-06-05';
+    const categories=eventParam && catParam ? [catParam] : demoDate==='2027-06-12'?['U12','U13']:['U10','U11'];
+    const events=chooseEvents(categories.map((category,index)=>({
+      id:eventParam && index===0 ? eventParam : 'demo-'+category.toLowerCase(), category, date:demoDate, published:true
+    })));
     state.events=events;
     for(const event of events)state.records.set(event.id,demoFixtures(event.category));
     state.connected=true;
@@ -407,7 +421,7 @@
     const nav=E('nav','demo-switcher');
     nav.setAttribute('aria-label','Navigation de la démonstration');
     for(const view of selectedViews()){
-      const b=E('button','demo-link',view.id==='standings'?'Poules U10 - U11':view.id==='upcoming'?'Matchs U10 - U11':view.label);
+      const b=E('button','demo-link',view.label);
       b.type='button';
       b.addEventListener('click',()=>{
         const i=state.slides.findIndex(s=>s.view.id===view.id);

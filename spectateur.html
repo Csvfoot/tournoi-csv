@@ -11,7 +11,7 @@
   <meta name="theme-color" content="#21070d">
   <link rel="manifest" href="./manifest-spectateur.webmanifest">
   <!-- CSS généré à la construction : pas de compilation Tailwind dans le navigateur -->
-  <link rel="stylesheet" href="./styles.css?v=7.4.15">
+  <link rel="stylesheet" href="./styles.css?v=7.4.23">
   <!-- React & ReactDOM 18 -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -32,6 +32,14 @@
       <img src="./apple-touch-icon.png" width="112" height="112" alt="Blason du CS La Verpillière">
       <h1 id="csv-intro-title">CS La Verpillière <span>1939</span></h1>
       <p>Retrouvez le calendrier, les scores et les classements du tournoi.</p>
+      <div class="csv-intro-fox-track" aria-hidden="true">
+        <div class="csv-intro-fox-runner">
+          <div class="csv-intro-fox-frame">
+            <img class="csv-intro-fox" src="./renard-galop.webp" width="3072" height="128" alt="">
+          </div>
+          <span class="csv-intro-fox-ball"><span>⚽</span></span>
+        </div>
+      </div>
       <form method="dialog"><button autofocus>Entrer dans le tournoi</button></form>
     </div>
   </dialog>
@@ -44,6 +52,6 @@
       intro.addEventListener("close", () => clearTimeout(introTimer), { once: true });
     }
   </script>
-  <script defer src="./app.js?v=7.4.15"></script>
+  <script defer src="./app.js?v=7.4.23"></script>
 </body>
 </html>

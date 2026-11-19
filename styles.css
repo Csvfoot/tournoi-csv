@@ -2991,7 +2991,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-metrics strong,.csv-v74-mini-metrics strong {font-size:24px;font-weight:900;color:#ffca43;}
 .csv-v74-metrics small,.csv-v74-mini-metrics small {font-size:10px;color:#cdb2bd;}
 .csv-v74-mini-metrics {grid-template-columns:repeat(4,minmax(0,1fr));margin:12px 0;}
-.csv-v74-link {display:block;width:100%;text-align:center;margin-top:15px;background:#492a34;border:1px solid #7d4b5b;border-radius:12px;padding:13px;color:#fff;font-size:13px;font-weight:850;min-height:44px;}
+.csv-v74-link {display:block;width:100%;text-align:center;margin-top:15px;background:var(--csv-card-surface);border:1px solid #7d4b5b;border-radius:12px;padding:13px;color:#fff;font-size:13px;font-weight:850;min-height:44px;}
 .csv-v74-link:hover,.csv-v74-link:focus-visible{background:#ffca43;color:#271010;}
 .csv-v74-muted {color:#ad949f!important;font-size:12px!important;}
 .csv-v74-practical{white-space:pre-wrap;}
@@ -3008,7 +3008,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-round{min-width:190px;max-width:360px;flex:1 1 0;display:flex;flex-direction:column;justify-content:center;gap:12px;}
 .csv-v74-round h3{font-size:13px;font-weight:900;color:#ffce58;text-transform:uppercase;text-align:center;padding-bottom:8px;border-bottom:1px solid #a75f44;}
 .csv-v74-round-match{border:1px solid #8b455b;border-radius:13px;background:#170a13;padding:12px;display:grid;gap:8px;}
-.csv-v74-round-subtitle{font-size:10px;color:#e5aec2;}
+.csv-v74-round-subtitle{font-size:10px;color:#ffe2db;}
 .csv-v74-round-team{display:flex;align-items:center;gap:9px;color:#fff;font-size:12px;font-weight:700;}
 .csv-v74-round-team > :first-child{flex:none;}
 .csv-v74-round-club-name{flex:1;min-width:0;overflow-wrap:anywhere;}
@@ -3071,10 +3071,10 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-quicknav button:disabled{opacity:.45;cursor:not-allowed;}
 .csv-v74-welcome-choices{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:19px;flex-wrap:wrap;}
 .csv-v74-welcome-choices>div:first-child{display:flex;align-items:center;flex-wrap:wrap;gap:12px;color:#ffcb52;font-size:12px;font-weight:800;}
-.csv-v74-welcome-choices select{background:#341423;color:#fff;border:1px solid #966144;border-radius:10px;padding:10px;min-height:44px;}
+.csv-v74-welcome-choices select{background:var(--csv-control-surface);color:#fff;color-scheme:dark;border:1px solid #966144;border-radius:10px;padding:10px;min-height:44px;}
 .csv-v74-category-pills{display:flex;gap:7px;flex-wrap:wrap;}
-.csv-v74-category-pills button{border:1px solid #673149;background:#2b1420;border-radius:999px;padding:10px 17px;font-size:12px;font-weight:850;color:#e5becf;min-height:44px;}
-.csv-v74-category-pills button:hover,.csv-v74-category-pills .csv-v74-category-active{color:#ffca43;border-color:#ffca43;background:#4d1b2b;}
+.csv-v74-category-pills button{border:1px solid #673149;background:var(--csv-card-surface);border-radius:999px;padding:10px 17px;font-size:12px;font-weight:850;color:#e5becf;min-height:44px;}
+.csv-v74-category-pills button:hover,.csv-v74-category-pills .csv-v74-category-active{color:#ffca43;border-color:#ffca43;background:var(--csv-control-surface);}
 .csv-v74-welcome-status{font-size:13px;color:#ffcc70;margin-bottom:12px;}
 @media(max-width:700px){.csv-v74-welcome{padding:12px 12px 90px;}.csv-v74-welcome-header{gap:12px;margin-bottom:15px;}.csv-v74-welcome-header h1{font-size:22px;}.csv-v74-quicknav{gap:5px;}.csv-v74-quicknav button{font-size:12px;padding:10px 12px;flex:1 1 auto;}.csv-v74-category-pills button{padding:8px 13px;}}
 
@@ -3083,10 +3083,10 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-score-side{min-width:0;}
 .csv-v74-versus{font-size:12px;color:#ffca43;font-weight:900;align-self:center;}
 .csv-v74-stepper{display:flex;align-items:center;justify-content:center;gap:3px;width:100%;}
-.csv-v74-stepper-button{width:33px;min-width:33px;height:48px;border-radius:9px;background:#32121b;border:1px solid #845b35;color:#ffe1a6;font-size:22px;font-weight:900;touch-action:manipulation;}
+.csv-v74-stepper-button{width:33px;min-width:33px;height:48px;border-radius:9px;background:var(--csv-card-surface);border:1px solid #845b35;color:#ffe1a6;font-size:22px;font-weight:900;touch-action:manipulation;}
 .csv-v74-stepper-button:active{background:#ffca43;color:#281018;}
 .csv-v74-stepper-button:focus-visible,.csv-v74-stepper-input:focus-visible{outline:2px solid #ffca43;outline-offset:2px;}
-.csv-v74-stepper-input{width:42px;min-width:0;height:48px;border-radius:10px;background:#18080a;border:1px solid #813047;color:#fff;text-align:center;font-family:ui-monospace,monospace;font-size:22px;font-weight:900;appearance:textfield;}
+.csv-v74-stepper-input{width:42px;min-width:0;height:48px;border-radius:10px;background:var(--csv-control-surface);border:1px solid #813047;color:#fff;text-align:center;font-family:ui-monospace,monospace;font-size:22px;font-weight:900;appearance:textfield;}
 .csv-v74-stepper-input::-webkit-inner-spin-button,.csv-v74-stepper-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
 @media(min-width:480px){.csv-v74-stepper{gap:6px;}.csv-v74-stepper-input{width:58px;}.csv-v74-stepper-button{width:40px;min-width:40px;}}
 
@@ -3134,7 +3134,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   background: var(--csv-club-backdrop);
 }
 .csv-intro-content { width: min(100%, 740px); }
-.csv-intro-content img {
+.csv-intro-content > img {
   width: clamp(134px, 39vw, 220px);
   height: auto;
   margin: 0 auto 16px;
@@ -3166,14 +3166,14 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   font-weight: 850;
 }
 :is(.csv-v74-inline-view, .csv-v74-organizer) { color: #f8edf2; }
-.csv-intro-content img { animation: csv-intro-logo 1.7s cubic-bezier(.2,.7,.25,1) both; }
+.csv-intro-content > img { animation: csv-intro-logo 1.7s cubic-bezier(.2,.7,.25,1) both; }
 @keyframes csv-intro-logo {
   0% { opacity: 0; transform: translateY(-65px) scale(.12); }
   72% { opacity: 1; transform: translateY(0) scale(1.14); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .csv-intro-content img { animation: none; }
+  .csv-intro-content > img { animation: none; }
 }
 @media (max-width: 700px) {
   .csv-v74-welcome { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
@@ -3186,24 +3186,29 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
     margin: 0;
     padding: 6px max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
     border-top: 1px solid #b9815a;
-    background: #572131;
+    background: var(--csv-overlay-surface);
+    backdrop-filter: blur(12px);
   }
   .csv-v74-quicknav button { min-height: 50px; padding: 4px 2px; font-size: clamp(9px, 2.6vw, 12px); line-height: 1.15; }
   .csv-v74-quicknav button span:first-child { display: block; margin-bottom: 4px; font-size: 18px; }
 }
 
-/* Surfaces spectateur sur le fond rouge et or. */
+/* Fonds translucides partagés par les vues spectateur et organisateur. */
 :root {
-  --csv-banner-surface: linear-gradient(105deg, #671723, #8b3035 62%, #5c1826);
-  --csv-panel-surface: #672632;
-  --csv-card-surface: #78303b;
-  --csv-card-border: #bd7b67;
+  --csv-banner-surface: linear-gradient(105deg, #3f0b1b66, #641d2d4d 62%, #3f0b1b66);
+  --csv-panel-surface: rgb(41 7 20 / .33);
+  --csv-card-surface: rgb(32 5 17 / .31);
+  --csv-nested-surface: rgb(255 188 160 / .085);
+  --csv-control-surface: rgb(36 6 18 / .29);
+  --csv-overlay-surface: rgb(64 15 31 / .76);
+  --csv-card-border: #ffc39085;
 }
 .csv-v74-final-visual, .csv-v74-welcome :is(.csv-v74-panel, .csv-v74-team-summary) {
+  --csv-card-surface: var(--csv-nested-surface);
   background: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
 }
-.csv-v74-welcome .csv-v74-panel-feature { background: linear-gradient(145deg, #903740, #672632); }
+.csv-v74-welcome .csv-v74-panel-feature { background: linear-gradient(145deg, #510d234a, var(--csv-panel-surface)); }
 .csv-v74-final-visual :is(.csv-v74-round-match, .csv-v74-podium-place),
 .csv-v74-welcome :is(.csv-v74-sponsor,
   .csv-v74-metrics > div, .csv-v74-mini-metrics > div) {
@@ -3219,6 +3224,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 :is(.csv-v74-welcome, .csv-v74-final-visual) .csv-v74-muted { color: #f0d9e0 !important; }
 :is(.csv-v74-inline-view, .csv-v74-organizer) :is([class~="bg-[#150709]"], [class~="bg-[#16080b]"], [class~="bg-[#211016]"]) {
+  --csv-card-surface: var(--csv-nested-surface);
   background-color: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
 }
@@ -3239,9 +3245,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 .csv-v74-header-logo { width: clamp(58px, 8vw, 116px); aspect-ratio: 1; }
 .csv-v74-welcome-header h1 { font-size: clamp(22px, 3.6vw, 48px); }
 .csv-v74-welcome-header .csv-v74-welcome-choices { margin: 0; gap: 16px; }
-:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card { background: var(--csv-card-surface); border-color: var(--csv-card-border); }
-:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card[class~="bg-amber-950/20"] { border-color: #ffd16d; background: #842d34; }
-:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="bg-red-950"] { background: #571c27; color: #ffda83; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="bg-red-950"] { background: var(--csv-control-surface); color: #ffda83; }
 :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-meta { flex-wrap: wrap; gap: 6px 10px; }
 :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-meta > div { flex-wrap: wrap; min-width: 0; }
 @media (max-width: 800px) {
@@ -3297,22 +3301,31 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   background: var(--csv-banner-surface);
   border-color: var(--csv-card-border);
 }
+.csv-v74-organizer .csv-v74-tournament-banner,
+.csv-v74-organizer [class~="bg-[#21090e]/95"] {
+  background: var(--csv-overlay-surface);
+  backdrop-filter: blur(12px);
+}
 .csv-v74-organizer-logo { width: clamp(46px, 6vw, 75px); aspect-ratio: 1; }
 .csv-v74-organizer :is([class~="bg-[#22070c]"], [class~="bg-[#16090e]"],
   [class~="bg-[#17090c]"], [class~="bg-[#1b0b10]"], [class~="bg-[#210a11]"],
   [class~="bg-[#160608]"], [class~="bg-[#1d0a0f]"], [class~="bg-[#1b090e]"],
-  [class~="bg-[#150709]"], [class~="bg-[#21090e]/95"]) {
+  [class~="bg-[#150709]"], [class~="bg-[#130508]"], [class~="bg-[#130b12]"],
+  [class~="bg-[#190b10]"], [class~="bg-[#1b080c]"], [class~="bg-[#1b0a10]"]) {
+  --csv-card-surface: var(--csv-nested-surface);
   background-color: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
 }
 .csv-v74-organizer :is([class~="bg-[#18080a]"], [class~="bg-[#32131b]"],
-  [class~="bg-[#2a1014]"], [class~="bg-[#1f080c]"], [class~="bg-[#2b1118]"]) {
+  [class~="bg-[#2a1014]"], [class~="bg-[#1f080c]"], [class~="bg-[#2b1118]"],
+  [class~="bg-[#190a0d]"], [class~="bg-[#10080c]"], [class~="bg-[#100508]"],
+  [class~="bg-[#1b090d]"], [class~="bg-[#33141f]"], [class~="bg-[#33121a]"]) {
   background-color: var(--csv-card-surface);
   border-color: var(--csv-card-border);
 }
 .csv-v74-organizer :is(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), textarea, select) {
   color-scheme: dark;
-  background-color: #4c1b27;
+  background-color: var(--csv-control-surface);
   border-color: var(--csv-card-border);
 }
 .csv-v74-organizer :is(input, textarea)::placeholder { color: #e2bdc6; }
@@ -3322,6 +3335,8 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 
 /* Les cartes utilisent la même palette quelle que soit la largeur de l’écran. */
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card { background: var(--csv-card-surface); border-color: var(--csv-card-border); }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card[class~="bg-amber-950/20"] { border-color: #ffd16d; background: rgb(59 9 20 / .30); }
 .csv-v74-tv-columns article {
   background: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
@@ -3343,7 +3358,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="font-mono"][class~="min-w-[54px]"],
 :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="font-mono"][class~="min-w-[48px]"] {
-  background: #571c27;
+  background: var(--csv-control-surface);
   border-color: var(--csv-card-border);
   color: #ffda83;
 }
@@ -3368,4 +3383,72 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
     justify-content: center;
   }
   .csv-v74-organizer .csv-v74-bronze h3 { text-align: center; }
+}
+
+.csv-intro-fox-track {
+  --fox-width: clamp(144px, 46vw, 260px);
+  --fox-travel-time: 3.2s;
+  --fox-stride-time: .56s;
+  --fox-ball-size: clamp(17px, 5vw, 28px);
+  position: relative;
+  height: clamp(80px, 23vw, 145px);
+  overflow: hidden;
+  margin: -4px auto 16px;
+  background: radial-gradient(ellipse at 50% 90%, #ffbf4140, transparent 65%);
+}
+.csv-intro-fox-runner {
+  position: absolute;
+  z-index: 1;
+  bottom: 10px;
+  left: calc(-1 * (var(--fox-width) + var(--fox-ball-size)));
+  width: var(--fox-width);
+  animation: csv-fox-cross var(--fox-travel-time) linear .35s both;
+  filter: drop-shadow(0 5px 6px #31030b88);
+}
+.csv-intro-fox-frame { overflow: hidden; }
+.csv-intro-fox {
+  display: block;
+  width: 800%;
+  max-width: none;
+  height: auto;
+  animation: csv-fox-stride var(--fox-stride-time) steps(8, end) .35s infinite;
+}
+.csv-intro-fox-ball {
+  position: absolute;
+  left: 86%;
+  bottom: 0;
+  display: grid;
+  width: var(--fox-ball-size);
+  height: var(--fox-ball-size);
+  place-items: center;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: var(--fox-ball-size);
+  line-height: 1;
+  animation: csv-fox-ball-touch var(--fox-stride-time) linear .35s infinite;
+}
+.csv-intro-fox-ball > span {
+  display: block;
+  animation: csv-fox-ball-roll .48s linear .35s infinite;
+}
+@keyframes csv-fox-ball-touch {
+  0%, 100% { transform: translate(0, 0); }
+  26% { transform: translate(56%, -17%); }
+  55% { transform: translate(40%, 0); }
+}
+@keyframes csv-fox-ball-roll {
+  to { transform: rotate(1turn); }
+}
+@keyframes csv-fox-cross {
+  from { left: calc(-1 * (var(--fox-width) + var(--fox-ball-size))); }
+  to { left: 100%; }
+}
+@keyframes csv-fox-stride {
+  to { transform: translateX(-100%); }
+}
+@media (max-width: 600px) {
+  .csv-intro-fox-track { --fox-travel-time: 2.65s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .csv-intro-fox-runner { left: 50%; transform: translateX(-50%); animation: none; }
+  .csv-intro-fox, .csv-intro-fox-ball, .csv-intro-fox-ball > span { animation: none; }
 }
