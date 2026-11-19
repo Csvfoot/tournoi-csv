@@ -3165,7 +3165,7 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   color: #34131a;
   font-weight: 850;
 }
-.csv-v74-inline-view { color: #f8edf2; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) { color: #f8edf2; }
 .csv-intro-content img { animation: csv-intro-logo 1.7s cubic-bezier(.2,.7,.25,1) both; }
 @keyframes csv-intro-logo {
   0% { opacity: 0; transform: translateY(-65px) scale(.12); }
@@ -3193,17 +3193,19 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 
 /* Surfaces spectateur sur le fond rouge et or. */
-.csv-v74-welcome {
+:root {
+  --csv-banner-surface: linear-gradient(105deg, #671723, #8b3035 62%, #5c1826);
   --csv-panel-surface: #672632;
   --csv-card-surface: #78303b;
   --csv-card-border: #bd7b67;
 }
-.csv-v74-welcome :is(.csv-v74-panel, .csv-v74-final-visual, .csv-v74-team-summary) {
+.csv-v74-final-visual, .csv-v74-welcome :is(.csv-v74-panel, .csv-v74-team-summary) {
   background: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
 }
 .csv-v74-welcome .csv-v74-panel-feature { background: linear-gradient(145deg, #903740, #672632); }
-.csv-v74-welcome :is(.csv-v74-round-match, .csv-v74-podium-place, .csv-v74-sponsor,
+.csv-v74-final-visual :is(.csv-v74-round-match, .csv-v74-podium-place),
+.csv-v74-welcome :is(.csv-v74-sponsor,
   .csv-v74-metrics > div, .csv-v74-mini-metrics > div) {
   background: var(--csv-card-surface);
   border-color: var(--csv-card-border);
@@ -3215,33 +3217,33 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   border: 1px solid var(--csv-card-border);
   border-radius: 12px;
 }
-.csv-v74-welcome .csv-v74-muted { color: #f0d9e0 !important; }
-.csv-v74-inline-view :is([class~="bg-[#150709]"], [class~="bg-[#16080b]"], [class~="bg-[#211016]"]) {
+:is(.csv-v74-welcome, .csv-v74-final-visual) .csv-v74-muted { color: #f0d9e0 !important; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) :is([class~="bg-[#150709]"], [class~="bg-[#16080b]"], [class~="bg-[#211016]"]) {
   background-color: var(--csv-panel-surface);
   border-color: var(--csv-card-border);
 }
-.csv-v74-inline-view :is([class~="bg-[#0b0304]"], [class~="bg-[#0c0406]"]) {
+:is(.csv-v74-inline-view, .csv-v74-organizer) :is([class~="bg-[#0b0304]"], [class~="bg-[#0c0406]"]) {
   background-color: var(--csv-card-surface);
   border-color: var(--csv-card-border);
 }
-.csv-v74-inline-view :is([class~="text-slate-400"], [class~="text-slate-500"]) { color: #f1dae2; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) :is([class~="text-slate-400"], [class~="text-slate-500"]) { color: #f1dae2; }
 
 .csv-v74-welcome-header {
   justify-content: space-between;
   padding: clamp(14px, 2.5vw, 34px);
   border: 1px solid #ffcc5355;
   border-radius: 20px;
-  background: linear-gradient(105deg, #671723e6, #8b3035dd 62%, #5c1826e6);
+  background: var(--csv-banner-surface);
 }
 .csv-v74-welcome-brand { display: flex; align-items: center; gap: clamp(12px, 2vw, 28px); }
 .csv-v74-header-logo { width: clamp(58px, 8vw, 116px); aspect-ratio: 1; }
 .csv-v74-welcome-header h1 { font-size: clamp(22px, 3.6vw, 48px); }
 .csv-v74-welcome-header .csv-v74-welcome-choices { margin: 0; gap: 16px; }
-.csv-v74-inline-view .csv-v74-calendar-card { background: var(--csv-card-surface); border-color: var(--csv-card-border); }
-.csv-v74-inline-view .csv-v74-calendar-card[class~="bg-amber-950/20"] { border-color: #ffd16d; background: #842d34; }
-.csv-v74-inline-view .csv-v74-calendar-card [class~="bg-red-950"] { background: #571c27; color: #ffda83; }
-.csv-v74-inline-view .csv-v74-calendar-meta { flex-wrap: wrap; gap: 6px 10px; }
-.csv-v74-inline-view .csv-v74-calendar-meta > div { flex-wrap: wrap; min-width: 0; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card { background: var(--csv-card-surface); border-color: var(--csv-card-border); }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card[class~="bg-amber-950/20"] { border-color: #ffd16d; background: #842d34; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="bg-red-950"] { background: #571c27; color: #ffda83; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-meta { flex-wrap: wrap; gap: 6px 10px; }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-meta > div { flex-wrap: wrap; min-width: 0; }
 @media (max-width: 800px) {
   .csv-v74-welcome-header { align-items: stretch; flex-direction: column; }
   .csv-v74-welcome-header .csv-v74-welcome-choices { row-gap: 8px; }
@@ -3256,21 +3258,114 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
 }
 
 @media (min-width: 801px) {
-  .csv-v74-inline-view .csv-v74-calendar-meta {
+  :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-meta {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
     align-items: start;
     gap: 6px 10px;
     margin-bottom: 10px;
   }
-  .csv-v74-inline-view .csv-v74-calendar-time { white-space: nowrap; }
-  .csv-v74-inline-view .csv-v74-calendar-field { color: #f5e1d8; overflow-wrap: anywhere; }
-  .csv-v74-inline-view .csv-v74-calendar-phase { grid-column: 1 / -1; justify-content: space-between; }
-  .csv-v74-inline-view .csv-v74-calendar-teams {
+  :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-time { white-space: nowrap; }
+  :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-field { color: #f5e1d8; overflow-wrap: anywhere; }
+  :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-phase { grid-column: 1 / -1; justify-content: space-between; }
+  :is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-teams {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   }
 }
 @media (max-width: 800px) {
   .csv-v74-calendar-time::after { content: " · "; }
+}
+
+.csv-v74-final-edit {
+  justify-self: start;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid #ffce7c;
+  border-radius: 8px;
+  color: #ffe4ab;
+  font-size: 12px;
+  font-weight: 750;
+}
+.csv-v74-final-edit:hover, .csv-v74-final-edit:focus-visible {
+  background: #ffca43;
+  color: #34131a;
+}
+
+/* Le thème est partagé entre les écrans publics et les commandes du tournoi. */
+.csv-v74-organizer :is(.csv-v74-workspace-banner, .csv-v74-tournament-banner) {
+  background: var(--csv-banner-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-organizer-logo { width: clamp(46px, 6vw, 75px); aspect-ratio: 1; }
+.csv-v74-organizer :is([class~="bg-[#22070c]"], [class~="bg-[#16090e]"],
+  [class~="bg-[#17090c]"], [class~="bg-[#1b0b10]"], [class~="bg-[#210a11]"],
+  [class~="bg-[#160608]"], [class~="bg-[#1d0a0f]"], [class~="bg-[#1b090e]"],
+  [class~="bg-[#150709]"], [class~="bg-[#21090e]/95"]) {
+  background-color: var(--csv-panel-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-organizer :is([class~="bg-[#18080a]"], [class~="bg-[#32131b]"],
+  [class~="bg-[#2a1014]"], [class~="bg-[#1f080c]"], [class~="bg-[#2b1118]"]) {
+  background-color: var(--csv-card-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-organizer :is(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), textarea, select) {
+  color-scheme: dark;
+  background-color: #4c1b27;
+  border-color: var(--csv-card-border);
+}
+.csv-v74-organizer :is(input, textarea)::placeholder { color: #e2bdc6; }
+.csv-v74-organizer :is(button, input, textarea, select, a):focus-visible {
+  outline: 2px solid #ffca43;
+  outline-offset: 2px;
+}
+
+/* Les cartes utilisent la même palette quelle que soit la largeur de l’écran. */
+.csv-v74-tv-columns article {
+  background: var(--csv-panel-surface);
+  border-color: var(--csv-card-border);
+}
+.csv-v74-tv-fixture {
+  margin-block: 8px;
+  padding: clamp(10px, 1.2vw, 18px);
+  background: var(--csv-card-surface);
+  border: 1px solid var(--csv-card-border);
+  border-radius: 12px;
+}
+.csv-v74-tv-top button { background: var(--csv-panel-surface); border-color: var(--csv-card-border); }
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-pool-card {
+  background: var(--csv-panel-surface);
+  border-color: var(--csv-card-border);
+}
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-pool-card :is(thead, tbody tr) {
+  border-color: #bd7b6766;
+}
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="font-mono"][class~="min-w-[54px]"],
+:is(.csv-v74-inline-view, .csv-v74-organizer) .csv-v74-calendar-card [class~="font-mono"][class~="min-w-[48px]"] {
+  background: #571c27;
+  border-color: var(--csv-card-border);
+  color: #ffda83;
+}
+
+@media (min-width: 801px) {
+  .csv-v74-organizer .csv-v74-rounds {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    justify-content: safe center;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .csv-v74-organizer .csv-v74-rounds::after { content: none; }
+  .csv-v74-organizer .csv-v74-bronze {
+    order: 0;
+    flex: 1 0 190px;
+    width: auto;
+    max-width: 360px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .csv-v74-organizer .csv-v74-bronze h3 { text-align: center; }
 }

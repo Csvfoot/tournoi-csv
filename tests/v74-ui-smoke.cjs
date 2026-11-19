@@ -134,7 +134,7 @@ async function main() {
       await page.evaluate(()=>window.__render('team','u11'));
       await page.getByText('CSV La Verpillière U11').waitFor();
       await page.evaluate(()=>window.__render('tv','u11'));
-      await page.getByText('TOURNOI CSV').waitFor();
+      await page.getByRole('heading', { name: '⚽ TOURNOI', exact: true }).waitFor();
       await page.screenshot({path:path.join(root,'test-artifacts','v74-tv-'+name+'.png'),fullPage:true});
       assert.deepEqual(errors,[],'Erreurs JavaScript '+name);
       await page.close();
