@@ -77,7 +77,7 @@ const documentHtml = [
   ' const props={day:"2027-06-05",dates:["2027-06-05"],events:f.events,activeId:event.id,',
   ' isLoading:false,offline:false,onChooseDay:()=>{},onChooseCategory:id=>window.__render("welcome",id),',
   ' onOpen:t=>window.__lastAction=t,onRefresh:()=>{},refreshing:false,',
-  ' records:{[event.id]:data},fields:[{id:"f1",name:"Terrain Honneur"}]};',
+  ' records:{[event.id]:data},readyRecords:{[event.id]:true},fields:[{id:"f1",name:"Terrain Honneur"}]};',
   ' let c = view==="finals"?React.createElement(CsvVisualFinals,{matches:data.matches,teams:data.teams}):',
   ' view==="team"?React.createElement(CsvTeamOverview,{team:data.teams[0],teams:data.teams,',
   ' matches:data.matches,config:data.config,groups:["Poule A","Poule B"]}):',
