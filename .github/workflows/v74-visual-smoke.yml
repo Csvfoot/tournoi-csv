@@ -29,10 +29,12 @@ jobs:
           node tests/v74-organizer-pwa.cjs
       - name: Installer react et Playwright dans le runner
         run: npm install --no-save --no-package-lock react@18.2.0 react-dom@18.2.0 playwright@1.55.0
-      - name: Navigateur Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Navigateurs Chromium et WebKit
+        run: npx playwright install --with-deps chromium webkit
       - name: Verifier les ecrans V7.4 a partir des composants reels
         run: node tests/v74-ui-smoke.cjs
+      - name: Vérifier les finales sur WebKit avec un profil iPhone
+        run: node tests/v74-ui-smoke.cjs --webkit
       - name: Charger la page spectateur reelle depuis la branche V7.4
         run: node tests/v74-app-smoke.cjs
       - uses: actions/upload-artifact@v4

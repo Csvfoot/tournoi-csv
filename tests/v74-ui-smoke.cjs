@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { chromium, webkit, devices } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
@@ -34,7 +34,11 @@ const fixture = {
      status:'pending',startTime:'14:00',score1:null,score2:null},
     {id:'ko-final',group:'Phase Finale Principale',stage:'Grande Finale',
      placeholder1:'Vainqueur demi 1',placeholder2:'Vainqueur demi 2',
-     status:'pending',startTime:'16:00',score1:null,score2:null}
+     status:'pending',startTime:'16:00',score1:null,score2:null},
+    {id:'consolante',group:'Tournoi Consolante',stage:'Finale consolante',
+     startTime:'15:30',team1Id:'a',team2Id:'b'},
+    {id:'classement',group:'Tournoi Classement',stage:'Match pour la 5e place',
+     startTime:'15:00',team1Id:'b',team2Id:'c'}
   ]
 };
 const realLogic = [
@@ -94,33 +98,47 @@ const documentHtml = [
 
 async function main() {
   fs.mkdirSync(path.join(root,'test-artifacts'),{recursive:true});
-  const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+  const safari = process.argv.includes('--webkit');
+  const browser = await (safari ? webkit.launch() : chromium.launch({headless:true,args:['--no-sandbox']}));
+  const viewports = safari ? [{...devices['iPhone 15'], name:'webkit-iphone'}] : [
+    {viewport:{width:1440,height:900},deviceScaleFactor:1,name:'desktop'},
+    {viewport:{width:390,height:844},deviceScaleFactor:1,name:'iphone'}
+  ];
   try {
-    for(const viewport of [{width:1440,height:900,name:'desktop'},
-      {width:390,height:844,name:'iphone'}]) {
-      const page=await browser.newPage({viewport:{width:viewport.width,height:viewport.height},
-        deviceScaleFactor:1});
+    for(const { name, ...options } of viewports) {
+      const page = await browser.newPage(options);
       const errors=[];
       page.on('pageerror', e=>errors.push(e.message));
       await page.setContent(documentHtml,{waitUntil:'load'});
       await page.getByText('Le football se vit ici.').waitFor();
       assert((await page.getByText('CSV La Verpillière').count())>0,'Équipes visibles');
-      await page.screenshot({path:path.join(root,'test-artifacts','v74-accueil-'+viewport.name+'.png'),fullPage:true});
+      await page.screenshot({path:path.join(root,'test-artifacts','v74-accueil-'+name+'.png'),fullPage:true});
       const horizontalOverflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
-      assert(horizontalOverflow<=2,'Débordement horizontal '+viewport.name+': '+horizontalOverflow);
+      assert(horizontalOverflow<=2,'Débordement horizontal '+name+': '+horizontalOverflow);
       await page.getByRole('button',{name:'U11'}).click();
       await page.getByText('Le football se vit ici.').waitFor();
       await page.evaluate(()=>window.__render('finals','u11'));
       await page.getByText('La route vers la finale').waitFor();
-      await page.screenshot({path:path.join(root,'test-artifacts','v74-finales-'+viewport.name+'.png'),fullPage:true});
+      await page.getByText('Finale consolante · 15:30', { exact: true }).waitFor();
+      await page.getByText('Match pour la 5e place · 15:00', { exact: true }).waitFor();
+      if (safari) {
+        const rounds = page.getByRole('region', { name: 'Tableau des tours à faire défiler' });
+        const overflow = await rounds.evaluate(node => node.scrollWidth > node.clientWidth);
+        assert(overflow, 'Le tableau iPhone doit défiler dans son propre conteneur');
+        await rounds.getByRole('heading', { name: 'Grande finale' }).scrollIntoViewIfNeeded();
+        assert(await rounds.evaluate(node => node.scrollLeft > 0), 'Grande finale accessible par défilement');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
+          'La page iPhone doit rester dans la largeur de l’écran');
+      }
+      await page.screenshot({path:path.join(root,'test-artifacts','v74-finales-'+name+'.png'),fullPage:true});
       await page.evaluate(()=>window.__render('team','u11'));
       await page.getByText('CSV La Verpillière U11').waitFor();
       await page.evaluate(()=>window.__render('tv','u11'));
       await page.getByText('TOURNOI CSV').waitFor();
-      await page.screenshot({path:path.join(root,'test-artifacts','v74-tv-'+viewport.name+'.png'),fullPage:true});
-      assert.deepEqual(errors,[],'Erreurs JavaScript '+viewport.name);
+      await page.screenshot({path:path.join(root,'test-artifacts','v74-tv-'+name+'.png'),fullPage:true});
+      assert.deepEqual(errors,[],'Erreurs JavaScript '+name);
       await page.close();
-      console.log('OK rendu '+viewport.name+' : accueil, changement U10/U11, finale, équipe, TV');
+      console.log('OK rendu '+name+' : accueil, changement U10/U11, finale, équipe, TV');
     }
   } finally { await browser.close(); }
 }
