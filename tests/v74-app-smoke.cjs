@@ -19,8 +19,7 @@ const server = http.createServer((req,res) => {
   });
 });
 
-async function verifyAlternation(browser, url) {
-  const context = await browser.newContext({viewport:{width:1440,height:900}});
+function alternationFixture() {
   const day = '2027-06-05';
   const field = {id:'a',name:'Terrain Honneur'};
   const events = [
@@ -35,30 +34,15 @@ async function verifyAlternation(browser, url) {
     matches:[{id:'fixture',status:'pending',group:'Poule A',stage:'Journée 1',
       team1Id:'a',team2Id:'b',fieldId:field.id,fieldName:field.name,startTime:'10:00',endTime:'10:10'}]
   });
-  const docs = {
+  return {
     'tournaments/cslv_multi_catalog_v1':{events,fields:[field]},
     'tournaments/cslv_main_data':record(2,'U10'),
     'tournaments/cslv_mt_u11':record(4,'U11'),
     'organizers/test-organizer':{active:true,role:'editor',email:'fixture@example.invalid'}
   };
-  await context.route('**/*', async route => {
-    const request = new URL(route.request().url());
-    if (request.origin===url) return route.continue();
-    const react = {
-      '/ajax/libs/react/18.2.0/umd/react.production.min.js':'react',
-      '/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js':'react-dom'
-    }[request.pathname];
-    if (react) return route.fulfill({contentType:'text/javascript',
-      path:path.join(path.dirname(require.resolve(react)),'umd',request.pathname.split('/').pop())});
-    return route.fulfill({body:'',contentType:'text/javascript'});
-  });
-  await context.exposeBinding('__planningUpdate', async (_, changes) => {
-    for (const [key, value] of changes) docs[key]={...docs[key],...value};
-    await Promise.all(context.pages().map(page => page.evaluate(values => {
-      if (window.__planningSnapshots) window.__planningSnapshots(values);
-    }, docs)));
-  });
-  await context.addInitScript(values => {
+}
+
+function installPlanningFixture({docs: values, organizer}) {
     const subscribers = new Set();
     let docs = values;
     const copy = value => JSON.parse(JSON.stringify(value));
@@ -91,7 +75,7 @@ async function verifyAlternation(browser, url) {
     const user = {uid:'test-organizer',email:'fixture@example.invalid',emailVerified:true,isAnonymous:false,
       reload:async()=>{},getIdToken:async()=>''};
     const auth = {
-      currentUser: location.pathname.includes('organisateur')?user:{isAnonymous:true},
+      currentUser: (organizer ?? location.pathname.includes('organisateur'))?user:{isAnonymous:true},
       onAuthStateChanged: callback=>{
         const timer=setTimeout(()=>callback(auth.currentUser),0);
         return ()=>clearTimeout(timer);
@@ -103,7 +87,30 @@ async function verifyAlternation(browser, url) {
       app:()=>window.firebase.apps[0],
       initializeApp:(options,name)=>{const app={options,name,firestore:()=>db};window.firebase.apps.push(app);return app;}
     };
-  }, docs);
+  }
+
+async function verifyAlternation(browser, url) {
+  const context = await browser.newContext({viewport:{width:1440,height:900}});
+  const docs = alternationFixture();
+  const day = docs['tournaments/cslv_multi_catalog_v1'].events[0].date;
+  await context.route('**/*', async route => {
+    const request = new URL(route.request().url());
+    if (request.origin===url) return route.continue();
+    const react = {
+      '/ajax/libs/react/18.2.0/umd/react.production.min.js':'react',
+      '/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js':'react-dom'
+    }[request.pathname];
+    if (react) return route.fulfill({contentType:'text/javascript',
+      path:path.join(path.dirname(require.resolve(react)),'umd',request.pathname.split('/').pop())});
+    return route.fulfill({body:'',contentType:'text/javascript'});
+  });
+  await context.exposeBinding('__planningUpdate', async (_, changes) => {
+    for (const [key, value] of changes) docs[key]={...docs[key],...value};
+    await Promise.all(context.pages().map(page => page.evaluate(values => {
+      if (window.__planningSnapshots) window.__planningSnapshots(values);
+    }, docs)));
+  });
+  await context.addInitScript(installPlanningFixture, {docs});
   async function expectText(page, value) {
     await page.waitForFunction(text=>document.body.innerText.includes(text),value,{timeout:15000});
   }
@@ -142,6 +149,92 @@ async function verifyAlternation(browser, url) {
     await screenshot(organizer,'matchs');
     console.log('OK propagation planning général, Matchs, spectateur et écran TV sur les mêmes snapshots.');
   } finally { await context.close(); }
+}
+
+
+function writeAlternationPreview() {
+  const read = name => fs.readFileSync(path.join(root,name),'utf8');
+  const lib = name => fs.readFileSync(path.join(path.dirname(require.resolve(name)),
+    'umd',name+'.production.min.js'),'utf8');
+  const bundle = lib('react')+'\n'+lib('react-dom');
+  const script = source => '<script>'+source.replace(/<\/script/gi,'<\\/script')+'</script>';
+  const css = name => '<style>'+read(name)+'</style>';
+  const modes = {organisateur:'organizer',spectateur:'spectator',ecran:'tv'};
+  const frames = Object.fromEntries(Object.entries(modes).map(([page, mode]) => {
+    let html=read(page+'.html');
+    html=html.replace(/<script\b[^>]*\bsrc=[^>]*><\/script>\s*/gi,'')
+      .replace(/<link\b[^>]*>/gi,'')
+      .replace('</head>',css(mode==='tv'?'ecran.css':'styles.css')+'</head>');
+    for (const file of ['apple-touch-icon.png','icon-512.png','renard-galop.webp']) {
+      const data=fs.readFileSync(path.join(root,file)).toString('base64');
+      html=html.replaceAll('./'+file,'data:image/'+(file.endsWith('webp')?'webp':'png')+';base64,'+data);
+    }
+    const setup=script('parent.initializeFixture(window,'+JSON.stringify(mode)+','+
+      installPlanningFixture.toString()+');');
+    const app=script(mode==='tv'?read('ecran.js'):bundle+'\n'+read('app.js'));
+    html=html.replace('</body>',setup+app+'</body>');
+    return [page, Buffer.from(html).toString('base64')];
+  }));
+  const bootstrap = ((frames, docs) => {
+    const targets = new Map();
+    const values = new Map();
+    const storage = {getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),
+      removeItem:key=>values.delete(key)};
+    window.initializeFixture = (frame, mode, install) => {
+      Object.defineProperty(frame,'localStorage',{value:storage});
+      Object.defineProperty(frame,'sessionStorage',{value:storage});
+      frame.history.replaceState=()=>{};
+      frame.__planningUpdate=async changes=>{
+        for (const [key,value] of changes) {
+          const config=value.config?{...docs[key]?.config,...value.config}:docs[key]?.config;
+          docs[key]={...docs[key],...value,...(config?{config}:{})};
+        }
+        for (const target of targets.values()) target.__planningSnapshots?.(docs);
+      };
+      targets.set(mode, frame);
+      install.call(frame,{docs,organizer:mode==='organizer'});
+    };
+    for (const iframe of document.querySelectorAll('iframe')) {
+      iframe.srcdoc=new TextDecoder().decode(Uint8Array.from(atob(frames[iframe.id]),ch=>ch.charCodeAt(0)));
+    }
+    for (const button of document.querySelectorAll('nav button')) {
+      button.onclick=()=>{
+        for (const iframe of document.querySelectorAll('iframe')) iframe.hidden=iframe.id!==button.dataset.screen;
+        for (const tab of document.querySelectorAll('nav button')) tab.setAttribute('aria-pressed',String(tab===button));
+      };
+    }
+  }).toString();
+  const preview='<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
+    '<title>Tournoi CSV · Test des pauses</title><style>'+
+    'body{margin:0;background:#39101a;color:#fff4df;font:16px system-ui;display:flex;flex-direction:column;height:100dvh}'+
+    'header{padding:12px 16px}p{margin:0 0 8px}button{font:inherit;background:#581728;color:#fff4df;border:1px solid #c68734;border-radius:8px;padding:.45rem .75rem;margin-right:6px}'+
+    'button[aria-pressed=true]{background:#ffcc48;color:#39101a}iframe{width:100%;flex:1;min-height:0;border:0}</style>'+
+    '<header><p><strong>Test des pauses · Tournoi CSV</strong> · Données fictives</p>'+
+    '<p>Dans Organisateur, ouvre Planning général, puis prévisualise et confirme l’alternance. Vérifie ensuite Matchs en U11, le calendrier spectateur et les prochains matchs à l’écran TV.</p>'+
+    '<nav aria-label="Vues de test"><button data-screen="organisateur" aria-pressed="true">Organisateur</button>'+
+    '<button data-screen="spectateur" aria-pressed="false">Spectateur</button>'+
+    '<button data-screen="ecran" aria-pressed="false">Écran TV</button></nav></header>'+
+    '<iframe id="organisateur" title="Organisateur"></iframe><iframe id="spectateur" title="Spectateur" hidden></iframe>'+
+    '<iframe id="ecran" title="Écran TV" hidden></iframe>'+
+    script('('+bootstrap+')('+JSON.stringify(frames)+','+JSON.stringify(alternationFixture())+');');
+  fs.writeFileSync(path.join(root,'test-artifacts','apercu-alternance.html'),preview);
+}
+
+async function verifyAlternationPreview(browser) {
+  const page = await browser.newPage({viewport:{width:1440,height:900}});
+  page.on('dialog',dialog=>dialog.accept());
+  try {
+    const {pathToFileURL}=require('node:url');
+    await page.goto(pathToFileURL(path.join(root,'test-artifacts','apercu-alternance.html')).href);
+    const organizer=page.frameLocator('#organisateur');
+    await organizer.getByRole('button',{name:/Planning général/}).click({timeout:15000});
+    await organizer.getByRole('button',{name:'Prévisualiser',exact:true}).click();
+    await organizer.getByRole('button',{name:"Confirmer l'alternance"}).click();
+    await organizer.getByText(/Alternance appliquée/).waitFor();
+    await page.getByRole('button',{name:'Écran TV',exact:true}).click();
+    await page.frameLocator('#ecran').getByText('09:12',{exact:true}).waitFor({timeout:15000});
+    console.log('OK aperçu HTML autonome ouvert depuis le disque, propagation jusqu’à l’écran TV.');
+  } finally { await page.close(); }
 }
 
 async function main(){
@@ -204,6 +297,8 @@ async function main(){
     console.log('OK lien public role=editor : reste spectateur');
     await forged.close();
     await verifyAlternation(browser, 'http://127.0.0.1:'+port);
+    writeAlternationPreview();
+    await verifyAlternationPreview(browser);
   }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;server.close();});
