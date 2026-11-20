@@ -203,6 +203,8 @@ async function verifyAlternation(browser, url) {
     await settings.getByRole('button',{name:'Enregistrer'}).click();
     await settings.locator('#status').getByText(/Réglages enregistrés/).waitFor();
     await tv.goto(url+'/ecran.html');
+    // Chaque navigation Playwright démarre avec les données initiales du simulateur.
+    await tv.evaluate(records=>window.__planningSnapshots(records),docs);
     await tv.locator('#screen-category').filter({hasText:/^U11$/}).waitFor();
     await expectText(tv,'09:12');
     console.log('OK choix de la journée, aperçu de la catégorie et application des réglages sur l’écran TV.');
