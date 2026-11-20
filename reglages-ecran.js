@@ -3,16 +3,19 @@
 (() => {
   'use strict';
   const KEY='csv.screen.v72.display.settings';
-  const DEFAULTS={rotationSeconds:10,upcomingLimit:2,categories:'both',views:['results','standings','upcoming','finals']};
+  const DEFAULTS={rotationSeconds:10,upcomingLimit:2,categories:'both',views:['results','standings','upcoming','finals'],showPartners:true};
   const $=id=>document.getElementById(id);
   const checks=()=>[...document.querySelectorAll('input[name=view]')];
-  const safeRead=()=>{try{const v=JSON.parse(localStorage.getItem(KEY)||'null');return v&&typeof v==='object'?v:DEFAULTS;}catch(e){return DEFAULTS;}};
+  const safeRead=()=>{try{const v=JSON.parse(localStorage.getItem(KEY)||'null');return v&&typeof v==='object'?{...DEFAULTS,...v}:DEFAULTS;}catch(e){return DEFAULTS;}};
   function setFields(v){
     $('categories').value=v.categories||'both';$('limit').value=String(v.upcomingLimit||2);
     $('rotation').value=String(v.rotationSeconds||10);
+    $('show-partners').checked=v.showPartners!==false;
     checks().forEach(c=>{c.checked=(v.views||DEFAULTS.views).includes(c.value);});
   }
-  const form=()=>({categories:$('categories').value,upcomingLimit:Number($('limit').value),rotationSeconds:Number($('rotation').value),views:checks().filter(c=>c.checked).map(c=>c.value)});
+  const form=()=>({rotationSeconds:Number($('rotation').value),upcomingLimit:Number($('limit').value),
+    categories:$('categories').value,views:checks().filter(c=>c.checked).map(c=>c.value),
+    showPartners:$('show-partners').checked});
   const status=(message,kind='')=>{$('status').className='status '+kind;$('status').textContent=message;};
   const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   let loadToken=0;
@@ -30,7 +33,7 @@
         try{
           const persisted=safeRead(),actual=api.getSettings(),slides=api.getSlides();
           const categories=expected.categories==='both'?['U10','U11']:[expected.categories];
-          const views=expected.views;
+          const views=expected.showPartners?[...expected.views,'partners']:expected.views;
           const failures=[];
           if(!equal(persisted,expected))failures.push('Enregistrement local incohérent');
           if(!equal(actual,expected))failures.push('Réglages non appliqués dans l’écran');
