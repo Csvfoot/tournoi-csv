@@ -1,66 +1,99 @@
-/* Prévisualisation fonctionnelle et validation de réglages 100 % locaux.
-   Aucun SDK Firebase, aucun appel réseau, aucune modification des tournois. */
 (() => {
   'use strict';
-  const KEY='csv.screen.v72.display.settings';
-  const DEFAULTS={rotationSeconds:10,upcomingLimit:2,categories:'both',views:['results','standings','upcoming','finals'],showPartners:true};
+  const {SETTINGS_KEY,SETTINGS_DEFAULTS,validateSettings,readSettings,
+    readableDay,categoryOf,publishedEvents,daysFor,defaultDay,connect,demoEvents}=window.CSV_TV_CONFIG;
   const $=id=>document.getElementById(id);
   const checks=()=>[...document.querySelectorAll('input[name=view]')];
-  const safeRead=()=>{try{const v=JSON.parse(localStorage.getItem(KEY)||'null');return v&&typeof v==='object'?{...DEFAULTS,...v}:DEFAULTS;}catch(e){return DEFAULTS;}};
-  function setFields(v){
-    $('categories').value=v.categories||'both';$('limit').value=String(v.upcomingLimit||2);
-    $('rotation').value=String(v.rotationSeconds||10);
-    $('show-partners').checked=v.showPartners!==false;
-    checks().forEach(c=>{c.checked=(v.views||DEFAULTS.views).includes(c.value);});
-  }
-  const form=()=>({rotationSeconds:Number($('rotation').value),upcomingLimit:Number($('limit').value),
-    categories:$('categories').value,views:checks().filter(c=>c.checked).map(c=>c.value),
-    showPartners:$('show-partners').checked});
-  const status=(message,kind='')=>{$('status').className='status '+kind;$('status').textContent=message;};
-  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-  let loadToken=0;
-  async function testPreview(expected) {
-    const token=++loadToken;
-    const iframe=$('preview');
-    iframe.src='./APERCU_ECRAN_LOCAL.html?validation='+Date.now();
-    return new Promise(resolve=>{
-      let attempts=0;
-      const check=()=>{
-        if(token!==loadToken)return resolve(false);
-        let api;
-        try{api=iframe.contentWindow.CSV_SCREEN_TEST;}catch(e){}
-        if(!api){if(attempts++<100)return setTimeout(check,100);status('⚠️ Moteur de prévisualisation indisponible : ouvre cette page avec le serveur local du pack.', 'error');return resolve(false);}
-        try{
-          const persisted=safeRead(),actual=api.getSettings(),slides=api.getSlides();
-          const categories=expected.categories==='both'?['U10','U11']:[expected.categories];
-          const views=expected.showPartners?[...expected.views,'partners']:expected.views;
-          const failures=[];
-          if(!equal(persisted,expected))failures.push('Enregistrement local incohérent');
-          if(!equal(actual,expected))failures.push('Réglages non appliqués dans l’écran');
-          if(api.getMode()!=='DEMO')failures.push('Affichage non isolé de Firebase');
-          const actualViews=[...new Set(slides.map(x=>x.view))];
-          if(!views.every(v=>actualViews.includes(v))||actualViews.some(v=>!views.includes(v))) failures.push('Rubriques non conformes');
-          const upcoming=api.getUpcomingCounts();
-          if(views.includes('upcoming')){
-            if(upcoming.length!==categories.length)failures.push('Nombre de catégories sur la page matchs incorrect');
-            for(const c of categories){const n=upcoming.find(x=>x.category===c)?.count;if(n!==expected.upcomingLimit) failures.push('Prochains matchs '+c+' : attendu '+expected.upcomingLimit+', obtenu '+String(n));}
-          }
-          if(!failures.length){
-            const timestamp=new Date().toLocaleString('fr-FR');
-            status('✅ RÉGLAGES VALIDÉS · '+timestamp+'\n'+categories.join(' - ')+' · '+expected.upcomingLimit+' matchs/catégorie · rotation '+expected.rotationSeconds+' s\n'+views.length+' rubriques · données fictives · persistance locale confirmée', 'ok');resolve(true);
-          }else{status('⛔ Vérification non validée :\n• '+failures.join('\n• '),'error');resolve(false);}
-        }catch(e){status('⛔ Erreur de validation : '+e.message,'error');resolve(false);}
-      };
-      setTimeout(check,200);
-    });
-  }
-  $('save').addEventListener('click',()=>{
-    const value=form();if(!value.views.length)return status('⛔ Sélectionne au moins une rubrique.','error');
-    try{localStorage.setItem(KEY,JSON.stringify(value));}
-    catch(e){return status('⛔ Impossible d’enregistrer dans ce navigateur : '+e.message,'error');}
-    testPreview(value);
+  const demo=document.body.dataset.screenMode==='demo';
+  const screenPage=demo?'./APERCU_ECRAN_LOCAL.html':'./ecran.html';
+  let catalogue=null;
+  let current=readSettings();
+  const choices=new Intl.Collator('fr',{numeric:true});
+  const status=(message,kind='')=>{
+    $('status').className='status '+kind;
+    $('status').textContent=message;
+  };
+  const getSettings=()=>validateSettings({
+    day:$('day').value,categories:$('categories').value,
+    rotationSeconds:$('rotation').value,upcomingLimit:$('limit').value,
+    views:checks().filter(c=>c.checked).map(c=>c.value),showPartners:$('show-partners').checked
   });
-  $('check').addEventListener('click',()=>testPreview(form()));
-  $('reset').addEventListener('click',()=>{setFields(DEFAULTS);try{localStorage.setItem(KEY,JSON.stringify(DEFAULTS));}catch(e){return status('⛔ Sauvegarde impossible : '+e.message,'error');}testPreview(DEFAULTS);});
-  const saved=safeRead();setFields(saved);status('Réglages trouvés dans le navigateur. Vérification en cours…');testPreview(form());
+  function setOptions(select, options, preferred) {
+    select.replaceChildren(...options.map(([value,label])=>new Option(label,value)));
+    select.value=options.some(([value])=>value===preferred)?preferred:options[0]?.[0]||'';
+  }
+  function updateCategories(preferred) {
+    const day=$('day').value||defaultDay(daysFor(catalogue));
+    const categories=[...new Set(catalogue.filter(event=>event.date===day).map(event=>categoryOf(event.category)))].sort(choices.compare);
+    setOptions($('categories'), [['both','Toutes les catégories'],...categories.map(category=>[category,category])], preferred);
+    $('category-help').textContent=day ? categories.join(' · ') : 'Aucune journée publiée.';
+  }
+  function showPreview() {
+    const url=new URL(screenPage,location.href);
+    url.searchParams.set('configuration',JSON.stringify(getSettings()));
+    if($('preview').src!==url.href)$('preview').src=url.href;
+  }
+  function refreshForm(preferred) {
+    const days=daysFor(catalogue);
+    const automatic=defaultDay(days);
+    setOptions($('day'),[['',automatic?'Automatique · '+readableDay(automatic):'Aucune journée publiée'],
+      ...days.map(day=>[day,readableDay(day)])],preferred.day);
+    updateCategories(preferred.categories);
+    $('selection').disabled=!days.length;
+    $('save').disabled=!days.length;
+    $('reset').disabled=!days.length;
+    if(days.length)showPreview();
+  }
+  function setFields(settings) {
+    $('limit').value=String(settings.upcomingLimit);
+    $('rotation').value=String(settings.rotationSeconds);
+    $('show-partners').checked=settings.showPartners;
+    checks().forEach(c=>{c.checked=settings.views.includes(c.value);});
+    if(catalogue)refreshForm(settings);
+  }
+  function receive(events) {
+    const preferred=catalogue?getSettings():current;
+    catalogue=publishedEvents(events);
+    refreshForm(preferred);
+    const dates=daysFor(catalogue);
+    status(dates.length ? (demo?'Journées de démonstration chargées.':'Journées publiées chargées.') :
+      'Aucune journée publiée pour le moment.', dates.length?'':'error');
+  }
+  $('settings').addEventListener('change',event=>{
+    if(!catalogue?.length)return;
+    if(event.target===$('day'))updateCategories($('categories').value);
+    if(!checks().some(c=>c.checked)){
+      status('Sélectionne au moins une rubrique.', 'error');
+      return;
+    }
+    showPreview();
+    status('Aperçu mis à jour. Enregistre pour appliquer les réglages à l’écran TV.');
+  });
+  function save(settings) {
+    try{
+      localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
+      current=settings;
+      status('Réglages enregistrés et appliqués dans ce navigateur.', 'ok');
+    }catch{status('Impossible d’enregistrer les réglages dans ce navigateur.', 'error');}
+  }
+  $('settings').addEventListener('submit',event=>{
+    event.preventDefault();
+    if(!catalogue?.length)return;
+    if(!checks().some(c=>c.checked))return status('Sélectionne au moins une rubrique.', 'error');
+    save(getSettings());
+  });
+  $('reset').addEventListener('click',()=>{
+    setFields(SETTINGS_DEFAULTS);
+    save(getSettings());
+  });
+  $('open-screen').href=screenPage;
+  setFields(current);
+  if(demo)receive(demoEvents);
+  else {
+    const unavailable=()=>status('Impossible de charger les journées publiées. Recharge la page pour réessayer.', 'error');
+    try{
+      connect().collection('tournaments').doc('cslv_multi_catalog_v1')
+        .onSnapshot(snapshot=>{if(snapshot.exists)receive(snapshot.data()?.events);else receive([]);},unavailable);
+    }catch{unavailable();}
+  }
 })();

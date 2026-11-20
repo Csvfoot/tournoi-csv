@@ -12,39 +12,17 @@
     { id: 'finals', label: 'Phases finales', eyebrow: 'LE TABLEAU FINAL', caption: 'Qualifications · demi-finales · finale · matchs de classement' },
     { id: 'partners', label: 'Partenaires', eyebrow: 'MERCI À NOS PARTENAIRES', caption: 'Ils soutiennent le tournoi' }
   ];
-  // Configuration cliente déjà publique dans la V7.1 officielle (GitHub Pages).
-  // Une clé API Firebase Web n'accorde pas de permission d'écriture.
-  const FIREBASE_CONFIG = {
-    apiKey: 'AIzaSyBYFQkkpiDs-7dkiTHZOIgKgh8cqonuYTk',
-    projectId: 'tournoi-cs-la-verpilliere',
-    authDomain: 'tournoi-cs-la-verpilliere.firebaseapp.com'
-  };
-  // Réglages LOCAUX de cet écran, jamais synchronisés vers Firestore.
-  // En cas de contenu invalide, retour garanti aux valeurs validées par défaut.
-  const SETTINGS_KEY = 'csv.screen.v72.display.settings';
-  const SETTINGS_DEFAULTS = Object.freeze({
-    rotationSeconds: 10, upcomingLimit: 2, categories: 'both',
-    views: ['results', 'standings', 'upcoming', 'finals'], showPartners: true
-  });
-  function validateSettings(input) {
-    const source=input && typeof input==='object' && !Array.isArray(input)?input:{};
-    const rotationSeconds=[5,10,15,20,30].includes(Number(source.rotationSeconds))?Number(source.rotationSeconds):10;
-    const upcomingLimit=[1,2,3,4].includes(Number(source.upcomingLimit))?Number(source.upcomingLimit):2;
-    const categories=['both','U10','U11'].includes(source.categories)?source.categories:'both';
-    const allowed=SETTINGS_DEFAULTS.views;
-    const views=Array.isArray(source.views)?allowed.filter(x=>source.views.includes(x)):allowed.slice();
-    return {rotationSeconds,upcomingLimit,categories,views:views.length?views:allowed.slice(),showPartners:source.showPartners!==false};
+  const {SETTINGS_KEY,validateSettings,readSettings,readableDay,categoryOf,isDay,
+    publishedEvents,daysFor,defaultDay,connect,demoEvents}=window.CSV_TV_CONFIG;
+  const params=new URLSearchParams(location.search);
+  const preview=readPreviewSettings(params.get('configuration'));
+  function readPreviewSettings(raw) {
+    if(!raw)return null;
+    try{return validateSettings(JSON.parse(raw));}catch{return null;}
   }
-  function readSettings(){
-    try{return validateSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null'));}
-    catch(e){return validateSettings(null);}
-  }
-  let screenSettings=readSettings();
+  let screenSettings=preview||readSettings();
   const rotationMs=()=>screenSettings.rotationSeconds*1000;
-  const configuredCategories=()=>catParam?[catParam]:screenSettings.categories==='both'?['U10','U11']:[screenSettings.categories];
-  const selectedCategories=()=>eventParam || fullDay
-    ? [...new Set(state.events.map(e=>categoryOf(e.category)).filter(Boolean))]
-    : configuredCategories();
+  const selectedCategories=()=>[...new Set(state.events.map(e=>categoryOf(e.category)))];
   const selectedViews=()=>VIEWS.filter(v=>v.id==='partners'?screenSettings.showPartners:screenSettings.views.includes(v.id));
   const ROOT = document.getElementById('screen-content');
   const STATUS = document.getElementById('screen-connection');
@@ -56,13 +34,14 @@
   const PAUSE = document.getElementById('screen-pause');
   const CLOCK = document.getElementById('screen-clock');
   const FULLSCREEN = document.getElementById('screen-fullscreen');
-  const params = new URLSearchParams(location.search);
   let requestedView = params.get('view');
   const isDemo = document.body.dataset.screenMode === 'demo' || params.get('demo') === '1';
-  const dayParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') || '') ? params.get('day') : null;
+  const dayParam = isDay(params.get('day')) ? params.get('day') : '';
   const catParam = categoryOf(params.get('category'));
   const eventParam = params.get('event');
   const fullDay = params.get('categories') === 'day' || Boolean(dayParam && !catParam && !eventParam);
+  const chosenDay=()=>dayParam||(eventParam||catParam||fullDay?'':screenSettings.day);
+  let catalogueSnapshot, catalogueDb;
   const state = {
     events: [], records: new Map(), unsubscribe: [], slides: [], index: 0,
     paused: false, nextAt: Date.now() + rotationMs(), connected: false,
@@ -77,17 +56,6 @@
   const add = (parent, ...nodes) => { for (const node of nodes) if (node) parent.append(node); return parent; };
   const arr = v => Array.isArray(v) ? v : [];
   const safe = (v, fallback = '—') => v === null || v === undefined || String(v).trim() === '' ? fallback : String(v).slice(0,120);
-  const readableDay = value => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return 'Journée du tournoi';
-    return new Date(value + 'T12:00:00').toLocaleDateString('fr-FR', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  };
-  const today = () => { const d = new Date(); return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'); };
-  function categoryOf(value) {
-    const label=String(value || '').trim().toUpperCase().slice(0,60);
-    if (!label) return null;
-    const ageGroup=/^U[\s-]*(\d{1,2})\b/.exec(label);
-    return ageGroup ? 'U'+ageGroup[1] : label;
-  }
   const matchMinutes = v => { const m = /^(\d{1,2}):(\d{2})$/.exec(v || ''); return m ? (+m[1])*60+(+m[2]) : -1; };
   const timeCompare = (a,b) => (matchMinutes(a.startTime) < 0 ? 9999 : matchMinutes(a.startTime)) - (matchMinutes(b.startTime) < 0 ? 9999 : matchMinutes(b.startTime)) || safe(a.id,'').localeCompare(safe(b.id,''));
   const statusDone = m => m && m.status === 'finished' && m.score1 != null && m.score2 != null && Number.isFinite(+m.score1) && Number.isFinite(+m.score2);
@@ -291,11 +259,9 @@
   function createSlides(events,records) {
     if (!events.length) return [];
     const slides=[];
-    const categories=selectedCategories();
     for(const view of selectedViews()){
       if(view.id==='standings'||view.id==='upcoming'){
-        const entries=(eventParam || fullDay) ? events.map(event=>({category:categoryOf(event.category),event})) :
-          categories.map(category=>({category,event:events.find(e=>categoryOf(e.category)===category)}));
+        const entries=events.map(event=>({category:categoryOf(event.category),event}));
         for(const batch of chunk(entries,2)){
           const parts=batch.map(({category,event})=>{
             const data=event?(records.get(event.id)||{teams:[],matches:[],config:{}}):{teams:[],matches:[],config:{}};
@@ -375,25 +341,29 @@
     if(requested>=0){requestedView=null;state.nextAt=Date.now()+rotationMs();}
     if(!slides.length){
       CATEGORY.textContent='Tournoi';
-      DAY.textContent=dayParam ? readableDay(dayParam) : 'Journée du tournoi';
-      ROOT.replaceChildren(empty('Aucune catégorie publiée', dayParam
-        ? 'Aucun tournoi correspondant au lien pour cette journée.'
+      DAY.textContent=chosenDay() ? readableDay(chosenDay()) : 'Journée du tournoi';
+      ROOT.replaceChildren(empty('Aucune catégorie publiée', chosenDay()
+        ? 'Aucun tournoi correspondant aux réglages pour cette journée.'
         : 'Les catégories apparaîtront après publication.'));
       DOTS.replaceChildren();
     }else currentSlide();
   }
   function chooseEvents(all) {
-    const eligible=arr(all).filter(e=>e && typeof e.id==='string' && /^[a-z0-9_-]{1,70}$/.test(e.id) &&
-      e.published!==false && /^\d{4}-\d{2}-\d{2}$/.test(e.date||'') && categoryOf(e.category) && (eventParam ? e.id===eventParam : fullDay || configuredCategories().includes(categoryOf(e.category))));
-    const dates=[...new Set(eligible.map(e=>e.date))].sort();
-    const picked=dayParam || dates.find(d=>d>=today()) || dates[dates.length-1];
-    return eligible.filter(e=>e.date===picked).sort((a,b)=>(categoryOf(a.category)||'').localeCompare(categoryOf(b.category)||''));
+    const published=publishedEvents(all);
+    const category=catParam||(fullDay?'both':screenSettings.categories);
+    const eligible=published.filter(event=>eventParam?event.id===eventParam:
+      category==='both'||categoryOf(event.category)===category);
+    const picked=chosenDay()||defaultDay(daysFor(eventParam||catParam?eligible:published));
+    return eligible.filter(event=>event.date===picked)
+      .sort((a,b)=>categoryOf(a.category).localeCompare(categoryOf(b.category),'fr',{numeric:true}));
   }
   function unsubscribeRecords() {for(const u of state.unsubscribe)try{u();}catch(e){}state.unsubscribe=[];}
   function useCatalogSnapshot(snap,db) {
     if(!snap.exists)throw new Error('Catalogue non disponible dans Firebase.');
     const raw=snap.data()||{};
     if(!Array.isArray(raw.events))throw new Error('Catégories du tournoi indisponibles.');
+    catalogueSnapshot=snap;
+    catalogueDb=db;
     const events=chooseEvents(raw.events);
     const ids=events.map(e=>e.id).join('|');
     const before=state.events.map(e=>e.id).join('|');
@@ -401,6 +371,9 @@
     state.fromCache=Boolean(snap.metadata?.fromCache);
     if(before!==ids){
       unsubscribeRecords();
+      state.connected=false;
+      connection('waiting','ACTUALISATION…');
+      ROOT.replaceChildren(empty('Chargement du programme','Récupération des matchs de la journée sélectionnée.'));
       state.records=new Map();
       state.missing=new Set(events.map(e=>e.id));
       for(const event of events){
@@ -428,10 +401,7 @@
   }
   async function startFirebase(){
     try{
-      if(typeof firebase==='undefined' || typeof firebase.firestore!=='function')throw new Error('Bibliothèques Firebase indisponibles.');
-      const app=firebase.apps.find(a=>a.name==='csv-ecran-geant')||firebase.initializeApp(FIREBASE_CONFIG,'csv-ecran-geant');
-      if(app.options.projectId!=='tournoi-cs-la-verpilliere')throw new Error('Projet Firebase inattendu.');
-      const db=app.firestore();
+      const db=connect();
       db.collection('tournaments').doc('cslv_multi_catalog_v1').onSnapshot({includeMetadataChanges:true},
         snap=>{try{useCatalogSnapshot(snap,db);}catch(e){state.connected=false;connection('error','DONNÉES INDISPONIBLES');ROOT.replaceChildren(empty('Programme indisponible',e.message));}},
         err=>{state.connected=false;connection('error','CONNEXION PERDUE');ROOT.replaceChildren(empty('Connexion impossible','Vérifiez la connexion Internet et les autorisations de lecture Firestore.'));console.error('Lecture catalogue indisponible',err);});
@@ -455,16 +425,18 @@
     return {teams,matches,config:{pointsWin:3,pointsDraw:1,pointsLoss:0,
       sponsors:[{name:'Partenaire de démonstration'}]}};
   }
-  function startDemo(){
-    const demoDate=dayParam || '2027-06-05';
-    const categories=eventParam && catParam ? [catParam] : demoDate==='2027-06-12'?['U12','U13']:['U10','U11'];
-    const events=chooseEvents(categories.map((category,index)=>({
-      id:eventParam && index===0 ? eventParam : 'demo-'+category.toLowerCase(), category, date:demoDate, published:true
-    })));
+  function refreshDemo(){
+    const events=chooseEvents(eventParam&&catParam&&dayParam
+      ? [{id:eventParam,category:catParam,date:dayParam,published:true}]
+      : demoEvents);
     state.events=events;
+    state.records.clear();
     for(const event of events)state.records.set(event.id,demoFixtures(event.category));
     state.connected=true;
     resetSlides();
+  }
+  function startDemo(){
+    refreshDemo();
     const nav=E('nav','demo-switcher');
     nav.setAttribute('aria-label','Navigation de la démonstration');
     for(const view of selectedViews()){
@@ -499,6 +471,7 @@
   if(isDemo)startDemo();else startFirebase();
   // API limitée aux tests automatisés : lecture de l'état, aucune écriture.
   window.CSV_SCREEN_TEST={
+    getSelection:()=>({day:state.events[0]?.date||'',categories:selectedCategories()}),
     getSettings:()=>JSON.parse(JSON.stringify(screenSettings)),
     getSlides:()=>state.slides.map(s=>({view:s.view.id,category:s.dual?s.panels.map(p=>p.category).join(' - '):s.event.category,page:s.page})),
     getUpcomingCounts:()=>state.slides.filter(s=>s.view.id==='upcoming'&&s.dual).flatMap(s=>s.panels.map(p=>({category:p.category,count:p.items.length}))),
@@ -508,6 +481,10 @@
     goto:(id)=>{const index=state.slides.findIndex(s=>s.view.id===id);if(index>=0){state.index=index;currentSlide();return true;}return false;}
   };
   window.addEventListener('storage',e=>{
-    if(e.key===SETTINGS_KEY){screenSettings=readSettings();state.nextAt=Date.now()+rotationMs();resetSlides();}
+    if(e.key!==SETTINGS_KEY||preview)return;
+    screenSettings=readSettings();
+    state.nextAt=Date.now()+rotationMs();
+    if(isDemo)refreshDemo();
+    else if(catalogueSnapshot)useCatalogSnapshot(catalogueSnapshot,catalogueDb);
   });
 })();

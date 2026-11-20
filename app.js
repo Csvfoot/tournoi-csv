@@ -6375,7 +6375,11 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         userRole === 'viewer' && viewerMoreOpen && React.createElement("div", { className: "xl:hidden fixed inset-x-3 z-[49] rounded-xl border border-amber-600/50 bg-[#1c080d] shadow-2xl p-3 grid grid-cols-2 gap-2", style: { bottom: 'calc(85px + env(safe-area-inset-bottom, 0px))' }, role: "region", "aria-label": "Autres vues spectateur" },
             [{ id: 'finalStandings', label: '🥇 Classement final' }, { id: 'stats', label: '⚽ Statistiques' }].map(tab => React.createElement("button", { type: "button", key: tab.id, onClick: () => { setActiveTab(tab.id); setViewerMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }, className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-slate-100 font-bold text-xs" }, tab.label)),
             React.createElement("button", { type: "button", onClick: () => setViewerMoreOpen(false), className: "min-h-[48px] rounded-lg border border-red-900/50 bg-[#2a1014] text-amber-200 text-xs" }, "Fermer")),
-        userRole === 'editor' && React.createElement("div", { className: "max-w-7xl mx-auto w-full px-3 sm:px-6 pt-2 flex justify-end" },
+        userRole === 'editor' && React.createElement("div", { className: "max-w-7xl mx-auto w-full px-3 sm:px-6 pt-2 flex flex-wrap justify-end gap-2" },
+            React.createElement("a", {
+                href: "./reglages-ecran.html", target: "_blank", rel: "noopener",
+                className: "min-h-[42px] inline-flex items-center px-4 rounded-xl bg-[#33141f] border border-amber-800 text-amber-300 text-xs font-bold"
+            }, "⚙ Réglages Écran TV"),
             tournament.published === false
                 ? React.createElement("button", {
                     type: "button", onClick: () => csvSetTvMode(true),
