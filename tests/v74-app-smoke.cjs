@@ -90,7 +90,7 @@ function installPlanningFixture({docs: values, organizer}) {
   }
 
 async function verifyAlternation(browser, url) {
-  const context = await browser.newContext({viewport:{width:1440,height:900}});
+  const context = await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block'});
   const docs = alternationFixture();
   const day = docs['tournaments/cslv_multi_catalog_v1'].events[0].date;
   await context.route('**/*', async route => {
@@ -112,7 +112,7 @@ async function verifyAlternation(browser, url) {
   });
   await context.addInitScript(installPlanningFixture, {docs});
   async function expectText(page, value) {
-    await page.waitForFunction(text=>document.body.innerText.includes(text),value,{timeout:15000});
+    await page.waitForFunction(text=>document.body.innerText.includes(text),value,{timeout:15000,polling:100});
   }
   async function screenshot(page, name) {
     fs.mkdirSync(path.join(root,'test-artifacts'),{recursive:true});
