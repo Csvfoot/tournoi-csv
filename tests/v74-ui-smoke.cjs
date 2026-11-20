@@ -12,9 +12,9 @@ const component = name => {
   const start = source.indexOf('function ' + name + '(');
   assert(start >= 0, 'Composant absent : ' + name);
   const end = source.indexOf('\nfunction ', start + 9);
-  return source.slice(start, end >= 0 ? end : undefined);
+  return source.slice(start, end >= 0 ? end : source.indexOf('\nReactDOM.render', start));
 };
-const components = ['CsvSpectatorWelcome','CsvVisualHome','CsvVisualFinals','CsvTvBoard','CsvTeamOverview']
+const components = ['CsvSpectatorWelcome','CsvVisualHome','CsvVisualFinals','CsvTvBoard','CsvTeamOverview','StandingsTable','csvPlacementStart']
   .map(component).join('\n');
 const fixture = {
   events:[{id:'u10',category:'U10',date:'2027-06-05'},{id:'u11',category:'U11',date:'2027-06-05'}],
@@ -30,6 +30,8 @@ const fixture = {
      startTime:'10:30',endTime:'10:45',fieldName:'Terrain Annexe',score1:null,score2:null},
     {id:'m3',group:'Poule A',stage:'Journée 1',team1Id:'b',team2Id:'a',status:'finished',
      startTime:'08:30',endTime:'08:45',fieldName:'Terrain Honneur',score1:0,score2:2},
+    {id:'ko-qf',group:'Phase Finale Principale',stage:'Quart de finale 1',team1Id:'a',team2Id:'b',status:'pending',startTime:'13:00'},
+    {id:'ko-bronze',group:'Phase Finale Principale',stage:'Match pour la 3e place',team1Id:'b',team2Id:'c',status:'pending',startTime:'15:45'},
     {id:'ko-semi',group:'Phase Finale Principale',stage:'Demi-Finale',team1Id:'a',team2Id:'c',
      status:'pending',startTime:'14:00',score1:null,score2:null},
     {id:'ko-final',group:'Phase Finale Principale',stage:'Grande Finale',
@@ -85,7 +87,12 @@ const documentHtml = [
   ' isLoading:false,offline:false,onChooseDay:()=>{},onChooseCategory:id=>window.__render("welcome",id),',
   ' onOpen:t=>window.__lastAction=t,onRefresh:()=>{},refreshing:false,',
   ' records:{[event.id]:data},readyRecords:{[event.id]:true},fields:[{id:"f1",name:"Terrain Honneur"}]};',
-  ' let c = view==="finals"?React.createElement(CsvVisualFinals,{matches:data.matches,teams:data.teams}):',
+  ' const h = React.createElement;',
+  ' let c = view.startsWith("finals")?h("main",{className:view==="finals-editor"?"csv-v74-organizer":"csv-v74-inline-view"},',
+  ' h(CsvVisualFinals,{matches:data.matches,teams:data.teams,onEditMatch:view==="finals-editor"?()=>{}:undefined})):',
+  ' view==="pools"?h("section",{className:"csv-v74-pool-card"},h(StandingsTable,{standings:teams.map(team=>',
+  ' ({team,points:4,played:3,won:1,drawn:1,lost:1,gf:4,ga:4,gd:0}))})):',
+
   ' view==="team"?React.createElement(CsvTeamOverview,{team:data.teams[0],teams:data.teams,',
   ' matches:data.matches,config:data.config,groups:["Poule A","Poule B"]}):',
   ' view==="tv"?React.createElement(CsvTvBoard,{tournament:event,matches:data.matches,',
@@ -121,16 +128,27 @@ async function main() {
       await page.getByText('La route vers la finale').waitFor();
       await page.getByRole('region', { name: 'Consolante', exact: true }).getByText('Finale consolante · 15:30', { exact: true }).waitFor();
       await page.getByRole('region', { name: 'Matchs de classement', exact: true }).getByText('Match pour la 5e place · 15:00', { exact: true }).waitFor();
-      if (safari) {
+      for (const mode of ['finals','finals-editor']) {
+        await page.evaluate(view=>window.__render(view,'u11'),mode);
         const rounds = page.getByRole('region', { name: 'Tableau des tours' });
-        const overflow = await rounds.evaluate(node => node.scrollWidth > node.clientWidth);
-        assert(!overflow, 'Le tableau iPhone doit tenir dans la largeur disponible');
-        await rounds.getByRole('heading', { name: 'Grande finale' }).scrollIntoViewIfNeeded();
-        assert(await rounds.getByRole('heading', { name: 'Grande finale' }).isVisible(), 'Grande finale accessible en descendant');
-        assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
-          'La page iPhone doit rester dans la largeur de l’écran');
+        await rounds.getByRole('heading', { name: 'Grande finale' }).waitFor();
+        const centers = await rounds.locator('h3').evaluateAll(headings=>headings.map(h=>{
+          const rect=h.getBoundingClientRect();
+          return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};
+        }));
+        assert.equal(centers.length,4);
+        const axis=name==='desktop'?'x':'y';
+        assert(centers.every((p,i)=>!i||p[axis]>centers[i-1][axis]),'Tours en ordre dans '+mode+' '+name);
+        assert.equal(await page.locator('.csv-v74-podium').count(),0);
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),
+          'Le tableau doit tenir dans l’écran');
+        await page.screenshot({path:path.join(root,'test-artifacts','v74-'+mode+'-'+name+'.png'),fullPage:true});
       }
-      await page.screenshot({path:path.join(root,'test-artifacts','v74-finales-'+name+'.png'),fullPage:true});
+      await page.evaluate(()=>window.__render('pools','u11'));
+      for (const label of ['G','N','P','BP','BC'])
+        await page.getByRole('columnheader',{name:label,exact:true}).waitFor();
+      assert(await page.locator('.csv-v74-pool-table').evaluate(table=>table.scrollWidth<=table.parentElement.clientWidth+2),
+        'Toutes les statistiques doivent tenir dans la largeur de la poule');
       await page.evaluate(()=>window.__render('team','u11'));
       await page.getByText('CSV La Verpillière U11').waitFor();
       await page.evaluate(()=>window.__render('tv','u11'));
