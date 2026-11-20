@@ -18,6 +18,132 @@ const server = http.createServer((req,res) => {
       'Cache-Control':'no-store'});res.end(data);
   });
 });
+
+async function verifyAlternation(browser, url) {
+  const context = await browser.newContext({viewport:{width:1440,height:900}});
+  const day = '2027-06-05';
+  const field = {id:'a',name:'Terrain Honneur'};
+  const events = [
+    {id:'principal',category:'U10',title:'Tournoi U10',date:day,published:true},
+    {id:'u11',category:'U11',title:'Tournoi U11',date:day,published:true}
+  ];
+  const record = (pause, cat) => ({
+    config:{name:'Tournoi '+cat,format:'groups_knockout',breakDuration:pause,startTime:'09:00',
+      duration:10,pointsWin:3,pointsDraw:1,pointsLoss:0},
+    teams:[{id:'a',name:'CSV '+cat,group:'Poule A',color:'#d00'},
+      {id:'b',name:'Frontonas '+cat,group:'Poule A',color:'#db0'}],
+    matches:[{id:'fixture',status:'pending',group:'Poule A',stage:'Journée 1',
+      team1Id:'a',team2Id:'b',fieldId:field.id,fieldName:field.name,startTime:'10:00',endTime:'10:10'}]
+  });
+  const docs = {
+    'tournaments/cslv_multi_catalog_v1':{events,fields:[field]},
+    'tournaments/cslv_main_data':record(2,'U10'),
+    'tournaments/cslv_mt_u11':record(4,'U11'),
+    'organizers/test-organizer':{active:true,role:'editor',email:'fixture@example.invalid'}
+  };
+  await context.route('**/*', async route => {
+    const request = new URL(route.request().url());
+    if (request.origin===url) return route.continue();
+    const react = {
+      '/ajax/libs/react/18.2.0/umd/react.production.min.js':'react',
+      '/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js':'react-dom'
+    }[request.pathname];
+    if (react) return route.fulfill({contentType:'text/javascript',
+      path:path.join(path.dirname(require.resolve(react)),'umd',request.pathname.split('/').pop())});
+    return route.fulfill({body:'',contentType:'text/javascript'});
+  });
+  await context.exposeBinding('__planningUpdate', async (_, changes) => {
+    for (const [key, value] of changes) docs[key]={...docs[key],...value};
+    await Promise.all(context.pages().map(page => page.evaluate(values => {
+      if (window.__planningSnapshots) window.__planningSnapshots(values);
+    }, docs)));
+  });
+  await context.addInitScript(values => {
+    const subscribers = new Set();
+    let docs = values;
+    const copy = value => JSON.parse(JSON.stringify(value));
+    const snapshot = key => ({exists:!!docs[key],data:()=>docs[key] && copy(docs[key]),metadata:{fromCache:false}});
+    window.__planningSnapshots = values => {
+      docs = values;
+      for (const send of subscribers) send();
+    };
+    const db = {
+      collection: name => ({doc: id => {
+        const key = name+'/'+id;
+        return {
+          key, get:async()=>snapshot(key),
+          onSnapshot:(options,callback)=>{
+            const notify = typeof options==='function'?options:callback;
+            const send = ()=>notify(snapshot(key));
+            subscribers.add(send);
+            queueMicrotask(()=>{if(subscribers.has(send))send();});
+            return ()=>subscribers.delete(send);
+          },
+          set:async value=>window.__planningUpdate([[key,value]])
+        };
+      }}),
+      runTransaction:async run=>{
+        const pending=[];
+        await run({get:async ref=>snapshot(ref.key),update:(ref,value)=>pending.push([ref.key,value])});
+        await window.__planningUpdate(pending);
+      }
+    };
+    const user = {uid:'test-organizer',email:'fixture@example.invalid',emailVerified:true,isAnonymous:false,
+      reload:async()=>{},getIdToken:async()=>''};
+    const auth = {
+      currentUser: location.pathname.includes('organisateur')?user:{isAnonymous:true},
+      onAuthStateChanged: callback=>{
+        const timer=setTimeout(()=>callback(auth.currentUser),0);
+        return ()=>clearTimeout(timer);
+      }
+    };
+    localStorage.setItem('csv.screen.v72.display.settings',JSON.stringify({views:['upcoming'],showPartners:false}));
+    window.firebase = {
+      apps:[],auth:()=>auth,firestore:()=>db,
+      app:()=>window.firebase.apps[0],
+      initializeApp:(options,name)=>{const app={options,name,firestore:()=>db};window.firebase.apps.push(app);return app;}
+    };
+  }, docs);
+  async function expectText(page, value) {
+    await page.waitForFunction(text=>document.body.innerText.includes(text),value,{timeout:15000});
+  }
+  async function screenshot(page, name) {
+    fs.mkdirSync(path.join(root,'test-artifacts'),{recursive:true});
+    await page.screenshot({path:path.join(root,'test-artifacts','alternance-'+name+'.png')});
+  }
+  try {
+    const organizer = await context.newPage();
+    await organizer.goto(url+'/organisateur.html');
+    await organizer.getByRole('button',{name:/Planning général/}).click({timeout:20000});
+    const spectator = await context.newPage();
+    await spectator.goto(url+'/spectateur.html?day='+day+'&tournament=u11');
+    await spectator.getByRole('button',{name:'Entrer dans le tournoi'}).click({timeout:1200}).catch(()=>{});
+    const tv = await context.newPage();
+    await tv.goto(url+'/ecran.html?day='+day+'&view=upcoming');
+    await expectText(tv,'10:00');
+    await expectText(spectator,'10:00');
+    organizer.on('dialog',dialog=>dialog.accept());
+    await organizer.getByRole('button',{name:'Prévisualiser',exact:true}).click();
+    await expectText(organizer,'U10 2 min · U11 4 min');
+    await organizer.getByRole('button',{name:"Confirmer l'alternance"}).click();
+    await expectText(organizer,'Alternance appliquée');
+    assert.equal(docs['tournaments/cslv_main_data'].matches[0].startTime,'09:00');
+    assert.equal(docs['tournaments/cslv_mt_u11'].matches[0].startTime,'09:12');
+    await expectText(organizer,'09:12');
+    await screenshot(organizer,'planning');
+    await expectText(spectator,'09:12');
+    await screenshot(spectator,'spectateur');
+    await expectText(tv,'09:12');
+    await screenshot(tv,'tv');
+    await organizer.getByRole('button',{name:/Tournoi Préparation et résultats/}).click();
+    await organizer.getByRole('button',{name:'U11',exact:true}).click();
+    await organizer.getByRole('button',{name:/^📅 Matchs$/}).filter({visible:true}).click();
+    await expectText(organizer,'09:12');
+    await screenshot(organizer,'matchs');
+    console.log('OK propagation planning général, Matchs, spectateur et écran TV sur les mêmes snapshots.');
+  } finally { await context.close(); }
+}
+
 async function main(){
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const port=server.address().port;
@@ -77,6 +203,7 @@ async function main(){
     assert.equal(await forged.getByRole('heading',{name:'Espace organisateur'}).count(),0);
     console.log('OK lien public role=editor : reste spectateur');
     await forged.close();
+    await verifyAlternation(browser, 'http://127.0.0.1:'+port);
   }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;server.close();});
