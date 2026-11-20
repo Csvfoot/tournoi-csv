@@ -134,7 +134,11 @@ async function verifyAlternation(browser, url) {
       console.error('TV:',await tv.locator('body').innerText(),await tv.evaluate(()=>window.CSV_SCREEN_TEST?.getUpcomingCounts()));
       throw error;
     }
-    await expectText(spectator,'10:00');
+    try { await expectText(spectator,'10:00'); }
+    catch (error) {
+      console.error('Spectateur:',(await spectator.locator('body').innerText()).slice(0,2000));
+      throw error;
+    }
     organizer.on('dialog',dialog=>dialog.accept());
     await organizer.getByRole('button',{name:'Prévisualiser',exact:true}).click();
     await expectText(organizer,'U10 2 min · U11 4 min');
@@ -144,11 +148,14 @@ async function verifyAlternation(browser, url) {
     assert.equal(docs['tournaments/cslv_mt_u11'].matches[0].startTime,'09:12');
     await expectText(organizer,'09:12');
     await screenshot(organizer,'planning');
+    await organizer.getByRole('button',{name:/Saisie journée/}).click();
+    await expectText(organizer,'09:12');
+    await screenshot(organizer,'saisie-journee');
     await expectText(spectator,'09:12');
     await screenshot(spectator,'spectateur');
     await expectText(tv,'09:12');
     await screenshot(tv,'tv');
-    await organizer.getByRole('button',{name:/Tournoi Préparation et résultats/}).click();
+    await organizer.getByRole('button',{name:/Tournoi.*Préparation et résultats/}).click();
     await organizer.getByRole('button',{name:'U11',exact:true}).click();
     await organizer.getByRole('button',{name:/^📅 Matchs$/}).filter({visible:true}).click();
     await expectText(organizer,'09:12');
