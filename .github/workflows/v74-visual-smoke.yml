@@ -39,6 +39,13 @@ jobs:
           path: test-artifacts/*.png
           if-no-files-found: ignore
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: apercu-alternance
+          path: test-artifacts/apercu-alternance.html
+          if-no-files-found: error
+          retention-days: 14
 
   webkit:
     runs-on: ubuntu-24.04
