@@ -760,13 +760,15 @@ const planningOverlap = (a, b) => planningMinutes(a.startTime) < planningMinutes
 // Important : 0 minute est une valeur valide, pas une valeur manquante.
 const rotationMinutes = value => value === undefined || value === null || value === ''
     ? 5 : (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 5);
+// La pause commence à la fin du match qui libère le terrain.
+const rotationOverlap = (startA, endA, pauseA, startB, endB, pauseB) =>
+    startA < endB + pauseB && startB < endA + pauseA;
 const planningRotationConflict = (a, b, pauseForEvent) => {
     if (a.kind !== 'match' || b.kind !== 'match' || !a.fieldId || a.fieldId !== b.fieldId ||
         !a.startTime || !a.endTime || !b.startTime || !b.endTime)
         return false;
-    const pause = Math.max(pauseForEvent(a.eventId), pauseForEvent(b.eventId));
-    return planningMinutes(a.startTime) < planningMinutes(b.endTime) + pause &&
-        planningMinutes(b.startTime) < planningMinutes(a.endTime) + pause;
+    return rotationOverlap(planningMinutes(a.startTime), planningMinutes(a.endTime), pauseForEvent(a.eventId),
+        planningMinutes(b.startTime), planningMinutes(b.endTime), pauseForEvent(b.eventId));
 };
 const planningConflict = (a, b) => {
     if (!a.startTime || !a.endTime || !b.startTime || !b.endTime || !planningOverlap(a, b))
@@ -1097,8 +1099,7 @@ const buildAlternatingWaves = (pair, allEvents, fields) => {
         });
     });
     const firstTime = Math.max(...pair.map(baseTime));
-    const lastLockedEnd = locked.length ? Math.max(...locked.map(m => planningMinutes(m.endTime))) : 0;
-    let cursor = Math.ceil(Math.max(firstTime, lastLockedEnd + (locked.length ? Math.max(...pair.map(pause)) : 0)) / 5) * 5;
+    let cursor = Math.max(firstTime, ...locked.map(m => planningMinutes(m.endTime) + (pauseByEvent.get(m.eventId) ?? 5)));
     const lunchCollision = (candidate, p) => {
         const cfg = p.data.config || {};
         return !!(cfg.hasLunchBreak && cfg.lunchStart && cfg.lunchEnd &&
@@ -1117,8 +1118,7 @@ const buildAlternatingWaves = (pair, allEvents, fields) => {
         if (!games.length)
             return false;
         const maxDuration = Math.max(...games.map(m => duration(m, p)));
-        let begin = Math.ceil(Math.max(cursor, baseTime(p)) / 5) * 5;
-        for (let tryN = 0; tryN < 290 && begin + maxDuration <= 1440; tryN++, begin += 5) {
+        for (let begin = Math.max(cursor, baseTime(p)); begin + maxDuration <= 1440; begin++) {
             const proposals = games.map((m, i) => ({
                 ...m, eventId: p.event.id, kind: 'match', exclusive: exclusive || !!m.exclusive,
                 fieldId: fields[i].id, fieldName: fields[i].name,
@@ -1144,7 +1144,7 @@ const buildAlternatingWaves = (pair, allEvents, fields) => {
             for (let i = list.length - 1; i >= 0; i--)
                 if (selected.has(list[i].id))
                     list.splice(i, 1);
-            cursor = begin + maxDuration + Math.max(...pair.map(pause));
+            cursor = begin + maxDuration + pause(p);
             return true;
         }
         return false;
@@ -1283,9 +1283,7 @@ const buildAlternatingSchedule = (pair, allEvents, fields) => {
         const options = exclusive ? [fields.find(f => f.id === match.fieldId) || fields[0]] : fields;
         let best = null;
         for (const field of options) {
-            let begin = Math.max(startOf(p), frontier, afterField.get(field.id) || 0);
-            begin = Math.ceil(begin / 5) * 5;
-            for (let count = 0; count < 400 && begin + minutes <= 1440; count++, begin += 5) {
+            for (let begin = Math.max(startOf(p), frontier, afterField.get(field.id) || 0); begin + minutes <= 1440; begin++) {
                 const candidate = { ...match, eventId: p.event.id, kind: 'match', exclusive,
                     startTime: planningTime(begin), endTime: planningTime(begin + minutes),
                     fieldId: field.id, fieldName: field.name };
@@ -1326,9 +1324,9 @@ const buildAlternatingSchedule = (pair, allEvents, fields) => {
                 return { error: `Impossible de placer les matchs de poules de ${g.p.event.category} sans conflit.` };
         }
     }
-    const endOfMatches = () => Math.max(earliestStart, ...occupied.filter(x => pairIds.has(x.eventId) && x.kind === 'match')
-        .map(x => planningMinutes(x.endTime)));
-    let frontier = endOfMatches() + Math.max(...pair.map(pauseOf));
+    const afterScheduledMatches = () => Math.max(earliestStart, ...occupied.filter(x => pairIds.has(x.eventId) && x.kind === 'match')
+        .map(x => planningMinutes(x.endTime) + (pauseByEvent.get(x.eventId) ?? 5)));
+    let frontier = afterScheduledMatches();
     const prelim = pair.map(p => {
         const list = (p.data.matches || []).filter(m => phases.has(m.group) &&
             m.group !== 'Tournoi Classement' && m.group !== 'Tournoi Consolante' &&
@@ -1359,7 +1357,7 @@ const buildAlternatingSchedule = (pair, allEvents, fields) => {
                     return { error: `Impossible de placer un tour de qualification de ${x.p.event.category}.` };
             }
         }
-        frontier = endOfMatches() + Math.max(...pair.map(pauseOf));
+        frontier = afterScheduledMatches();
     }
     const ranks = pair.map(p => ({ p, queue: (p.data.matches || []).filter(m => m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante') }));
     while (ranks.some(x => x.queue.length)) {
@@ -1368,7 +1366,7 @@ const buildAlternatingSchedule = (pair, allEvents, fields) => {
                 return { error: `Impossible de placer les matchs de classement de ${x.p.event.category}.` };
         }
     }
-    frontier = endOfMatches() + Math.max(...pair.map(pauseOf));
+    frontier = afterScheduledMatches();
     // Chaque catégorie finit par sa petite finale puis sa grande finale,
     // chacune seule sur TOUS les terrains, y compris ceux de l'autre catégorie.
     for (const p of pair) {
@@ -3884,7 +3882,7 @@ function MultiTournamentShell() {
                     React.createElement("p", { className: "text-xs text-amber-200" },
                         "\u23F1 Rotation incluse : ",
                         (alternatePreview.rotations || []).map(r => `${r.category} ${r.minutes} min`).join(' · '),
-                        ". La pause s\u00E9pare les matchs successifs sur chaque terrain, m\u00EAme entre cat\u00E9gories."),
+                        ". La pause de chaque cat\u00E9gorie s'applique apr\u00E8s ses matchs."),
                     alternatePreview.restAnalysis && React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2" },
                         alternatePreview.restAnalysis.map(a => React.createElement("div", { key: a.category, className: "rounded-lg border border-amber-900/40 bg-[#100508] p-2 text-xs text-slate-200" },
                             React.createElement("strong", { className: "text-amber-300" }, a.category),
@@ -4917,15 +4915,15 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     };
     // Créneaux exclusifs : blocs vides et matchs seuls sur tous les terrains.
     // Matchs des autres catégories organisées à la même date.
-    const matchRotation = value => value === undefined || value === null || value === ''
-        ? 5 : (Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 5);
     const externalMatches = otherEvents.flatMap(e => (e.matches || []).map(m => {
         var _a;
         return ({
             ...m, _eventId: e.id, _eventCategory: e.category,
-            _rotationMinutes: matchRotation((_a = e.config) === null || _a === void 0 ? void 0 : _a.breakDuration)
+            _rotationMinutes: rotationMinutes((_a = e.config) === null || _a === void 0 ? void 0 : _a.breakDuration)
         });
     }));
+    const matchPause = rotationMinutes(config.breakDuration);
+    const pauseAfterMatch = match => match._rotationMinutes ?? matchPause;
     const externalReservations = otherEvents.flatMap(e => ((e.config && e.config.reservedSlots) || []).map(r => ({ ...r, _eventCategory: e.category })));
     const foreignFieldConflict = (match, others = externalMatches) => others.find(m => m.startTime && m.endTime && match.startTime && match.endTime &&
         (m.fieldId === match.fieldId || m.exclusive || match.exclusive) &&
@@ -4963,14 +4961,9 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             timesOverlap(candidate.startTime, candidate.endTime, other.startTime, other.endTime) &&
             (candidate.exclusive || other.exclusive || candidate.fieldId === other.fieldId));
         const rotationConflict = [...scheduled.filter(m => m.id !== candidate.id), ...externalMatches]
-            .some(other => {
-            var _a, _b;
-            return other.startTime && other.endTime && candidate.fieldId && candidate.fieldId === other.fieldId &&
-                timeToMinutes(candidate.startTime) < timeToMinutes(other.endTime) +
-                    Math.max(matchRotation(config.breakDuration), matchRotation((_a = other._rotationMinutes) !== null && _a !== void 0 ? _a : config.breakDuration)) &&
-                timeToMinutes(other.startTime) < timeToMinutes(candidate.endTime) +
-                    Math.max(matchRotation(config.breakDuration), matchRotation((_b = other._rotationMinutes) !== null && _b !== void 0 ? _b : config.breakDuration));
-        });
+            .some(other => other.startTime && other.endTime && candidate.fieldId && candidate.fieldId === other.fieldId &&
+                rotationOverlap(timeToMinutes(candidate.startTime), timeToMinutes(candidate.endTime), matchPause,
+                    timeToMinutes(other.startTime), timeToMinutes(other.endTime), pauseAfterMatch(other)));
         return localConflict || foreignConflict || rotationConflict;
     };
     const changedMatchConflict = (scheduled, ids, slots = reservedSlots) => ids.some(id => matchSlotConflict(scheduled.find(m => m.id === id), scheduled, slots));
@@ -5332,7 +5325,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     // Les créneaux exclusifs bloquent aussi les AUTRES catégories le même jour.
     const organizeFinalDay = (groupFixtures, phaseFixtures, preserveGroups = false) => {
         const duration = Math.max(5, Number(config.duration) || 15);
-        const pause = Math.max(0, Number(config.breakDuration) || 0);
+        const pause = matchPause;
         const firstMinute = timeToMinutes(config.startTime || '09:00');
         const reservations = [...reservedSlots, ...externalReservations];
         const occupied = [...externalMatches, ...(preserveGroups ? groupFixtures : [])];
@@ -5349,7 +5342,6 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
             return keys;
         };
         const conflicts = (fixture, start, end, fieldId, exclusive) => {
-            var _a;
             const a = minutesToTime(start), b = minutesToTime(end);
             const reserved = reservations.find(slot => slot.startTime && slot.endTime &&
                 timesOverlap(a, b, slot.startTime, slot.endTime));
@@ -5357,19 +5349,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                 return timeToMinutes(reserved.endTime);
             const keys = participantKeys(fixture);
             const hit = occupied.find(other => {
-                var _a;
                 if (!other.startTime || !other.endTime)
                     return false;
                 const overlaps = timesOverlap(a, b, other.startTime, other.endTime);
                 const sameField = other.fieldId === fieldId;
-                const rotation = Math.max(pause, matchRotation((_a = other._rotationMinutes) !== null && _a !== void 0 ? _a : config.breakDuration));
-                const tooSoon = sameField && start < timeToMinutes(other.endTime) + rotation &&
-                    timeToMinutes(other.startTime) < end + rotation;
+                const tooSoon = sameField && rotationOverlap(start, end, pause,
+                    timeToMinutes(other.startTime), timeToMinutes(other.endTime), pauseAfterMatch(other));
                 return tooSoon || (overlaps && (exclusive || other.exclusive || sameField ||
                     (!other._eventId && keys.some(key => participantKeys(other).includes(key)))));
             });
             return hit ? timeToMinutes(hit.endTime) +
-                (hit.fieldId === fieldId ? Math.max(pause, matchRotation((_a = hit._rotationMinutes) !== null && _a !== void 0 ? _a : config.breakDuration)) : 0) : null;
+                (hit.fieldId === fieldId ? pauseAfterMatch(hit) : 0) : null;
         };
         const put = (fixture, earliest = firstMinute, exclusive = false) => {
             // Préserver une réservation manuelle déjà existante lors de la réorganisation.
@@ -5660,7 +5650,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         const startMinute = timeToMinutes(config.startTime || '09:00');
         const phaseStart = Math.min(1440, ...fixed.filter(m => phaseGroups.has(m.group) && m.startTime)
             .map(m => timeToMinutes(m.startTime)));
-        const pause = Math.max(0, Number(config.breakDuration) || 0);
+        const pause = matchPause;
         const phaseLimit = phaseStart < 1440 ? phaseStart - pause : 1440;
         const counts = new Map(availableFields.map(f => [f.id, fixed.filter(m => m.fieldId === f.id).length]));
         const nextByField = new Map(availableFields.map(f => [f.id, startMinute]));
@@ -5678,28 +5668,26 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                     const startTime = minutesToTime(t), endTime = minutesToTime(t + duration);
                     if (config.hasLunchBreak && config.lunchStart && config.lunchEnd &&
                         timesOverlap(startTime, endTime, config.lunchStart, config.lunchEnd)) {
-                        t = Math.max(t + 5, timeToMinutes(config.lunchEnd));
+                        t = Math.max(t + 1, timeToMinutes(config.lunchEnd));
                         continue;
                     }
                     const reservation = busySlots.find(slot => timesOverlap(startTime, endTime, slot.startTime, slot.endTime));
                     if (reservation) {
-                        t = Math.max(t + 5, timeToMinutes(reservation.endTime));
+                        t = Math.max(t + 1, timeToMinutes(reservation.endTime));
                         continue;
                     }
                     const conflict = occupied.find(other => {
-                        var _a;
                         if (!other.startTime || !other.endTime)
                             return false;
                         const overlaps = timesOverlap(startTime, endTime, other.startTime, other.endTime);
-                        const rotation = Math.max(pause, matchRotation((_a = other._rotationMinutes) !== null && _a !== void 0 ? _a : config.breakDuration));
-                        const tooSoon = other.fieldId === field.id && t < timeToMinutes(other.endTime) + rotation &&
-                            timeToMinutes(other.startTime) < t + duration + rotation;
+                        const tooSoon = other.fieldId === field.id && rotationOverlap(t, t + duration, pause,
+                            timeToMinutes(other.startTime), timeToMinutes(other.endTime), pauseAfterMatch(other));
                         return tooSoon || (overlaps && (other.exclusive || other.fieldId === field.id ||
                             (!other._eventId && [match.team1Id, match.team2Id].some(id => id && (id === other.team1Id || id === other.team2Id)))));
                     });
                     if (conflict) {
-                        const rotation = conflict.fieldId === field.id ? Math.max(pause, matchRotation((_a = conflict._rotationMinutes) !== null && _a !== void 0 ? _a : config.breakDuration)) : 0;
-                        t = Math.max(t + 5, timeToMinutes(conflict.endTime) + rotation);
+                        const rotation = conflict.fieldId === field.id ? pauseAfterMatch(conflict) : 0;
+                        t = Math.max(t + 1, timeToMinutes(conflict.endTime) + rotation);
                         continue;
                     }
                     // Favoriser la répartition, sans décaler exagérément les horaires.
@@ -6367,7 +6355,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                     }, className: "w-full bg-[#160608] border border-red-900/60 rounded-lg p-1.5 text-xs text-white font-mono font-bold" }, [0, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20].map(p => (React.createElement("option", { key: p, value: p },
                                     p,
                                     " minutes")))),
-                                React.createElement("p", { className: "mt-1 text-[10px] text-slate-400" }, "Incluse entre deux matchs sur un terrain. Pour un planning d\u00E9j\u00E0 cr\u00E9\u00E9, relance la pr\u00E9visualisation de l'alternance puis confirme.")),
+                                React.createElement("p", { className: "mt-1 text-[10px] text-slate-400" }, "Appliqu\u00E9e apr\u00E8s les matchs de cette cat\u00E9gorie. Pour un planning d\u00E9j\u00E0 cr\u00E9\u00E9, relance la pr\u00E9visualisation de l'alternance puis confirme.")),
                             React.createElement("div", { className: "bg-[#0b0304] p-3 rounded-xl border border-red-950" },
                                 React.createElement("div", { className: "flex items-center justify-between mb-1" },
                                     React.createElement("span", { className: "text-[11px] font-bold text-slate-400" }, "Pause repas"),
