@@ -107,7 +107,8 @@ async function main() {
   fs.mkdirSync(path.join(root,'test-artifacts'),{recursive:true});
   const safari = process.argv.includes('--webkit');
   const browser = await (safari ? webkit.launch() : chromium.launch({headless:true,args:['--no-sandbox']}));
-  const viewports = safari ? [{...devices['iPhone 15'], name:'webkit-iphone'}] : [
+  const desktop = {viewport:{width:1440,height:900},deviceScaleFactor:1};
+  const viewports = safari ? [{...desktop, name:'webkit-desktop'}, {...devices['iPhone 15'], name:'webkit-iphone'}] : [
     {viewport:{width:1440,height:900},deviceScaleFactor:1,name:'desktop'},
     {viewport:{width:390,height:844},deviceScaleFactor:1,name:'iphone'}
   ];
@@ -137,7 +138,7 @@ async function main() {
           return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};
         }));
         assert.equal(centers.length,4);
-        const axis=name==='desktop'?'x':'y';
+        const axis=name.endsWith('desktop')?'x':'y';
         assert(centers.every((p,i)=>!i||p[axis]>centers[i-1][axis]),'Tours en ordre dans '+mode+' '+name);
         assert.equal(await page.locator('.csv-v74-podium').count(),0);
         assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),
@@ -145,8 +146,13 @@ async function main() {
         await page.screenshot({path:path.join(root,'test-artifacts','v74-'+mode+'-'+name+'.png'),fullPage:true});
       }
       await page.evaluate(()=>window.__render('pools','u11'));
-      for (const label of ['G','N','P','BP','BC'])
-        await page.getByRole('columnheader',{name:label,exact:true}).waitFor();
+      try {
+        for (const label of ['G','N','P','BP','BC'])
+          await page.locator('.csv-v74-pool-table thead th').getByText(label,{exact:true}).waitFor({timeout:5000});
+      } catch (error) {
+        console.error('Table des poules', errors, (await page.locator('#root').innerText()).slice(0,500));
+        throw error;
+      }
       assert(await page.locator('.csv-v74-pool-table').evaluate(table=>table.scrollWidth<=table.parentElement.clientWidth+2),
         'Toutes les statistiques doivent tenir dans la largeur de la poule');
       await page.evaluate(()=>window.__render('team','u11'));
