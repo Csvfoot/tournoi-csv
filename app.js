@@ -925,6 +925,109 @@ const planningImmutable = item => item.kind === 'réservation' || item.exclusive
     ['finished', 'playing', 'live', 'started', 'in_progress'].includes(item.status) ||
     item.id === 'ko-final' || item.id === 'ko-bronze' || item.stage === 'Grande Finale' ||
     /3(?:ème|e)\s*\/\s*4/.test(String(item.stage || ''));
+const csvBuildRestPlan = (entries, events, getRecord, shortLimit, longLimit) => {
+    const working = entries.filter(m => m.startTime && m.endTime)
+        .sort((a, b) => a.startTime.localeCompare(b.startTime) || planningKey(a).localeCompare(planningKey(b)));
+    const original = working.slice();
+    const config = new Map(events.map(e => [e.id, getRecord(e.id)?.config || {}]));
+    const knownTeams = new Map(events.map(e => [e.id, new Map((getRecord(e.id)?.teams || []).map(t => [t.id, t]))]));
+    const pause = id => rotationMinutes(config.get(id)?.breakDuration);
+    const teamKeys = match => [match.team1Id, match.team2Id].filter(id => knownTeams.get(match.eventId)?.has(id))
+        .map(id => JSON.stringify([match.eventId, id]));
+    const byTeam = new Map();
+    working.forEach((m, i) => {
+        if (m.kind !== 'match')
+            return;
+        for (const key of new Set(teamKeys(m))) {
+            if (!byTeam.has(key))
+                byTeam.set(key, []);
+            byTeam.get(key).push(i);
+        }
+    });
+    const candidates = working.flatMap((m, i) => {
+        if (m.kind !== 'match' || (m.status && m.status !== 'pending') || planningImmutable(m) ||
+            csvMatchHasProtectedData(m) || m.source1 || m.source2 || !m.fieldId)
+            return [];
+        const teams = knownTeams.get(m.eventId);
+        const inPool = teams?.get(m.team1Id)?.group === m.group && teams?.get(m.team2Id)?.group === m.group;
+        const league = config.get(m.eventId)?.format === 'round_robin' && m.group === 'Poule Unique';
+        const duration = planningMinutes(m.endTime) - planningMinutes(m.startTime);
+        return (inPool || league) && !String(m.id).startsWith('ko-') && m.group &&
+            duration > 0 && teamKeys(m).length === 2 ? [{ i, duration, keys: teamKeys(m) }] : [];
+    });
+    const measure = (keys, replacement = new Map()) => {
+        let short = 0, long = 0, penalty = 0;
+        for (const key of keys) {
+            const games = byTeam.get(key).map(i => replacement.get(i) || working[i])
+                .sort((a, b) => a.startTime.localeCompare(b.startTime));
+            for (let i = 1; i < games.length; i++) {
+                const gap = planningMinutes(games[i].startTime) - planningMinutes(games[i - 1].endTime);
+                if (gap < 0)
+                    continue;
+                if (gap < shortLimit) {
+                    short++;
+                    penalty += 2 * (shortLimit - gap);
+                }
+                if (gap > longLimit) {
+                    long++;
+                    penalty += gap - longLimit;
+                }
+            }
+        }
+        return { short, long, penalty };
+    };
+    const totals = list => {
+        const health = csvPlanningHealth(list, events, getRecord, shortLimit, longLimit);
+        return { short: health.short.length, long: health.long.length };
+    };
+    const slot = ({startTime, endTime, fieldId, fieldName}) => ({startTime, endTime, fieldId, fieldName});
+    const conflict = (a, b) => planningConflict(a, b) || planningRotationConflict(a, b, pause);
+    // Les créneaux de poule restent dans la même catégorie et gardent leur durée.
+    // À chaque tour, retenir le meilleur échange parmi ceux qui améliorent le bilan.
+    for (let pass = 0; pass < 16; pass++) {
+        const affected = new Set([...byTeam.keys()].filter(key => measure([key]).penalty));
+        let best = null;
+        for (let i = 0; i < candidates.length; i++) {
+            const left = candidates[i], a = working[left.i];
+            for (let j = i + 1; j < candidates.length; j++) {
+                const right = candidates[j], b = working[right.i];
+                if (a.eventId !== b.eventId || left.duration !== right.duration ||
+                    ![...left.keys, ...right.keys].some(key => affected.has(key)))
+                    continue;
+                const keys = new Set([...left.keys, ...right.keys]);
+                const swappedA = { ...a, ...slot(b) }, swappedB = { ...b, ...slot(a) };
+                const before = measure(keys);
+                const after = measure(keys, new Map([[left.i, swappedA], [right.i, swappedB]]));
+                const gain = before.penalty - after.penalty;
+                if (gain <= (best?.gain || 0) || after.short > before.short || after.long > before.long)
+                    continue;
+                const cfg = config.get(a.eventId);
+                if (cfg?.hasLunchBreak && [swappedA, swappedB].some(m =>
+                    planningOverlap(m, { startTime: cfg.lunchStart, endTime: cfg.lunchEnd })))
+                    continue;
+                if (conflict(swappedA, swappedB) || working.some((m, k) => k !== left.i && k !== right.i &&
+                    (conflict(swappedA, m) || conflict(swappedB, m))))
+                    continue;
+                best = { gain, left, right, swappedA, swappedB };
+            }
+        }
+        if (!best)
+            break;
+        working[best.left.i] = best.swappedA;
+        working[best.right.i] = best.swappedB;
+    }
+    const moves = working.flatMap((m, i) => {
+        const previous = original[i];
+        if (m.startTime === previous.startTime && m.fieldId === previous.fieldId)
+            return [];
+        const teams = knownTeams.get(m.eventId);
+        return [{ eventId: m.eventId, category: m.category, id: m.id,
+            label: [m.team1Id, m.team2Id].map(id => teams.get(id).name).join(' – '),
+            from: previous.startTime, fromField: previous.fieldName || previous.fieldId,
+            to: m.startTime, endTime: m.endTime, fieldId: m.fieldId, fieldName: m.fieldName || m.fieldId }];
+    });
+    return { moves, before: totals(original), after: totals(working), shortLimit, longLimit };
+};
 const planningSignature = items => JSON.stringify(items.map(x => [
     planningKey(x), x.startTime, x.endTime, x.fieldId, x.exclusive || false, x.status || ''
 ]));
@@ -2011,6 +2114,8 @@ function MultiTournamentShell() {
     const [delayMinutes, setDelayMinutes] = useState(15);
     const [delayField, setDelayField] = useState('all');
     const [delayPreview, setDelayPreview] = useState(null);
+    const [restPreview, setRestPreview] = useState(null);
+    const [restNotice, setRestNotice] = useState('');
     const [delayNotice, setDelayNotice] = useState('');
     const [delayWorking, setDelayWorking] = useState(false);
     const [historyNotice, setHistoryNotice] = useState('');
@@ -2863,15 +2968,31 @@ function MultiTournamentShell() {
         else
             setDelayPreview(plan);
     };
-    const applyDelay = async () => {
-        if (!hubIsEditor || !delayPreview || delayWorking)
+    const previewRest = () => {
+        setRestNotice('');
+        setRestPreview(null);
+        if (!hubIsEditor || hubStatus !== 'online' || !dbRef.current || sameDayCategories.some(e => !loadedDocs[e.id])) {
+            setRestNotice('Attends la synchronisation des catégories pour calculer les échanges.');
+            return;
+        }
+        const plan = csvBuildRestPlan(busyEvents, sameDayCategories, id => eventData(sameDayCategories.find(e => e.id === id)), shortLimit, longLimit);
+        if (plan.moves.length)
+            setRestPreview({ ...plan, date: dateFilter });
+        else
+            setRestNotice('Aucun échange de matchs de poule ne permet d’améliorer le bilan avec ces seuils.');
+    };
+    const applyPlanningChange = async (plan, rest = false) => {
+        const setNotice = rest ? setRestNotice : setDelayNotice;
+        const setPreview = rest ? setRestPreview : setDelayPreview;
+        if (!hubIsEditor || !plan || delayWorking ||
+            (rest && (plan.date !== dateFilter || plan.shortLimit !== shortLimit || plan.longLimit !== longLimit)))
             return;
         if (hubStatus !== 'online' || !dbRef.current) {
-            setDelayNotice('Connexion Firebase requise.');
+            setNotice('Connexion Firebase requise.');
             return;
         }
         setDelayWorking(true);
-        setDelayNotice('');
+        setNotice('');
         let newMatchesById = {}, auditsById = {};
         try {
             const db = dbRef.current;
@@ -2890,15 +3011,19 @@ function MultiTournamentShell() {
                         ...(((_a = data.config) === null || _a === void 0 ? void 0 : _a.reservedSlots) || []).filter(m => m.startTime && m.endTime).map(m => ({ ...m, eventId: x.event.id, category: x.event.category, kind: 'réservation' }))
                     ];
                 }).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)) || String(a.fieldName || '').localeCompare(String(b.fieldName || '')));
-                if (planningSignature(freshEntries) !== delayPreview.signature)
+                if (!rest && planningSignature(freshEntries) !== plan.signature)
                     throw new Error('Le calendrier a changé depuis la prévisualisation. Recalcule le retard.');
                 const freshConfigById = Object.fromEntries(all.map(x => [x.event.id, x.snap.exists ? x.snap.data().config || {} : {}]));
                 const freshPause = id => { var _a; return rotationMinutes((_a = freshConfigById[id]) === null || _a === void 0 ? void 0 : _a.breakDuration); };
-                const check = csvBuildDelayPlan(freshEntries, { from: delayPreview.from, minutes: delayPreview.minutes, field: delayPreview.field }, freshPause);
+                const freshRecords = new Map(all.map(x => [x.event.id, x.snap.exists ? x.snap.data() : {}]));
+                const check = rest
+                    ? csvBuildRestPlan(freshEntries, sameDayCategories, id => freshRecords.get(id), shortLimit, longLimit)
+                    : csvBuildDelayPlan(freshEntries, { from: plan.from, minutes: plan.minutes, field: plan.field }, freshPause);
                 if (check.error)
                     throw new Error(check.error);
-                if (JSON.stringify(check.moves.map(m => [m.eventId, m.id, m.to])) !==
-                    JSON.stringify(delayPreview.moves.map(m => [m.eventId, m.id, m.to])))
+                if (JSON.stringify(check.moves) !== JSON.stringify(plan.moves) ||
+                    (rest && (JSON.stringify(check.before) !== JSON.stringify(plan.before) ||
+                        JSON.stringify(check.after) !== JSON.stringify(plan.after))))
                     throw new Error('La proposition a changé, prévisualise à nouveau.');
                 const moved = Object.fromEntries(check.moves.map(x => [x.eventId + '|' + x.id, x]));
                 for (const x of all) {
@@ -2910,10 +3035,11 @@ function MultiTournamentShell() {
                         continue;
                     const updated = (data.matches || []).map(m => {
                         const next = moved[x.event.id + '|' + m.id];
-                        return next ? { ...m, startTime: next.to, endTime: next.endTime } : m;
+                        return next ? { ...m, startTime: next.to, endTime: next.endTime,
+                            ...(rest ? { fieldId: next.fieldId, fieldName: next.fieldName } : {}) } : m;
                     });
-                    const audit = csvAuditEntry('delay', x.event.id, {
-                        detail: `Retard de ${delayPreview.minutes} min à partir de ${delayFrom}`,
+                    const audit = csvAuditEntry(rest ? 'rest_balance' : 'delay', x.event.id, {
+                        detail: rest ? 'Rééquilibrage des repos' : `Retard de ${plan.minutes} min à partir de ${plan.from}`,
                         moves: mine.map(m => ({ id: m.id, from: m.from, to: m.to, fieldId: m.fieldId }))
                     });
                     tx.update(x.ref, { matches: updated, updatedAt: new Date().toISOString(),
@@ -2939,12 +3065,13 @@ function MultiTournamentShell() {
                 return next;
             });
             setResetEpoch(v => v + 1);
-            setDelayPreview(null);
-            setDelayNotice(`${delayPreview.moves.length} match(s) décalé(s) de ${delayPreview.minutes} minute(s), synchronisés dans Firebase.`);
+            setPreview(null);
+            setNotice(rest ? `Rééquilibrage appliqué · ${plan.moves.length} matchs déplacés.` :
+                `${plan.moves.length} match(s) décalé(s) de ${plan.minutes} minute(s), synchronisés dans Firebase.`);
         }
         catch (err) {
-            setDelayNotice('Aucun changement appliqué : ' + ((err === null || err === void 0 ? void 0 : err.message) || String(err)));
-            setDelayPreview(null);
+            setNotice('Aucun changement appliqué : ' + ((err === null || err === void 0 ? void 0 : err.message) || String(err)));
+            setPreview(null);
         }
         finally {
             setDelayWorking(false);
@@ -3688,19 +3815,19 @@ function MultiTournamentShell() {
                 React.createElement("h2", { className: "text-lg font-black text-amber-300" }, "\uD83D\uDCC5 Planning g\u00E9n\u00E9ral \u2014 tous les terrains"),
                 React.createElement("label", { className: "text-xs text-slate-300" },
                     "Jour ",
-                    React.createElement("input", { type: "date", value: dateFilter, onChange: e => setDateFilter(e.target.value), className: "ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white" }))),
+                    React.createElement("input", { type: "date", value: dateFilter, onChange: e => { setDateFilter(e.target.value); setRestPreview(null); setRestNotice(''); }, className: "ml-2 bg-[#260d11] rounded-lg border border-red-900 p-2 text-white" }))),
             React.createElement("section", { "aria-label": "Contr\u00F4le intelligent du planning", className: "rounded-xl border border-amber-800/60 bg-[#1b090e] p-3 sm:p-4 space-y-3" },
                 React.createElement("div", { className: "flex flex-wrap justify-between items-center gap-2" },
                     React.createElement("h3", { className: "text-sm font-black text-amber-300" }, "\uD83D\uDEA8 Contr\u00F4le du planning"),
                     React.createElement("div", { className: "flex flex-wrap gap-2" },
                         React.createElement("label", { className: "text-[11px] text-slate-300" },
                             "Repos court",
-                            React.createElement("select", { value: shortLimit, onChange: e => setShortLimit(Number(e.target.value)), className: "ml-1 rounded bg-black border border-red-900 p-1 text-white" }, [15, 20, 25, 30, 40].map(n => React.createElement("option", { value: n, key: n },
+                            React.createElement("select", { value: shortLimit, onChange: e => { setShortLimit(Number(e.target.value)); setRestPreview(null); setRestNotice(''); }, className: "ml-1 rounded bg-black border border-red-900 p-1 text-white" }, [15, 20, 25, 30, 40].map(n => React.createElement("option", { value: n, key: n },
                                 n,
                                 " min")))),
                         React.createElement("label", { className: "text-[11px] text-slate-300" },
                             "Longue attente",
-                            React.createElement("select", { value: longLimit, onChange: e => setLongLimit(Number(e.target.value)), className: "ml-1 rounded bg-black border border-red-900 p-1 text-white" }, [60, 75, 85, 100, 120].map(n => React.createElement("option", { value: n, key: n },
+                            React.createElement("select", { value: longLimit, onChange: e => { setLongLimit(Number(e.target.value)); setRestPreview(null); setRestNotice(''); }, className: "ml-1 rounded bg-black border border-red-900 p-1 text-white" }, [60, 75, 85, 100, 120].map(n => React.createElement("option", { value: n, key: n },
                                 n,
                                 " min")))))),
                 React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-2" }, [['⛔ Conflits', livePlanningHealth.conflicts.length], ['🔄 Rotations', livePlanningHealth.rotation.length], ['🟠 Repos courts', livePlanningHealth.short.length], ['⌛ Longues attentes', livePlanningHealth.long.length]].map(([label, count]) => React.createElement("div", { key: label, className: 'rounded-lg border px-3 py-2 ' + (count ? 'border-amber-700 bg-amber-950/40' : 'border-emerald-900/50 bg-emerald-950/20') },
@@ -3738,7 +3865,32 @@ function MultiTournamentShell() {
                             "\u2026et ",
                             issues.length - 70,
                             " autre(s) anomalie(s)")))),
-                React.createElement("p", { className: "text-[11px] text-slate-400" }, "Le contr\u00F4le ne d\u00E9place aucun match : utilise \u00AB Ajuster \u00BB, \u00AB Proposer des corrections \u00BB ou \u00AB G\u00E9rer un retard \u00BB apr\u00E8s v\u00E9rification.")),
+                React.createElement("button", { type: "button", onClick: previewRest,
+                    disabled: delayWorking || hubStatus !== 'online',
+                    className: "min-h-[42px] rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-black disabled:opacity-50" },
+                    "Proposer un rééquilibrage des repos"),
+                restNotice && React.createElement("p", { role: "status", className: "text-xs text-amber-200" }, restNotice),
+                restPreview?.date === dateFilter && React.createElement("div", {
+                    className: "rounded-xl border border-emerald-800/70 bg-emerald-950/20 p-3 space-y-2",
+                    "aria-label": "Aperçu du rééquilibrage des repos" },
+                    React.createElement("h4", { className: "text-sm font-bold text-emerald-300" }, "Bilan avant → après"),
+                    React.createElement("div", { className: "flex flex-wrap gap-x-5 gap-y-1 text-sm text-white" },
+                        React.createElement("p", null, `Repos courts (< ${restPreview.shortLimit} min) · ${restPreview.before.short} → ${restPreview.after.short}`),
+                        React.createElement("p", null, `Attentes longues (> ${restPreview.longLimit} min) · ${restPreview.before.long} → ${restPreview.after.long}`)),
+                    React.createElement("details", { open: true, className: "text-xs text-slate-200" },
+                        React.createElement("summary", { className: "cursor-pointer font-bold text-amber-200" },
+                            `${restPreview.moves.length} matchs à déplacer`),
+                        React.createElement("ul", { className: "mt-2 max-h-56 overflow-auto space-y-2" },
+                            restPreview.moves.map(m => React.createElement("li", { key: m.eventId + '|' + m.id },
+                                React.createElement("strong", null, m.category + ' · ' + m.label),
+                                React.createElement("div", null, `${m.from} · ${m.fromField} → ${m.to} · ${m.fieldName}`))))),
+                    React.createElement("div", { className: "flex flex-wrap gap-2" },
+                        React.createElement("button", { type: "button", disabled: delayWorking,
+                            onClick: () => applyPlanningChange(restPreview, true),
+                            className: "min-h-[42px] rounded-lg bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" },
+                            delayWorking ? 'Enregistrement…' : 'Appliquer les échanges'),
+                        React.createElement("button", { type: "button", disabled: delayWorking, onClick: () => setRestPreview(null),
+                            className: "min-h-[42px] rounded-lg border border-slate-600 px-4 py-2 text-xs text-white" }, "Annuler")))),
             React.createElement("section", { "aria-label": "Imprimer un planning", className: "rounded-xl border border-emerald-800/50 bg-[#0c1917] p-3 sm:p-4 space-y-3" },
                 React.createElement("h3", { className: "text-sm font-black text-emerald-200" }, "\uD83D\uDDA8\uFE0F Export PDF / impression"),
                 React.createElement("p", { className: "text-xs text-slate-300" }, "Pr\u00E9pare un programme lisible sur papier : le navigateur permet de l'imprimer ou de l'enregistrer en PDF."),
@@ -3800,7 +3952,7 @@ function MultiTournamentShell() {
                             delayPreview.moves.length - 18,
                             " autres matchs")),
                     React.createElement("div", { className: "flex flex-wrap gap-2" },
-                        React.createElement("button", { type: "button", disabled: delayWorking, onClick: applyDelay, className: "rounded-lg bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" }, delayWorking ? 'Enregistrement…' : 'Confirmer le décalage'),
+                        React.createElement("button", { type: "button", disabled: delayWorking, onClick: () => applyPlanningChange(delayPreview), className: "rounded-lg bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" }, delayWorking ? 'Enregistrement…' : 'Confirmer le décalage'),
                         React.createElement("button", { type: "button", onClick: () => setDelayPreview(null), className: "rounded-lg border border-slate-600 px-4 py-2 text-xs text-white" }, "Annuler")))),
             React.createElement("section", { className: "rounded-xl border border-red-900/70 bg-[#190b10] p-3 sm:p-4 space-y-3", "aria-label": "Historique des modifications" },
                 React.createElement("button", { type: "button", className: "w-full flex items-center justify-between text-left min-h-[43px]", onClick: () => setHistoryOpen(v => !v), "aria-expanded": historyOpen },
@@ -3831,7 +3983,7 @@ function MultiTournamentShell() {
                                         "\u2013", (_d = (_c = a.before) === null || _c === void 0 ? void 0 : _c.score2) !== null && _d !== void 0 ? _d : '-',
                                         " \u2192 ", (_f = (_e = a.after) === null || _e === void 0 ? void 0 : _e.score1) !== null && _f !== void 0 ? _f : '-',
                                         "\u2013", (_h = (_g = a.after) === null || _g === void 0 ? void 0 : _g.score2) !== null && _h !== void 0 ? _h : '-'),
-                                    a.kind === 'delay' && React.createElement("div", { className: "text-[11px] text-amber-200" },
+                                    (a.kind === 'delay' || a.kind === 'rest_balance') && React.createElement("div", { className: "text-[11px] text-amber-200" },
                                         ((_j = a.moves) === null || _j === void 0 ? void 0 : _j.length) || 0,
                                         " matchs d\u00E9plac\u00E9s")),
                                 a.kind === 'score' && !historyUndone.has(a.auditId) && React.createElement("button", { type: "button", disabled: historyWorking || hubStatus !== 'online', onClick: () => undoScoreAudit(a), className: "min-h-[39px] rounded-lg border border-amber-700 px-3 py-1 text-xs text-amber-200 disabled:opacity-40" }, "Annuler ce score"));
