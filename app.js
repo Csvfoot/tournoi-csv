@@ -927,7 +927,8 @@ const planningImmutable = item => item.kind === 'réservation' || item.exclusive
     /3(?:ème|e)\s*\/\s*4/.test(String(item.stage || ''));
 const csvBuildRestPlan = (entries, events, getRecord, shortLimit, longLimit) => {
     const working = entries.filter(m => m.startTime && m.endTime)
-        .sort((a, b) => a.startTime.localeCompare(b.startTime) || planningKey(a).localeCompare(planningKey(b)));
+        .map(m => ({ ...m, startMinute: planningMinutes(m.startTime), endMinute: planningMinutes(m.endTime) }))
+        .sort((a, b) => a.startMinute - b.startMinute || planningKey(a).localeCompare(planningKey(b)));
     const original = working.slice();
     const config = new Map(events.map(e => [e.id, getRecord(e.id)?.config || {}]));
     const knownTeams = new Map(events.map(e => [e.id, new Map((getRecord(e.id)?.teams || []).map(t => [t.id, t]))]));
@@ -951,27 +952,25 @@ const csvBuildRestPlan = (entries, events, getRecord, shortLimit, longLimit) => 
         const teams = knownTeams.get(m.eventId);
         const inPool = teams?.get(m.team1Id)?.group === m.group && teams?.get(m.team2Id)?.group === m.group;
         const league = config.get(m.eventId)?.format === 'round_robin' && m.group === 'Poule Unique';
-        const duration = planningMinutes(m.endTime) - planningMinutes(m.startTime);
+        const duration = m.endMinute - m.startMinute;
         return (inPool || league) && !String(m.id).startsWith('ko-') && m.group &&
             duration > 0 && teamKeys(m).length === 2 ? [{ i, duration, keys: teamKeys(m) }] : [];
     });
-    const measure = (keys, replacement = new Map()) => {
+    const measureTeam = (key, replacement) => {
+        const games = byTeam.get(key).map(i => replacement?.get(i) || working[i])
+            .sort((a, b) => a.startMinute - b.startMinute);
         let short = 0, long = 0, penalty = 0;
-        for (const key of keys) {
-            const games = byTeam.get(key).map(i => replacement.get(i) || working[i])
-                .sort((a, b) => a.startTime.localeCompare(b.startTime));
-            for (let i = 1; i < games.length; i++) {
-                const gap = planningMinutes(games[i].startTime) - planningMinutes(games[i - 1].endTime);
-                if (gap < 0)
-                    continue;
-                if (gap < shortLimit) {
-                    short++;
-                    penalty += 2 * (shortLimit - gap);
-                }
-                if (gap > longLimit) {
-                    long++;
-                    penalty += gap - longLimit;
-                }
+        for (let i = 1; i < games.length; i++) {
+            const gap = games[i].startMinute - games[i - 1].endMinute;
+            if (gap < 0)
+                continue;
+            if (gap < shortLimit) {
+                short++;
+                penalty += 2 * (shortLimit - gap);
+            }
+            if (gap > longLimit) {
+                long++;
+                penalty += gap - longLimit;
             }
         }
         return { short, long, penalty };
@@ -980,26 +979,32 @@ const csvBuildRestPlan = (entries, events, getRecord, shortLimit, longLimit) => 
         const health = csvPlanningHealth(list, events, getRecord, shortLimit, longLimit);
         return { short: health.short.length, long: health.long.length };
     };
-    const slot = ({startTime, endTime, fieldId, fieldName}) => ({startTime, endTime, fieldId, fieldName});
+    const slot = ({startTime, endTime, fieldId, fieldName, startMinute, endMinute}) =>
+        ({startTime, endTime, fieldId, fieldName, startMinute, endMinute});
     const conflict = (a, b) => planningConflict(a, b) || planningRotationConflict(a, b, pause);
     // Les créneaux de poule restent dans la même catégorie et gardent leur durée.
     // À chaque tour, retenir le meilleur échange parmi ceux qui améliorent le bilan.
     for (let pass = 0; pass < 16; pass++) {
-        const affected = new Set([...byTeam.keys()].filter(key => measure([key]).penalty));
+        const baseline = new Map([...byTeam.keys()].map(key => [key, measureTeam(key)]));
         let best = null;
         for (let i = 0; i < candidates.length; i++) {
             const left = candidates[i], a = working[left.i];
             for (let j = i + 1; j < candidates.length; j++) {
                 const right = candidates[j], b = working[right.i];
                 if (a.eventId !== b.eventId || left.duration !== right.duration ||
-                    ![...left.keys, ...right.keys].some(key => affected.has(key)))
+                    ![...left.keys, ...right.keys].some(key => baseline.get(key).penalty))
                     continue;
                 const keys = new Set([...left.keys, ...right.keys]);
                 const swappedA = { ...a, ...slot(b) }, swappedB = { ...b, ...slot(a) };
-                const before = measure(keys);
-                const after = measure(keys, new Map([[left.i, swappedA], [right.i, swappedB]]));
-                const gain = before.penalty - after.penalty;
-                if (gain <= (best?.gain || 0) || after.short > before.short || after.long > before.long)
+                const replacement = new Map([[left.i, swappedA], [right.i, swappedB]]);
+                let gain = 0, extraShort = 0, extraLong = 0;
+                for (const key of keys) {
+                    const before = baseline.get(key), after = measureTeam(key, replacement);
+                    gain += before.penalty - after.penalty;
+                    extraShort += after.short - before.short;
+                    extraLong += after.long - before.long;
+                }
+                if (gain <= (best?.gain || 0) || extraShort > 0 || extraLong > 0)
                     continue;
                 const cfg = config.get(a.eventId);
                 if (cfg?.hasLunchBreak && [swappedA, swappedB].some(m =>
