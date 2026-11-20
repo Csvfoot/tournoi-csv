@@ -113,7 +113,8 @@ function installPlanningFixture({docs: values, organizer}) {
         return ()=>clearTimeout(timer);
       }
     };
-    localStorage.setItem('csv.screen.v72.display.settings',JSON.stringify({views:['upcoming'],showPartners:false}));
+    if (!localStorage.getItem('csv.screen.v72.display.settings'))
+      localStorage.setItem('csv.screen.v72.display.settings',JSON.stringify({views:['upcoming'],showPartners:false}));
     const firestore = Object.assign(()=>db,{FieldValue:{arrayUnion:(...values)=>values}});
     window.firebase = {
       apps:[],auth:()=>auth,firestore,
@@ -194,6 +195,20 @@ async function verifyAlternation(browser, url) {
     await expectText(organizer,'09:12');
     await screenshot(organizer,'matchs');
     console.log('OK propagation planning général, Matchs, spectateur et écran TV sur les mêmes snapshots.');
+    const settings = await context.newPage();
+    await settings.goto(url+'/reglages-ecran.html');
+    await settings.locator('#day').selectOption(day);
+    await settings.locator('#categories').selectOption('U11');
+    await settings.frameLocator('#preview').locator('#screen-category').filter({hasText:/^U11$/}).waitFor();
+    await settings.getByRole('button',{name:'Enregistrer'}).click();
+    await settings.locator('#status').getByText(/Réglages enregistrés/).waitFor();
+    await tv.goto(url+'/ecran.html');
+    // Chaque navigation Playwright démarre avec les données initiales du simulateur.
+    await tv.evaluate(records=>window.__planningSnapshots(records),docs);
+    await tv.locator('#screen-category').filter({hasText:/^U11$/}).waitFor();
+    await expectText(tv,'09:12');
+    console.log('OK choix de la journée, aperçu de la catégorie et application des réglages sur l’écran TV.');
+
   } finally { await context.close(); }
 }
 
@@ -217,7 +232,7 @@ function writePlanningPreview({title, instructions, filename, docs}) {
     }
     const setup=script('parent.initializeFixture(window,'+JSON.stringify(mode)+','+
       installPlanningFixture.toString()+');');
-    const app=script(mode==='tv'?read('ecran.js'):bundle+'\n'+read('app.js'));
+    const app=script(mode==='tv'?read('ecran-config.js')+'\n'+read('ecran.js'):bundle+'\n'+read('app.js'));
     html=html.replace('</body>',setup+app+'</body>');
     return [page, Buffer.from(html).toString('base64')];
   }));

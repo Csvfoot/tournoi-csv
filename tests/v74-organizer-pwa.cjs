@@ -157,13 +157,13 @@ async function pwa() {
     await pending;
   }
   assert(activated);
-  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.25']);
-  const cache = await caches.open('tournoi-csv-shell-v7.4.25');
-  for (const file of ['app.js?v=7.4.25', 'styles.css?v=7.4.25', 'spectateur.html', 'organisateur.html'])
+  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.26']);
+  const cache = await caches.open('tournoi-csv-shell-v7.4.26');
+  for (const file of ['app.js?v=7.4.26', 'styles.css?v=7.4.26', 'spectateur.html', 'organisateur.html'])
     assert(await cache.match(new URL(file, scope)), 'Fichier absent du cache : ' + file);
   offline = true;
   let response;
-  handlers.fetch({ request: new Request(scope + 'app.js?v=7.4.25'), respondWith: promise => { response = promise; } });
+  handlers.fetch({ request: new Request(scope + 'app.js?v=7.4.26'), respondWith: promise => { response = promise; } });
   assert.match(await (await response).text(), /csvUpdateTeamLogo/);
   handlers.fetch({ request: new Request('https://firestore.googleapis.com/example'),
     respondWith: () => assert.fail('La requête Firestore est interceptée') });
