@@ -1298,11 +1298,20 @@ const buildAlternatingWaves = (pair, allEvents, fields) => {
             }
     }
     // Les matchs de classement avant les petites et grandes finales.
-    const rankings = pair.map(p => ({ p, queue: (p.data.matches || []).filter(m => isPending(m) && (m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante')) }));
+    const rankings = pair.map(p => ({ p, queue: (p.data.matches || [])
+            .filter(m => isPending(m) && (m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante'))
+            .sort((a, b) => csvPlacementStart(b) - csvPlacementStart(a)) }));
     while (rankings.some(x => x.queue.length))
         for (const item of rankings) {
-            if (item.queue.length && !placeBatch(item.p, item.queue))
+            if (!item.queue.length)
+                continue;
+            // Les places chiffrées occupent des créneaux successifs.
+            const next = item.queue[0];
+            const batch = csvPlacementStart(next) ? [next] : item.queue;
+            if (!placeBatch(item.p, batch))
                 return { error: 'Impossible de programmer les matchs de classement.' };
+            if (batch !== item.queue)
+                item.queue.shift();
         }
     // La petite puis la grande finale de chaque catégorie sont seules,
     // sur un créneau exclusif, y compris vis-à-vis des autres catégories.
@@ -1467,11 +1476,20 @@ const buildAlternatingSchedule = (pair, allEvents, fields) => {
         }
         frontier = afterScheduledMatches();
     }
-    const ranks = pair.map(p => ({ p, queue: (p.data.matches || []).filter(m => m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante') }));
+    const ranks = pair.map(p => ({ p, nextPlacement: frontier, queue: (p.data.matches || [])
+            .filter(m => m.group === 'Tournoi Classement' || m.group === 'Tournoi Consolante')
+            .sort((a, b) => csvPlacementStart(b) - csvPlacementStart(a)) }));
     while (ranks.some(x => x.queue.length)) {
         for (const x of ranks) {
-            if (x.queue.length && !place(x.queue.shift(), x.p, frontier))
+            if (!x.queue.length)
+                continue;
+            const match = x.queue.shift();
+            const numbered = csvPlacementStart(match) > 0;
+            const placed = place(match, x.p, numbered ? x.nextPlacement : frontier);
+            if (!placed)
                 return { error: `Impossible de placer les matchs de classement de ${x.p.event.category}.` };
+            if (numbered)
+                x.nextPlacement = planningMinutes(placed.endTime) + pauseOf(x.p);
         }
     }
     frontier = afterScheduledMatches();
@@ -1870,14 +1888,37 @@ function csvPlacementStart(match) {
         ? Number(legacy[1]) : 0;
 }
 
-function csvCalendarLabel(match) {
+// Les journées affichées suivent le planning de chaque poule après déplacement.
+function csvCalendarRounds(matches) {
+    const groups = new Map();
+    const rounds = new Map();
+    const scheduled = matches.filter(m => m.group && /^Journée\s+\d+$/i.test(m.stage || '') &&
+        m.team1Id && m.team2Id && planningMinutes(m.startTime) >= 0)
+        .sort((a, b) => planningMinutes(a.startTime) - planningMinutes(b.startTime) ||
+            String(a.fieldId || '').localeCompare(String(b.fieldId || '')) || String(a.id).localeCompare(String(b.id)));
+    for (const match of scheduled) {
+        if (!groups.has(match.group))
+            groups.set(match.group, { number: 1, teams: new Set() });
+        const round = groups.get(match.group);
+        if (round.teams.has(match.team1Id) || round.teams.has(match.team2Id)) {
+            round.number++;
+            round.teams.clear();
+        }
+        round.teams.add(match.team1Id);
+        round.teams.add(match.team2Id);
+        rounds.set(match.id, round.number);
+    }
+    return rounds;
+}
+
+function csvCalendarLabel(match, round) {
     if (match.id === 'ko-final' || /^grande finale$/i.test(match.stage || '')) return 'Grande finale';
     if (match.id === 'ko-bronze') return 'Match pour la 3e place';
     const place = csvPlacementStart(match);
     if (place) return `Classement · ${place}e–${place + 1}e places`;
-    const stage = match.stage || 'Match';
+    const stage = round ? `Journée ${round}` : match.stage || 'Match';
     if (match.group === 'Tournoi Consolante') return /consolante/i.test(stage) ? stage : `Consolante · ${stage}`;
-    return /^Poule\s/i.test(match.group || '') ? `${match.group} · ${stage}` : stage;
+    return round || /^Poule\s/i.test(match.group || '') ? `${match.group} · ${stage}` : stage;
 }
 
 function CsvSpectatorWelcome({ day, dates, events, activeId, isLoading, offline,
@@ -4327,9 +4368,9 @@ function CsvVisualHome({ tournament, matches, teams, fields, config, onNavigate,
                         React.createElement('span',null,sp.name)))) :
                     React.createElement('p',{className:'csv-v74-muted'},'Les partenaires du tournoi seront présentés ici.'))));
 }
-// V7.4 — Phases finales en colonnes par tour, avec progression et podium.
+// Phases finales par tour, dans l’ordre du tableau.
 function CsvVisualFinals({ matches, teams, demo = false, onEditMatch }) {
-    const rounds = matches.filter(m=>m.group==='Phase Finale Principale'&&m.id!=='ko-bronze'&&!/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
+    const rounds = matches.filter(m=>['Phase Finale Principale','Phase Finale'].includes(m.group)&&m.id!=='ko-bronze'&&!/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
     const roundName = m => /huit/i.test(m.stage||'')?'Huitièmes':
         /quart/i.test(m.stage||'')?'Quarts':/demi/i.test(m.stage||'')?'Demi-finales':
         /final/i.test(m.stage||'')?'Grande finale':'Autres matchs';
@@ -4352,34 +4393,26 @@ function CsvVisualFinals({ matches, teams, demo = false, onEditMatch }) {
             onClick: () => onEditMatch(m)
         }, 'Feuille de match'));
     const bronze=matches.find(m=>m.id==='ko-bronze'||/3(?:ème|e)\s*\/\s*4/i.test(m.stage||''));
-    const final=matches.find(m=>m.stage==='Grande Finale'||m.id==='ko-final');
     const secondaryPhases = [
         { group: 'Tournoi Consolante', label: 'Consolante' },
         { group: 'Tournoi Classement', label: 'Matchs de classement' }
     ];
-    const finalResult=resultOf(final),bronzeResult=resultOf(bronze);
-    const medal = (name,id,placeholder)=>React.createElement('div',{className:'csv-v74-podium-place',key:name},
-        React.createElement('strong',null,name),
-        React.createElement('span',null,club(id,placeholder).name));
     return React.createElement('section',{className:'csv-v74-final-visual'},
         React.createElement('h2',null,'🏆 La route vers la finale'),
         React.createElement('p',{className:'csv-v74-muted'},demo ? 'Exemple fictif · 8 équipes et 3 tours' : 'Les qualifications et résultats sont issus du calendrier officiel.'),
         (rounds.length || bronze) ? React.createElement('div',{className:'csv-v74-rounds',role:'region','aria-label':'Tableau des tours'},
             [...names.filter(name => name !== 'Grande finale'), ...(bronze ? ['3e place'] : []),
                 ...names.filter(name => name === 'Grande finale')].map(name =>
-                name === '3e place' ? React.createElement('div',{className:'csv-v74-bronze',key:name},
+                name === '3e place' ? React.createElement('div',{className:'csv-v74-round csv-v74-bronze',key:name},
                     React.createElement('h3',null,'🥉 Match pour la 3e place'),tile(bronze)) :
                     React.createElement('div',{className:'csv-v74-round',key:name},
                         React.createElement('h3',null,name),
                         rounds.filter(m=>roundName(m)===name).map(tile)))) :
             React.createElement('p',{className:'csv-v74-muted'},'Les phases finales seront affichées après programmation.'),
-        React.createElement('div',{className:'csv-v74-podium'},
-            medal('🥇 Champion',finalResult&&finalResult.winner,'En attente de la finale'),
-            medal('🥈 Finaliste',finalResult&&finalResult.loser,'En attente de la finale'),
-            medal('🥉 Troisième',bronzeResult&&bronzeResult.winner,'En attente de la petite finale')),
         secondaryPhases.map(({ group, label }) => {
             const fixtures = matches.filter(match => match.group === group)
-                .sort((a, b) => (a.startTime || '99:99').localeCompare(b.startTime || '99:99'));
+                .sort((a, b) => (group === 'Tournoi Classement' ? csvPlacementStart(b) - csvPlacementStart(a) : 0) ||
+                    (a.startTime || '99:99').localeCompare(b.startTime || '99:99'));
             return fixtures.length ? React.createElement('section', {
                 key: group, className: 'csv-v74-ranking-matches', 'aria-label': label
             },
@@ -4633,6 +4666,8 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
     const [csvFieldFilter, csvSetFieldFilter] = useState('all');
     const [csvGroupFilter, csvSetGroupFilter] = useState('all');
     const [csvSearch, csvSetSearch] = useState('');
+    const calendarRounds = useMemo(() => csvCalendarRounds(matches), [matches]);
+    const calendarLabel = match => csvCalendarLabel(match, calendarRounds.get(match.id));
     const visibleMatches = matches.filter(m => {
         if (userRole === 'viewer' && isCompactMatchScreen &&
             !(mobileMatchFilter === 'finished' ? m.status === 'finished'
@@ -4641,7 +4676,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         if (csvFieldFilter !== 'all' && m.fieldId !== csvFieldFilter) return false;
         if (csvGroupFilter !== 'all' && m.group !== csvGroupFilter) return false;
         const needle = csvSearch.trim().toLocaleLowerCase('fr');
-        if (needle && ![m.stage, m.group, m.fieldName,
+        if (needle && ![calendarLabel(m), m.group, m.fieldName,
             teams.find(t => t.id === m.team1Id)?.name,
             teams.find(t => t.id === m.team2Id)?.name].some(v => String(v || '').toLocaleLowerCase('fr').includes(needle))) return false;
         return true;
@@ -4651,8 +4686,17 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
         const knockout = m => /phase finale/i.test(String(m.group || '')) ||
             /(?:quart|demi|finale|huitième|classement)/i.test(String(m.stage || '')) ||
             String(m.id || '').startsWith('ko-');
-        const phaseDiff = Number(knockout(a)) - Number(knockout(b));
-        if (userRole === 'editor' && phaseDiff) return phaseDiff;
+        if (userRole === 'editor') {
+            const section = m => m.id === 'ko-final' || /^grande finale$/i.test(m.stage || '') ? 4 :
+                m.id === 'ko-bronze' || /3(?:ème|e)\s*(?:\/\s*4|place)/i.test(m.stage || '') ? 3 :
+                    csvPlacementStart(m) >= 5 ? 2 : knockout(m) ? 1 : 0;
+            const phaseDiff = section(a) - section(b);
+            if (phaseDiff) return phaseDiff;
+            if (section(a) === 2) {
+                const placementDiff = csvPlacementStart(b) - csvPlacementStart(a);
+                if (placementDiff) return placementDiff;
+            }
+        }
         const minutes = m => /^\d{1,2}:\d{2}$/.test(String(m.startTime || ''))
             ? timeToMinutes(m.startTime) : Number.POSITIVE_INFINITY;
         const fieldOrder = m => {
@@ -6800,7 +6844,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                             " - ",
                                             m.endTime || '--:--'),
                                         React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] csv-v74-calendar-label font-bold bg-red-950 text-amber-300" },
-                                            csvCalendarLabel(m))),
+                                            calendarLabel(m))),
                                     React.createElement("div", { className: "flex items-center justify-between gap-1 py-1" },
                                         React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
                                             React.createElement(CsvTeamLogo, { team: t1, size: 26 }),
@@ -6841,7 +6885,7 @@ function TournamentApp({ tournament, tournamentRecord, sharedFields, onFieldsCha
                                     React.createElement("button", { onClick: (e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'up'); }, className: "text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs", title: "Monter dans l'ordre chronologique" }, "\u25B2"),
                                     React.createElement("button", { onClick: (e) => { e.stopPropagation(); handleMoveMatchOrder(m.id, 'down'); }, className: "text-slate-400 hover:text-amber-300 px-1 py-0.5 rounded bg-black/40 font-bold text-xs", title: "Descendre dans l'ordre chronologique" }, "\u25BC"))),
                                 React.createElement("span", { className: "px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] csv-v74-calendar-label font-bold bg-red-950 text-amber-300" },
-                                    csvCalendarLabel(m)),
+                                    calendarLabel(m)),
                                 React.createElement("span", { className: m.status === 'live' ? 'text-emerald-400 font-black animate-pulse' : m.status === 'pending' ? 'text-amber-100 font-bold' : 'text-amber-300 font-bold' }, m.status === 'live' ? '● Live' : m.status === 'finished' ? 'Terminé' : 'À venir'))),
                         React.createElement("div", { className: "csv-v74-calendar-teams flex items-center justify-between gap-1 py-1" },
                             React.createElement("div", { className: "flex items-center gap-1.5 flex-1 min-w-0" },
@@ -7125,33 +7169,33 @@ function StandingsTable({ standings }) {
         return React.createElement("div", { className: "text-center py-6 text-xs text-slate-500 italic" }, "Aucune donn\u00E9e disponible.");
     }
     return (React.createElement("div", { className: "overflow-x-auto" },
-        React.createElement("table", { className: "w-full text-left text-xs" },
+        React.createElement("table", { className: "csv-v74-pool-table w-full text-left text-xs", role: "table" },
             React.createElement("thead", null,
                 React.createElement("tr", { className: "border-b border-red-950 text-slate-400 uppercase tracking-wider font-semibold" },
-                    React.createElement("th", { className: "py-2 px-1 text-center w-6" }, "#"),
-                    React.createElement("th", { className: "py-2 px-2" }, "Club"),
-                    React.createElement("th", { className: "py-2 px-1 text-center font-bold text-amber-300" }, "PTS"),
-                    React.createElement("th", { className: "py-2 px-1 text-center" }, "J"),
-                    React.createElement("th", { className: "hidden sm:table-cell py-2 px-1 text-center" }, "G"),
-                    React.createElement("th", { className: "hidden sm:table-cell py-2 px-1 text-center" }, "N"),
-                    React.createElement("th", { className: "hidden sm:table-cell py-2 px-1 text-center" }, "P"),
-                    React.createElement("th", { className: "hidden sm:table-cell py-2 px-1 text-center" }, "BP"),
-                    React.createElement("th", { className: "hidden sm:table-cell py-2 px-1 text-center" }, "BC"),
-                    React.createElement("th", { className: "py-2 px-1 text-center" }, "+/-"))),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center w-6" }, "#"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-2" }, "Club"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center font-bold text-amber-300" }, "PTS"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "J"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "G"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "N"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "P"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "BP"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "BC"),
+                    React.createElement("th", { scope: "col", className: "py-2 px-1 text-center" }, "+/-"))),
             React.createElement("tbody", { className: "divide-y divide-red-950/60 font-medium" }, standings.map((r, idx) => (React.createElement("tr", { key: r.team.id, className: idx < 2 ? 'bg-amber-500/5' : '' },
                 React.createElement("td", { className: "py-2.5 px-1 text-center font-bold" },
                     React.createElement("span", { className: `inline-flex items-center justify-center w-5 h-5 rounded ${idx === 0 ? 'bg-amber-400 text-slate-950 font-black' : idx === 1 ? 'bg-red-900 text-amber-200' : 'text-slate-500'}` }, idx + 1)),
                 React.createElement("td", { className: "py-2.5 px-2" },
                     React.createElement("div", { className: "flex items-center gap-2" },
                         React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: r.team.color } }),
-                        React.createElement("span", { className: "font-bold text-white truncate" }, r.team.name))),
+                        React.createElement("span", { className: "csv-v74-pool-club font-bold text-white" }, r.team.name))),
                 React.createElement("td", { className: "py-2.5 px-1 text-center font-black text-amber-300 bg-amber-500/10" }, r.points),
                 React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-300" }, r.played),
-                React.createElement("td", { className: "hidden sm:table-cell py-2.5 px-1 text-center text-slate-300" }, r.won),
-                React.createElement("td", { className: "hidden sm:table-cell py-2.5 px-1 text-center text-slate-300" }, r.drawn),
-                React.createElement("td", { className: "hidden sm:table-cell py-2.5 px-1 text-center text-slate-300" }, r.lost),
-                React.createElement("td", { className: "hidden sm:table-cell py-2.5 px-1 text-center text-slate-400" }, r.gf),
-                React.createElement("td", { className: "hidden sm:table-cell py-2.5 px-1 text-center text-slate-400" }, r.ga),
+                React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-300" }, r.won),
+                React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-300" }, r.drawn),
+                React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-300" }, r.lost),
+                React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-400" }, r.gf),
+                React.createElement("td", { className: "py-2.5 px-1 text-center text-slate-400" }, r.ga),
                 React.createElement("td", { className: `py-2.5 px-1 text-center font-bold ${r.gd > 0 ? 'text-amber-400' : r.gd < 0 ? 'text-rose-400' : 'text-slate-400'}` }, r.gd > 0 ? `+${r.gd}` : r.gd))))))));
 }
 ReactDOM.render(React.createElement(MultiTournamentShell, null), document.getElementById('root'));

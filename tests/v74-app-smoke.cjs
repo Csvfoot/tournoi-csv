@@ -55,6 +55,25 @@ function restFixture() {
   return docs;
 }
 
+function matchesPreviewFixture() {
+  const docs = restFixture();
+  const record = docs['tournaments/cslv_main_data'];
+  record.matches[0].stage = 'Journée 4';
+  record.matches[1].stage = 'Journée 2';
+  const base = record.matches[0];
+  const phases = [
+    ['ko-qf','Quart de finale 1','13:00','13:10','Phase Finale Principale'],
+    ['ko-semi','Demi-finale 1','14:00','14:10','Phase Finale Principale'],
+    ['rank-7-8','Classement 7ème / 8ème place','14:30','14:40','Tournoi Classement'],
+    ['rank-9-10','Classement 9ème / 10ème place','14:45','14:55','Tournoi Classement'],
+    ['ko-bronze','Match pour la 3e place','15:15','15:25','Phase Finale Principale'],
+    ['ko-final','Grande Finale','16:00','16:10','Phase Finale Principale']
+  ];
+  record.matches.push(...phases.map(([id,stage,startTime,endTime,group])=>
+    ({...base,id,stage,startTime,endTime,group})));
+  return docs;
+}
+
 function installPlanningFixture({docs: values, organizer}) {
     const subscribers = new Set();
     let docs = values;
@@ -291,6 +310,23 @@ async function verifyRestPreview(browser) {
   } finally { await page.close(); }
 }
 
+async function verifyMatchesPreview(browser) {
+  const page = await browser.newPage({viewport:{width:1440,height:900}});
+  try {
+    const {pathToFileURL} = require('node:url');
+    await page.goto(pathToFileURL(path.join(root,'test-artifacts','apercu-matchs-poules-finales.html')).href);
+    const organizer = page.frameLocator('#organisateur');
+    await organizer.getByRole('button',{name:/^📅 Matchs$/}).filter({visible:true}).click({timeout:15000});
+    const badges = organizer.locator('.csv-v74-calendar-label');
+    await badges.first().waitFor();
+    const labels = await badges.allTextContents();
+    assert.equal(labels[0],'Poule A · Journée 1');
+    assert(labels.indexOf('Classement · 9e–10e places') < labels.indexOf('Classement · 7e–8e places'));
+    assert(labels.includes('Classement · 9e–10e places'));
+    console.log('OK Matchs organisateur : journées et ordre des places.');
+  } finally { await page.close(); }
+}
+
 async function main(){
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const port=server.address().port;
@@ -355,6 +391,9 @@ async function main(){
       instructions:'Dans Organisateur, ouvre Planning général, puis prévisualise et confirme l’alternance.' });
     await verifyAlternationPreview(browser);
     await verifyRestPreview(browser);
+    writePlanningPreview({ title:'Matchs, poules et phases finales', filename:'apercu-matchs-poules-finales.html', docs:matchesPreviewFixture(),
+      instructions:'Dans Organisateur ou Spectateur, explore les matchs, les poules et les phases finales avec ces données fictives.' });
+    await verifyMatchesPreview(browser);
   }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;server.close();});

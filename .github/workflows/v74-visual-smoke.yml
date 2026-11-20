@@ -54,6 +54,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apercu-matchs-poules-finales
+          path: test-artifacts/apercu-matchs-poules-finales.html
+          if-no-files-found: error
+          retention-days: 14
+
   webkit:
     runs-on: ubuntu-24.04
     container: mcr.microsoft.com/playwright:v1.55.0-noble
