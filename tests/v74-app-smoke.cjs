@@ -126,8 +126,14 @@ async function verifyAlternation(browser, url) {
     await spectator.goto(url+'/spectateur.html?day='+day+'&tournament=u11');
     await spectator.getByRole('button',{name:'Entrer dans le tournoi'}).click({timeout:1200}).catch(()=>{});
     const tv = await context.newPage();
+    tv.on('console',message=>{ if (message.type()==='error') console.error('TV:',message.text()); });
+    tv.on('pageerror',error=>console.error('TV:',error.stack));
     await tv.goto(url+'/ecran.html?day='+day+'&view=upcoming');
-    await expectText(tv,'10:00');
+    try { await expectText(tv,'10:00'); }
+    catch (error) {
+      console.error('TV:',await tv.locator('body').innerText(),await tv.evaluate(()=>window.CSV_SCREEN_TEST?.getUpcomingCounts()));
+      throw error;
+    }
     await expectText(spectator,'10:00');
     organizer.on('dialog',dialog=>dialog.accept());
     await organizer.getByRole('button',{name:'Prévisualiser',exact:true}).click();
@@ -223,6 +229,7 @@ function writeAlternationPreview() {
 async function verifyAlternationPreview(browser) {
   const page = await browser.newPage({viewport:{width:1440,height:900}});
   page.on('dialog',dialog=>dialog.accept());
+  page.on('pageerror',error=>console.error('Aperçu:',error.stack));
   try {
     const {pathToFileURL}=require('node:url');
     await page.goto(pathToFileURL(path.join(root,'test-artifacts','apercu-alternance.html')).href);
