@@ -3373,7 +3373,6 @@ button, input:where([type='button'], [type='reset'], [type='submit']), ::file-se
   }
   .csv-v74-organizer .csv-v74-rounds::after { content: none; }
   .csv-v74-organizer .csv-v74-bronze {
-    order: 0;
     flex: 1 0 190px;
     width: auto;
     max-width: 360px;
