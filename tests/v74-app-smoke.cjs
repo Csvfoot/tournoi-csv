@@ -42,6 +42,19 @@ function alternationFixture() {
   };
 }
 
+function restFixture() {
+  const docs = alternationFixture();
+  const record = docs['tournaments/cslv_main_data'];
+  const base = record.matches[0];
+  record.teams = 'abcdef'.split('').map(id=>({id,name:'Équipe '+id.toUpperCase(),group:'Poule A',color:'#d00'}));
+  record.matches = [
+    ['a','b','09:00','09:10'], ['a','c','09:20','09:30'],
+    ['e','f','10:10','10:20'], ['a','d','11:30','11:40']
+  ].map(([team1Id,team2Id,startTime,endTime],i)=>({...base,id:'poule-'+i,team1Id,team2Id,startTime,endTime}));
+  docs['tournaments/cslv_mt_u11'].matches = [];
+  return docs;
+}
+
 function installPlanningFixture({docs: values, organizer}) {
     const subscribers = new Set();
     let docs = values;
@@ -82,8 +95,9 @@ function installPlanningFixture({docs: values, organizer}) {
       }
     };
     localStorage.setItem('csv.screen.v72.display.settings',JSON.stringify({views:['upcoming'],showPartners:false}));
+    const firestore = Object.assign(()=>db,{FieldValue:{arrayUnion:(...values)=>values}});
     window.firebase = {
-      apps:[],auth:()=>auth,firestore:()=>db,
+      apps:[],auth:()=>auth,firestore,
       app:()=>window.firebase.apps[0],
       initializeApp:(options,name)=>{const app={options,name,firestore:()=>db};window.firebase.apps.push(app);return app;}
     };
@@ -165,7 +179,7 @@ async function verifyAlternation(browser, url) {
 }
 
 
-function writeAlternationPreview() {
+function writePlanningPreview({title, instructions, filename, docs}) {
   const read = name => fs.readFileSync(path.join(root,name),'utf8');
   const lib = name => fs.readFileSync(path.join(path.dirname(require.resolve(name)),
     'umd',name+'.production.min.js'),'utf8');
@@ -218,19 +232,19 @@ function writeAlternationPreview() {
     }
   }).toString();
   const preview='<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
-    '<title>Tournoi CSV · Test des pauses</title><style>'+
+    '<title>Tournoi CSV · '+title+'</title><style>'+
     'body{margin:0;background:#39101a;color:#fff4df;font:16px system-ui;display:flex;flex-direction:column;height:100dvh}'+
     'header{padding:12px 16px}p{margin:0 0 8px}button{font:inherit;background:#581728;color:#fff4df;border:1px solid #c68734;border-radius:8px;padding:.45rem .75rem;margin-right:6px}'+
     'button[aria-pressed=true]{background:#ffcc48;color:#39101a}iframe{width:100%;flex:1;min-height:0;border:0}</style>'+
-    '<header><p><strong>Test des pauses · Tournoi CSV</strong> · Données fictives</p>'+
-    '<p>Dans Organisateur, ouvre Planning général, puis prévisualise et confirme l’alternance. Vérifie ensuite Matchs en U11, le calendrier spectateur et les prochains matchs à l’écran TV.</p>'+
+    '<header><p><strong>'+title+' · Tournoi CSV</strong> · Données fictives</p>'+
+    '<p>'+instructions+'</p>'+
     '<nav aria-label="Vues de test"><button data-screen="organisateur" aria-pressed="true">Organisateur</button>'+
     '<button data-screen="spectateur" aria-pressed="false">Spectateur</button>'+
     '<button data-screen="ecran" aria-pressed="false">Écran TV</button></nav></header>'+
     '<iframe id="organisateur" title="Organisateur"></iframe><iframe id="spectateur" title="Spectateur" hidden></iframe>'+
     '<iframe id="ecran" title="Écran TV" hidden></iframe>'+
-    script('('+bootstrap+')('+JSON.stringify(frames)+','+JSON.stringify(alternationFixture())+');');
-  fs.writeFileSync(path.join(root,'test-artifacts','apercu-alternance.html'),preview);
+    script('('+bootstrap+')('+JSON.stringify(frames)+','+JSON.stringify(docs)+');');
+  fs.writeFileSync(path.join(root,'test-artifacts',filename),preview);
 }
 
 async function verifyAlternationPreview(browser) {
@@ -248,6 +262,32 @@ async function verifyAlternationPreview(browser) {
     await page.getByRole('button',{name:'Écran TV',exact:true}).click();
     await page.frameLocator('#ecran').getByText('09:12',{exact:true}).waitFor({timeout:15000});
     console.log('OK aperçu HTML autonome ouvert depuis le disque, propagation jusqu’à l’écran TV.');
+  } finally { await page.close(); }
+}
+
+async function verifyRestPreview(browser) {
+  writePlanningPreview({ title:'Rééquilibrage des repos', filename:'apercu-reequilibrage.html', docs:restFixture(),
+    instructions:'Ouvre Planning général, puis clique sur « Proposer un rééquilibrage des repos ».' });
+  const page = await browser.newPage({viewport:{width:1440,height:900}});
+  try {
+    const {pathToFileURL} = require('node:url');
+    await page.goto(pathToFileURL(path.join(root,'test-artifacts','apercu-reequilibrage.html')).href);
+    const organizer = page.frameLocator('#organisateur');
+    await organizer.getByRole('button',{name:/Planning général/}).click({timeout:15000});
+    const plan = organizer.getByRole('button',{name:'Proposer un rééquilibrage des repos'});
+    const apply = organizer.getByRole('button',{name:'Appliquer les échanges'});
+    await plan.click();
+    await organizer.getByText(/Repos courts .*1 → 0/).waitFor({timeout:8000});
+    await organizer.getByText(/Attentes longues .*1 → 0/).waitFor({timeout:8000});
+    await organizer.getByRole('combobox',{name:'Longue attente'}).selectOption('75');
+    await apply.waitFor({state:'hidden',timeout:8000});
+    await plan.click();
+    await page.screenshot({path:path.join(root,'test-artifacts','reequilibrage-repos.png')});
+    await apply.click();
+    await organizer.getByText(/Rééquilibrage appliqué/).waitFor({timeout:8000});
+    await plan.click();
+    await organizer.getByText(/Aucun échange de matchs de poule/).waitFor({timeout:8000});
+    console.log('OK rééquilibrage : seuils pris en compte, aperçu, application et nouveau bilan.');
   } finally { await page.close(); }
 }
 
@@ -311,8 +351,10 @@ async function main(){
     console.log('OK lien public role=editor : reste spectateur');
     await forged.close();
     await verifyAlternation(browser, 'http://127.0.0.1:'+port);
-    writeAlternationPreview();
+    writePlanningPreview({ title:'Test des pauses', filename:'apercu-alternance.html', docs:alternationFixture(),
+      instructions:'Dans Organisateur, ouvre Planning général, puis prévisualise et confirme l’alternance.' });
     await verifyAlternationPreview(browser);
+    await verifyRestPreview(browser);
   }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;server.close();});
