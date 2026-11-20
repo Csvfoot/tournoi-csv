@@ -46,7 +46,7 @@ async function organizer() {
     showToast: message => notices.push(message), setTeams: () => {}
   };
   const logoHelper = extract('function csvSafeLogoUrl(', 'function CsvTeamLogo(');
-  const logoHandler = extract('const csvUpdateTeamLogo =', 'const csvUploadTeamLogo =');
+  const logoHandler = extract('const csvUpdateTeamLogo =', 'const handleRemoveTeam =');
   const logo = 'data:image/png;base64,AAAA';
   runHandler(state, logoHelper, logoHandler, `csvUpdateTeamLogo("a", ${JSON.stringify(logo)});`);
   await new Promise(setImmediate);
@@ -54,9 +54,9 @@ async function organizer() {
   assert.deepEqual(writes[0].value.teams, [{ ...teams[0], logoUrl: logo }, teams[1]]);
   assert.match(notices.at(-1), /Logo du club enregistré/);
 
-  const sponsorHandler = extract('const csvSaveSponsors =', 'const [csvSponsorDraft,');
+  const sponsorHandler = extract('const csvSaveSponsors =', 'const [csvPracticalDraft,');
   runHandler(state, logoHelper, sponsorHandler,
-    'csvSaveSponsors("Partenaire CSV | https://cdn.example/logo.png | https://club.example");');
+    'csvSaveSponsors([{name:"Partenaire CSV",logoUrl:"https://cdn.example/logo.png",url:"https://club.example"}]);');
   await new Promise(setImmediate);
   assert.deepEqual(writes[1].value.config.sponsors, [{
     name: 'Partenaire CSV', logoUrl: 'https://cdn.example/logo.png', url: 'https://club.example'
@@ -157,13 +157,13 @@ async function pwa() {
     await pending;
   }
   assert(activated);
-  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.24']);
-  const cache = await caches.open('tournoi-csv-shell-v7.4.24');
-  for (const file of ['app.js?v=7.4.24', 'styles.css?v=7.4.24', 'spectateur.html', 'organisateur.html'])
+  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.25']);
+  const cache = await caches.open('tournoi-csv-shell-v7.4.25');
+  for (const file of ['app.js?v=7.4.25', 'styles.css?v=7.4.25', 'spectateur.html', 'organisateur.html'])
     assert(await cache.match(new URL(file, scope)), 'Fichier absent du cache : ' + file);
   offline = true;
   let response;
-  handlers.fetch({ request: new Request(scope + 'app.js?v=7.4.24'), respondWith: promise => { response = promise; } });
+  handlers.fetch({ request: new Request(scope + 'app.js?v=7.4.25'), respondWith: promise => { response = promise; } });
   assert.match(await (await response).text(), /csvUpdateTeamLogo/);
   handlers.fetch({ request: new Request('https://firestore.googleapis.com/example'),
     respondWith: () => assert.fail('La requête Firestore est interceptée') });

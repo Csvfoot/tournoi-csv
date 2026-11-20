@@ -9,7 +9,8 @@
     { id: 'results', label: 'Derniers résultats', eyebrow: 'LES SCORES', caption: 'Rencontres terminées · actualisation automatique' },
     { id: 'standings', label: 'Classements', eyebrow: 'CLASSEMENT DES POULES', caption: 'Points · matchs joués · différence de buts' },
     { id: 'upcoming', label: 'Prochains matchs', eyebrow: 'À SUIVRE', caption: 'Prochains matchs · horaires et terrains' },
-    { id: 'finals', label: 'Phases finales', eyebrow: 'LE TABLEAU FINAL', caption: 'Qualifications · demi-finales · finale · matchs de classement' }
+    { id: 'finals', label: 'Phases finales', eyebrow: 'LE TABLEAU FINAL', caption: 'Qualifications · demi-finales · finale · matchs de classement' },
+    { id: 'partners', label: 'Partenaires', eyebrow: 'MERCI À NOS PARTENAIRES', caption: 'Ils soutiennent le tournoi' }
   ];
   // Configuration cliente déjà publique dans la V7.1 officielle (GitHub Pages).
   // Une clé API Firebase Web n'accorde pas de permission d'écriture.
@@ -23,7 +24,7 @@
   const SETTINGS_KEY = 'csv.screen.v72.display.settings';
   const SETTINGS_DEFAULTS = Object.freeze({
     rotationSeconds: 10, upcomingLimit: 2, categories: 'both',
-    views: ['results', 'standings', 'upcoming', 'finals']
+    views: ['results', 'standings', 'upcoming', 'finals'], showPartners: true
   });
   function validateSettings(input) {
     const source=input && typeof input==='object' && !Array.isArray(input)?input:{};
@@ -32,7 +33,7 @@
     const categories=['both','U10','U11'].includes(source.categories)?source.categories:'both';
     const allowed=SETTINGS_DEFAULTS.views;
     const views=Array.isArray(source.views)?allowed.filter(x=>source.views.includes(x)):allowed.slice();
-    return {rotationSeconds,upcomingLimit,categories,views:views.length?views:allowed.slice()};
+    return {rotationSeconds,upcomingLimit,categories,views:views.length?views:allowed.slice(),showPartners:source.showPartners!==false};
   }
   function readSettings(){
     try{return validateSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null'));}
@@ -44,7 +45,7 @@
   const selectedCategories=()=>eventParam || fullDay
     ? [...new Set(state.events.map(e=>categoryOf(e.category)).filter(Boolean))]
     : configuredCategories();
-  const selectedViews=()=>VIEWS.filter(v=>screenSettings.views.includes(v.id));
+  const selectedViews=()=>VIEWS.filter(v=>v.id==='partners'?screenSettings.showPartners:screenSettings.views.includes(v.id));
   const ROOT = document.getElementById('screen-content');
   const STATUS = document.getElementById('screen-connection');
   const CATEGORY = document.getElementById('screen-category');
@@ -56,6 +57,7 @@
   const CLOCK = document.getElementById('screen-clock');
   const FULLSCREEN = document.getElementById('screen-fullscreen');
   const params = new URLSearchParams(location.search);
+  let requestedView = params.get('view');
   const isDemo = document.body.dataset.screenMode === 'demo' || params.get('demo') === '1';
   const dayParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') || '') ? params.get('day') : null;
   const catParam = categoryOf(params.get('category'));
@@ -121,6 +123,48 @@
     const team=arr(data.teams).find(t=>t.id===id);
     return team ? safe(team.name,'Équipe') : safe(placeholder,'À déterminer');
   }
+  function safeLogoUrl(value) {
+    if(typeof value!=='string'||value.length>24000)return '';
+    if(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(value))return value;
+    try { const url=new URL(value);return url.protocol==='https:'?url.href:''; }
+    catch { return ''; }
+  }
+  function logoImage(src, className, onError) {
+    const image=E('img',className);
+    image.alt='';
+    image.referrerPolicy='no-referrer';
+    image.addEventListener('error',onError,{once:true});
+    image.src=src;
+    return image;
+  }
+  function teamMark(team) {
+    const fallback=E('span','team-dot');
+    fallback.style.setProperty('--team-color',color(team));
+    const src=safeLogoUrl(team?.logoUrl);
+    if(!src)return fallback;
+    const image=logoImage(src,'tv-team-logo',()=>image.replaceWith(fallback));
+    return image;
+  }
+  function standingsName(team) {
+    const node=E('span','standings-name');
+    return add(node,teamMark(team),E('span','standings-club',safe(team.name)));
+  }
+  function renderPartners(view,partners,page,pageCount) {
+    ROOT.replaceChildren(section(view,pageCount>1?`${view.caption} · page ${page+1}/${pageCount}`:view.caption));
+    const grid=E('div','tv-partner-grid');
+    grid.style.setProperty('--partner-columns',Math.min(3,partners.length));
+    for(const partner of partners) {
+      const card=E('article','tv-partner');
+      const src=safeLogoUrl(partner.logoUrl);
+      if(src) {
+        const image=logoImage(src,'tv-partner-logo',()=>image.remove());
+        card.append(image);
+      }
+      card.append(E('h2','',safe(partner.name)));
+      grid.append(card);
+    }
+    ROOT.append(grid);
+  }
   function makeMatchCard(m, data, kind) {
     const wrap=E('article','match-card');
     const meta=E('div','match-meta');
@@ -131,11 +175,9 @@
     const teamA=arr(data.teams).find(t=>t.id===m.team1Id);
     const teamB=arr(data.teams).find(t=>t.id===m.team2Id);
     const a=E('div','team home');
-    const dotA=E('span','team-dot'); dotA.style.setProperty('--team-color',color(teamA));
-    add(a,dotA,E('span','',teamName(m.team1Id,data,m.placeholder1)));
+    add(a,teamMark(teamA),E('span','',teamName(m.team1Id,data,m.placeholder1)));
     const b=E('div','team away');
-    const dotB=E('span','team-dot'); dotB.style.setProperty('--team-color',color(teamB));
-    add(b,E('span','',teamName(m.team2Id,data,m.placeholder2)),dotB);
+    add(b,E('span','',teamName(m.team2Id,data,m.placeholder2)),teamMark(teamB));
     const scored = statusDone(m) || (inProgress(m) && m.score1 != null && m.score2 != null);
     const scoreboard=E('div','score'+(scored?'':' pending'),scored ? `${m.score1} – ${m.score2}` : 'VS');
     add(mid,a,scoreboard,b);
@@ -187,7 +229,7 @@
       card.append(columns);
       group.rows.slice(0,6).forEach((r,i)=>{
         const row=E('div','standings-row');
-        add(row,E('span','rank'+(i<2?' lead':''),i+1), E('span','standings-name',safe(r.team.name)),
+        add(row,E('span','rank'+(i<2?' lead':''),i+1), standingsName(r.team),
           E('span','stat',r.played),E('span','stat',r.gf),E('span','stat',r.gd>0?'+'+r.gd:r.gd),E('span','stat points',r.points));
         card.append(row);
       });
@@ -209,7 +251,7 @@
     card.append(columns);
     for(const [i,r] of group.rows.entries()) {
       const row=E('div','standings-row');
-      add(row,E('span','rank'+(i<2?' lead':''),i+1),E('span','standings-name',safe(r.team.name)),
+      add(row,E('span','rank'+(i<2?' lead':''),i+1),standingsName(r.team),
         E('span','stat',r.played),E('span','stat',r.gf),
         E('span','stat',r.gd>0?'+'+r.gd:r.gd),E('span','stat points',r.points));
       card.append(row);
@@ -277,6 +319,12 @@
         if(view.id==='results'){
           const items=matches.filter(statusDone).sort((a,b)=>timeCompare(b,a)).slice(0,6);
           slides.push({view,event,data,items,page:0,pageCount:1});
+        }else if(view.id==='partners'){
+          const partners=arr(data.config?.sponsors).filter(p=>typeof p?.name==='string'&&p.name.trim());
+          if(partners.length) {
+            const pages=chunk(partners,6);
+            pages.forEach((items,page)=>slides.push({view,event,data,items,page,pageCount:pages.length}));
+          }
         }else if(view.id==='finals'){
           const finals=matches.filter(phase).sort(timeCompare);
           const pages=chunk(finals,6);
@@ -304,7 +352,8 @@
       CATEGORY.textContent=categoryOf(slide.event.category)||'Tournoi';
       DAY.textContent=readableDay(slide.event.date);
       LABEL.textContent=`${slide.view.label} · ${CATEGORY.textContent}`;
-      renderMatches(slide.view,slide.data,slide.items,slide.view.id,
+      if(slide.view.id==='partners')renderPartners(slide.view,slide.items,slide.page,slide.pageCount);
+      else renderMatches(slide.view,slide.data,slide.items,slide.view.id,
         slide.view.id==='results'?'Les premiers scores s’afficheront dès qu’un match sera terminé.':
           'Les phases finales apparaîtront après génération du tableau.',
         slide.page,slide.pageCount);
@@ -321,7 +370,9 @@
     const previous=slideKey(state.slides[state.index]);
     const slides=createSlides(state.events,state.records);
     state.slides=slides;
-    state.index=Math.max(0,slides.findIndex(s=>slideKey(s)===previous));
+    const requested=slides.findIndex(s=>s.view.id===requestedView);
+    state.index=requested>=0?requested:Math.max(0,slides.findIndex(s=>slideKey(s)===previous));
+    if(requested>=0){requestedView=null;state.nextAt=Date.now()+rotationMs();}
     if(!slides.length){
       CATEGORY.textContent='Tournoi';
       DAY.textContent=dayParam ? readableDay(dayParam) : 'Journée du tournoi';
@@ -401,7 +452,8 @@
     const matches=[m('m1',0,1,'Poule A','Journée 1','09:13',fA,u11?1:2,u11?0:1),m('m2',2,3,'Poule A','Journée 1','09:43',fB,u11?3:0,u11?1:0),m('m3',4,5,'Poule B','Journée 1','10:13',fA,u11?1:3,u11?2:1),m('m4',6,7,'Poule B','Journée 1','10:43',fB,u11?2:1,u11?2:0),m('m5',0,2,'Poule A','Journée 2','11:13',fA,u11?2:2,u11?2:0),m('m6',1,3,'Poule A','Journée 2','11:43',fB,u11?0:1,u11?2:1),m('m7',4,6,'Poule B','Journée 2','12:13',fA),m('m8',5,7,'Poule B','Journée 2','12:43',fB),m('m9',0,3,'Poule A','Journée 3','13:13',fA),m('m10',1,2,'Poule A','Journée 3','13:43',fB),m('semi1',0,4,'Phase Finale Principale','Demi-Finale 1','15:13',fA),m('semi2',2,5,'Phase Finale Principale','Demi-Finale 2','15:43',fB),m('fin',null,null,'Phase Finale Principale','Grande Finale','16:43',fA)];
     matches[matches.length-1].placeholder1='Vainqueur demi-finale 1';
     matches[matches.length-1].placeholder2='Vainqueur demi-finale 2';
-    return {teams,matches,config:{pointsWin:3,pointsDraw:1,pointsLoss:0}};
+    return {teams,matches,config:{pointsWin:3,pointsDraw:1,pointsLoss:0,
+      sponsors:[{name:'Partenaire de démonstration'}]}};
   }
   function startDemo(){
     const demoDate=dayParam || '2027-06-05';
@@ -413,14 +465,10 @@
     for(const event of events)state.records.set(event.id,demoFixtures(event.category));
     state.connected=true;
     resetSlides();
-    const chosen=params.get('view');
-    if(['standings','upcoming','results','finals'].includes(chosen)){
-      const idx=state.slides.findIndex(s=>s.view.id===chosen);
-      if(idx>=0){state.index=idx;currentSlide();}
-    }
     const nav=E('nav','demo-switcher');
     nav.setAttribute('aria-label','Navigation de la démonstration');
     for(const view of selectedViews()){
+      if(!state.slides.some(slide=>slide.view.id===view.id))continue;
       const b=E('button','demo-link',view.label);
       b.type='button';
       b.addEventListener('click',()=>{

@@ -56,3 +56,65 @@ body {
 .category-panel-head { background: #571c27; border-bottom-color: var(--border); }
 .score { background: #571c27; border-color: var(--border); color: #ffda83; }
 .state-chip.pending { background: #571c27; color: #ffda83; }
+
+.tv-team-logo {
+  width: clamp(20px, 2.3vw, 42px);
+  height: clamp(20px, 2.3vw, 42px);
+  flex: none;
+  object-fit: contain;
+  background: #fff9f0;
+  border-radius: .35em;
+}
+.standings-row .standings-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .4em;
+}
+.standings-club {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.standings-row .tv-team-logo {
+  width: 1.2em;
+  height: 1.2em;
+}
+.tv-partner-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--partner-columns), minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: clamp(6px, 1.4vw, 28px);
+}
+.tv-partner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  gap: clamp(4px, 1vh, 16px);
+  padding: clamp(5px, 1vw, 24px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  text-align: center;
+}
+.tv-partner-logo {
+  width: min(90%, 24rem);
+  height: min(20vh, 13rem);
+  min-height: 0;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #fff9f0;
+}
+.tv-partner h2 {
+  margin: 0;
+  font-size: clamp(.8rem, 2vw, 2.3rem);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .tv-partner-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tv-partner-logo { height: min(13vh, 8rem); }
+}
