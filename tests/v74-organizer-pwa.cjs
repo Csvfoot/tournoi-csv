@@ -157,8 +157,8 @@ async function pwa() {
     await pending;
   }
   assert(activated);
-  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.26']);
-  const cache = await caches.open('tournoi-csv-shell-v7.4.26');
+  assert.deepEqual((await caches.keys()).sort(), ['other-app', 'tournoi-csv-shell-v7.4.29']);
+  const cache = await caches.open('tournoi-csv-shell-v7.4.29');
   for (const file of ['app.js?v=7.4.26', 'styles.css?v=7.4.26', 'spectateur.html', 'organisateur.html'])
     assert(await cache.match(new URL(file, scope)), 'Fichier absent du cache : ' + file);
   offline = true;
